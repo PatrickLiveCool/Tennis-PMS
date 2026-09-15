@@ -1,4 +1,4 @@
-import { administratorCommandGrants, enabledAdministratorCommandGrants, hashPassword, ordinaryStaffCommandGrants, sha256 } from "@qintopia/domain";
+import { administratorCommandGrants, enabledAdministratorTokenCommandGrants, hashPassword, ordinaryStaffCommandGrants, sha256 } from "@qintopia/domain";
 import { pathToFileURL } from "node:url";
 import { sql, type Insertable, type Kysely } from "kysely";
 import type { CommandCatalogType } from "@qintopia/contracts";
@@ -229,7 +229,7 @@ export async function seedDemo(db: Kysely<Database>, options: { includeProtocolF
   }
   if (!profileReconciliationReady && await relationExists(db, "token_command_ceilings")) {
     await seedTokenCommandCeiling(db, "token_demo_write", demo.agentSubjectId, demo.propertyId, ordinaryStaffCommandGrants);
-    await seedTokenCommandCeiling(db, "token_demo_admin_write", demo.administratorSubjectId, demo.propertyId, enabledAdministratorCommandGrants);
+    await seedTokenCommandCeiling(db, "token_demo_admin_write", demo.administratorSubjectId, demo.propertyId, enabledAdministratorTokenCommandGrants);
   }
   const nicknameColumn = await sql<{ present: boolean }>`
     select exists (
@@ -364,7 +364,7 @@ export async function seedDemo(db: Kysely<Database>, options: { includeProtocolF
       "token_demo_admin_write",
       demo.administratorSubjectId,
       demo.propertyId,
-      enabledAdministratorCommandGrants
+      enabledAdministratorTokenCommandGrants
     );
     await reconcileStaffProfileManifest(db, "demo");
   }

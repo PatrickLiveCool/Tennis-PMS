@@ -47,7 +47,7 @@ test("settings retain old deep links and hide external access from ungranted sta
   await page.request.post("/api/v1/auth/login", { data: { username: "admin", password: "demo-pass-2026" } });
   await page.goto("/tokens?from=legacy");
   await expect(page).toHaveURL(/\/settings\/tokens\?from=legacy$/);
-  await expect(page.getByRole("heading", { name: "外部访问", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "智能体与外部访问", exact: true })).toBeVisible();
   const permissions = page.locator(".token-permissions").first();
   await expect(permissions.locator("summary")).toBeVisible();
   await permissions.locator("summary").click();
@@ -55,13 +55,13 @@ test("settings retain old deep links and hide external access from ungranted sta
   await permissions.locator("summary").click();
   await page.screenshot({ path: testInfo.outputPath("external-access.png"), fullPage: true });
   await page.goto("/settings");
-  await expect(page.getByRole("navigation", { name: "设置导航", exact: true }).getByRole("link", { name: /外部访问/ })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "设置入口", exact: true }).getByRole("link", { name: /外部访问/ })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("settings.png"), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.request.post("/api/v1/auth/logout");
   await page.request.post("/api/v1/auth/login", { data: { username: "operator", password: "demo-pass-2026" } });
   await page.goto("/settings");
-  await expect(page.getByRole("navigation", { name: "设置导航", exact: true }).getByRole("link", { name: /外部访问/ })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "设置入口", exact: true }).getByRole("link", { name: /外部访问/ })).toHaveCount(0);
 });
 
 test("workbench read failure stays distinct from an empty queue and can retry", async ({ page }) => {

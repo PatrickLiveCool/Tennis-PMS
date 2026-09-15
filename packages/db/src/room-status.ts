@@ -1,3 +1,4 @@
+import { projectCatalogUnitNames } from "./room-catalog-labels.ts";
 import { sql, type Kysely, type Transaction } from "kysely";
 import {
   currentReleaseFeatures,
@@ -1218,12 +1219,12 @@ export async function getRoomStatusBoard(db: Kysely<Database>, options: {
     const freshUntil = new Date(new Date(asOf).getTime() + 5_000).toISOString();
     const businessDate = propertyLocalClockAt(property.timezone, new Date(asOf)).date;
 
-    const inventoryRows = await trx.selectFrom("inventory_units")
+    const inventoryRows = await projectCatalogUnitNames(trx, await trx.selectFrom("inventory_units")
       .selectAll()
       .where("property_id", "=", options.propertyId)
       .where("kind", "in", ["ROOM", "BED"])
       .orderBy("code")
-      .execute();
+      .execute());
     const roomRows = inventoryRows.filter((unit) => unit.kind === "ROOM");
     const bedRows = inventoryRows.filter((unit) => unit.kind === "BED");
 

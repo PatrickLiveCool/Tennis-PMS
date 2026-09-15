@@ -1,3 +1,4 @@
+import { roomStatusUnitDescription } from "./roomStatusPresentation";
 import {
   ROOM_STATUS_MAX_QUERY_NIGHTS,
   roomStatusStatuses,
@@ -391,6 +392,7 @@ export function intervalsRenderedOnRoomStatusGrid(
 
 export interface RoomStatusFilterOptions {
   roomTypeCodes: string[];
+  roomTypeLabels?: Record<string, string>;
   salesModes: RoomStatusUnitDto["salesMode"][];
   statuses: RoomStatusStatus[];
   capacities: number[];
@@ -852,6 +854,7 @@ export function hasActiveRoomStatusFilters(filters: RoomStatusFilters): boolean 
 export function collectRoomStatusFilterOptions(rooms: readonly RoomStatusUnitDto[]): RoomStatusFilterOptions {
   const units = rooms.flatMap((room) => [room, ...room.children]);
   return {
+    roomTypeLabels: Object.fromEntries(rooms.flatMap((room) => room.roomTypeCode ? [[room.roomTypeCode, roomStatusUnitDescription(room)]] : [])),
     roomTypeCodes: [...new Set(rooms.flatMap((room) => room.roomTypeCode ? [room.roomTypeCode] : []))].sort(),
     salesModes: [...new Set(rooms.map((room) => room.salesMode))].sort(),
     statuses: roomStatusStatuses.filter((status) => units.some((unit) => unit.days.some((day) => day.status === status))),

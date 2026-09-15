@@ -1,3 +1,4 @@
+import { projectCatalogUnitNames } from "./room-catalog-labels.ts";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { DomainError, type InventoryUnitKind } from "@qintopia/contracts";
 import { enumerateServiceDates, newId } from "@qintopia/domain";
@@ -138,12 +139,17 @@ function deferredUnavailableBlockerAffectsUnit(
 
 async function loadInventoryUnitRecord(db: DbExecutor, propertyId: string, unitId: string, requireActive: boolean): Promise<InventoryUnitRecord> {
   let query = db.selectFrom("inventory_units")
-    .select(["id", "property_id", "kind", "parent_room_id", "code", "name", "catalog_version", "building_code", "room_type_code", "pricing_product_code", "inventory_basis", "code_provenance", "physical_bed_count", "occupancy_capacity"])
+    .select(["active", "id", "property_id", "kind", "parent_room_id", "code", "name", "catalog_version", "building_code", "room_type_code", "pricing_product_code", "inventory_basis", "code_provenance", "physical_bed_count", "occupancy_capacity"])
     .where("id", "=", unitId)
     .where("property_id", "=", propertyId);
   if (requireActive) query = query.where("active", "=", true);
-  const row = await query.executeTakeFirst();
+  let row = await query.executeTakeFirst();
   if (!row) throw new DomainError("NOT_FOUND", "Inventory unit not found", 404);
+  if (requireActive && row.kind === "BED") {
+    const parent = await db.selectFrom("inventory_units").select("id").where("id", "=", row.parent_room_id!).where("property_id", "=", propertyId).where("active", "=", true).executeTakeFirst();
+    if (!parent) throw new DomainError("NOT_FOUND", "父房间已停用，床位不可售", 404);
+  }
+  if (requireActive) row = (await projectCatalogUnitNames(db, [row]))[0]!;
   return {
     id: row.id,
     propertyId: row.property_id,
@@ -195,11 +201,13 @@ export async function listAvailability(
     excludedSegmentIds = new Set(rows.map((row) => row.id));
   }
   let query = db.selectFrom("inventory_units")
-    .select(["id", "property_id", "kind", "parent_room_id", "code", "name", "catalog_version", "building_code", "room_type_code", "pricing_product_code", "inventory_basis", "code_provenance", "physical_bed_count", "occupancy_capacity"])
+    .select(["active", "id", "property_id", "kind", "parent_room_id", "code", "name", "catalog_version", "building_code", "room_type_code", "pricing_product_code", "inventory_basis", "code_provenance", "physical_bed_count", "occupancy_capacity"])
     .where("property_id", "=", propertyId)
     .where("active", "=", true);
   if (kind) query = query.where("kind", "=", kind);
-  const units = await query.orderBy("code").execute();
+  const candidates = await projectCatalogUnitNames(db, await query.orderBy("code").execute());
+  const activeRooms = new Set((await db.selectFrom("inventory_units").select("id").where("property_id", "=", propertyId).where("kind", "=", "ROOM").where("active", "=", true).execute()).map((row) => row.id));
+  const units = candidates.filter((unit) => unit.kind === "ROOM" || activeRooms.has(unit.parent_room_id!));
   const claims = await db.selectFrom("inventory_claims")
     .select(["id", "room_id", "inventory_unit_id", "service_date", "source_type", "source_id"])
     .where("property_id", "=", propertyId)

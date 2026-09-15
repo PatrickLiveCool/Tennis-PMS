@@ -22,6 +22,7 @@ const effectContractDatabaseUrl = process.env.EFFECT_CONTRACT_DATABASE_URL
   ?? "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia_effect_contract";
 
 const expectedEffectKeys: Record<CommandType, string[]> = {
+  MANAGE_ROOM_CATALOG: ["action", "after", "beforeVersion", "description", "insertUnits", "operation", "policies", "propertyId", "retireUnitIds", "roomLink", "title"],
   CREATE_MEMBER: ["member", "memberId", "operation", "propertyLink"],
   CREATE_MEMBERSHIP_ORDER: ["member", "operation", "pricing", "product", "status"],
   RECORD_MEMBERSHIP_PAYMENT: ["memberName", "membershipOrderId", "operation", "payment", "productName", "status", "totals"],
@@ -1434,6 +1435,16 @@ describe("Command effect HTTP contract", () => {
     expect(Object.keys(historicalCleaningEffect).sort()).toEqual(expectedEffectKeys.COMPLETE_CLEANING);
     covered.add("COMPLETE_CLEANING");
 
+    const catalogResponse = await app.inject({ method: "POST", url: "/api/v1/command-previews",
+      cookies: { qintopia_session: adminSession!.value },
+      headers: { "idempotency-key": "effect-room-catalog", "x-correlation-id": "effect-room-catalog" },
+      payload: { commandType: "MANAGE_ROOM_CATALOG", input: { propertyId: demo.propertyId, expectedVersion: 0,
+        action: "SAVE_TYPE", name: "契约房型", bathroom: "PRIVATE", saleMode: "ROOM", bedCount: 2, capacity: 2 } } });
+    expect(catalogResponse.statusCode, catalogResponse.body).toBe(200);
+    const catalogEffect = catalogResponse.json().preview.effect;
+    expect(Object.keys(catalogEffect).sort()).toEqual(expectedEffectKeys.MANAGE_ROOM_CATALOG);
+    expect(Value.Check(CommandEffectSchema, catalogEffect)).toBe(true);
+    covered.add("MANAGE_ROOM_CATALOG");
     expect([...covered].sort()).toEqual([...commandTypes].sort());
   }, 120_000);
 });

@@ -1,3 +1,4 @@
+import { roomCatalogReady } from "./room-catalog-readiness.ts";
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
 import {
@@ -76,7 +77,8 @@ export const currentMigrationNames = [
   "057_order_directory_read_indexes.sql",
   "058_integration_events.sql",
   "059_wecom_refund_reference.sql",
-  "060_external_payments.sql"
+  "060_external_payments.sql",
+  "061_room_catalog_management.sql"
 ] as const;
 
 export function databaseUrl(): string {
@@ -124,7 +126,7 @@ const expectedStaffProfileCatalog = [
   ...administratorCommandGrants.map((commandType) => ({
     profile: "ADMIN" as const,
     command_type: commandType,
-    token_default: commandFeatureEnabled(commandType)
+    token_default: commandType !== "MANAGE_ROOM_CATALOG" && commandFeatureEnabled(commandType)
   }))
 ].sort(compareStaffProfileCatalogRows);
 
@@ -736,7 +738,7 @@ export async function databaseReady(
           ), false)
           AND COALESCE((
             SELECT encode(sha256(convert_to(procedure_row.prosrc, 'UTF8')), 'hex') =
-                '5b330639889353e57d0880869df10a8c7de220abb724cd05210ae8a637f8f886'
+                '6e1b524d8743b8a109add35436be2347a337b08c3821b715c59c56a273bd9639'
               AND procedure_row.proowner = database_owner.datdba
               AND procedure_row.prolang = (SELECT oid FROM pg_language WHERE lanname = 'plpgsql')
               AND NOT procedure_row.prosecdef
@@ -2600,7 +2602,7 @@ export async function databaseReady(
           ('command_catalog', 'command_catalog_feature_key_check', 'c',
             'CHECK (((feature_key IS NULL) OR (command_type = ANY (ARRAY[''COMPLETE_CLEANING''::text, ''CORRECT_HISTORICAL_STAY_ARRANGEMENTS''::text, ''VOID_ERRONEOUS_MEMBERSHIP_AND_RECONVERT_STAY''::text]))))'),
           ('subject_command_grants', 'subject_command_grants_human_exact_check', 'c',
-            'CHECK ((command_type = ANY (ARRAY[''CREATE_MEMBER''::text, ''CREATE_MEMBERSHIP_ORDER''::text, ''RECORD_MEMBERSHIP_PAYMENT''::text, ''CORRECT_MEMBERSHIP_PAYMENT''::text, ''ACTIVATE_MEMBERSHIP_ORDER''::text, ''CREATE_ORDER''::text, ''CORRECT_ORDER_OCCUPANT''::text, ''MANAGE_ORDER_OCCUPANTS''::text, ''CORRECT_HISTORICAL_STAY_ARRANGEMENTS''::text, ''CORRECT_MEMBER_PROFILE''::text, ''CORRECT_MEMBERSHIP_EFFECTIVE_DATE''::text, ''BACKFILL_HISTORICAL_MEMBERSHIP''::text, ''VOID_ERRONEOUS_MEMBERSHIP_AND_RECONVERT_STAY''::text, ''RESCHEDULE_STAY''::text, ''EXTEND_STAY''::text, ''SHORTEN_STAY''::text, ''MOVE_UNIT''::text, ''REPRICE_ORDER''::text, ''CANCEL_ORDER''::text, ''MARK_NO_SHOW''::text, ''REVOKE_CHECK_IN''::text, ''LOCK_MAINTENANCE''::text, ''RELEASE_MAINTENANCE''::text, ''COMPLETE_CLEANING''::text, ''RECORD_COLLECTION''::text, ''RECORD_REFUND''::text, ''REVERSE_FACT''::text, ''CONVERT_STAY_COLLECTIONS_TO_MEMBERSHIP''::text, ''CHECK_IN''::text, ''CHECK_OUT''::text, ''REVOKE_CHECK_OUT''::text, ''COMPLETE_STAY''::text, ''CORRECT_MEMBER_ENTITLEMENT_BALANCE''::text, ''ISSUE_TOKEN''::text, ''ROTATE_TOKEN''::text, ''REVOKE_TOKEN''::text, ''PLACE_INTERNAL_USE''::text, ''RELEASE_INTERNAL_USE''::text, ''BACKFILL_COMPLETED_STAY''::text])))'),
+            'CHECK ((command_type = ANY (ARRAY[''CREATE_MEMBER''::text, ''CREATE_MEMBERSHIP_ORDER''::text, ''RECORD_MEMBERSHIP_PAYMENT''::text, ''CORRECT_MEMBERSHIP_PAYMENT''::text, ''ACTIVATE_MEMBERSHIP_ORDER''::text, ''CREATE_ORDER''::text, ''CORRECT_ORDER_OCCUPANT''::text, ''MANAGE_ROOM_CATALOG''::text, ''MANAGE_ORDER_OCCUPANTS''::text, ''CORRECT_HISTORICAL_STAY_ARRANGEMENTS''::text, ''CORRECT_MEMBER_PROFILE''::text, ''CORRECT_MEMBERSHIP_EFFECTIVE_DATE''::text, ''BACKFILL_HISTORICAL_MEMBERSHIP''::text, ''VOID_ERRONEOUS_MEMBERSHIP_AND_RECONVERT_STAY''::text, ''RESCHEDULE_STAY''::text, ''EXTEND_STAY''::text, ''SHORTEN_STAY''::text, ''MOVE_UNIT''::text, ''REPRICE_ORDER''::text, ''CANCEL_ORDER''::text, ''MARK_NO_SHOW''::text, ''REVOKE_CHECK_IN''::text, ''LOCK_MAINTENANCE''::text, ''RELEASE_MAINTENANCE''::text, ''COMPLETE_CLEANING''::text, ''RECORD_COLLECTION''::text, ''RECORD_REFUND''::text, ''REVERSE_FACT''::text, ''CONVERT_STAY_COLLECTIONS_TO_MEMBERSHIP''::text, ''CHECK_IN''::text, ''CHECK_OUT''::text, ''REVOKE_CHECK_OUT''::text, ''COMPLETE_STAY''::text, ''CORRECT_MEMBER_ENTITLEMENT_BALANCE''::text, ''ISSUE_TOKEN''::text, ''ROTATE_TOKEN''::text, ''REVOKE_TOKEN''::text, ''PLACE_INTERNAL_USE''::text, ''RELEASE_INTERNAL_USE''::text, ''BACKFILL_COMPLETED_STAY''::text])))'),
           ('membership_orders', 'membership_orders_status_check', 'c',
             'CHECK ((status = ANY (ARRAY[''DRAFT''::text, ''ACTIVE''::text, ''VOIDED''::text])))'),
           ('membership_orders', 'membership_orders_lifecycle_state_check', 'c',
@@ -3176,7 +3178,7 @@ export async function databaseReady(
       && temporaryOtherRoomObjects.rows[0]?.body_marker_count === "22"
       && temporaryOtherRoomObjects.rows[0]?.function_bodies_ready === true
       && temporaryOtherRoomObjects.rows[0]?.runtime_privileges_ready === true;
-    return finalReady && await accountManagementReady(db) && await checkoutReversalReady(db) && await companionReady(db) && await integrationReady(db) && await wecomRefundReady(db) && await externalPaymentsReady(db);
+    return finalReady && await roomCatalogReady(db) && await accountManagementReady(db) && await checkoutReversalReady(db) && await companionReady(db) && await integrationReady(db) && await wecomRefundReady(db) && await externalPaymentsReady(db);
   } catch {
     return false;
   }

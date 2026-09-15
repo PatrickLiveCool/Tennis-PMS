@@ -60,6 +60,9 @@ function orderAmountLabel(order: OrderRowDto): string {
 }
 
 export function orderRoomTypeLabel(order: OrderRowDto): string {
+  if (order.current_unit_name && order.current_unit_code && order.current_unit_name.startsWith(order.current_unit_code + " ")) {
+    return order.current_unit_name.slice(order.current_unit_code.length + 1).replace(/^·\s*/, "");
+  }
   if (order.current_unit_room_type_code) return roomStatusRoomTypeLabel(order.current_unit_room_type_code);
   const name = order.current_unit_name;
   if (!name) return "历史未记录";

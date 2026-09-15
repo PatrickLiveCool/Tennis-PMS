@@ -910,6 +910,12 @@ export async function authorizeCommandAccess(
     correlationId: options.correlationId
   };
 
+  if (commandType === "MANAGE_ROOM_CATALOG") {
+    const admin = await trx.selectFrom("staff_profile_assignments").select("profile")
+      .where("subject_id", "=", principal.subjectId).where("property_id", "=", options.propertyId).where("profile", "=", "ADMIN").executeTakeFirst();
+    if (!admin || principal.credentialType !== "SESSION") deny({ ...auditContext, denialReason: "ADMIN_SESSION_REQUIRED", message: "仅管理员登录后可维护房型与价格" });
+  }
+
   if (tokenLifecycle && options.mode === "EXECUTE") {
     await preflightTokenLifecycleCallerCapability(trx, principal, options.propertyId, commandType, auditContext);
   }
@@ -1152,7 +1158,7 @@ export async function effectiveSubjectCommandGrants(
   )));
   if (principal.credentialType !== "TOKEN") return currentlyEnabledSubjectGrants;
   const tokenCeiling = await lockedTokenCommandCeiling(trx, principal.credentialId, principal.subjectId, propertyId);
-  return new Set([...currentlyEnabledSubjectGrants].filter((commandType) => tokenCeiling.has(commandType)));
+  return new Set([...currentlyEnabledSubjectGrants].filter((commandType) => commandType !== "MANAGE_ROOM_CATALOG" && tokenCeiling.has(commandType)));
 }
 
 export function exactCommandCeiling(value: unknown, field: string): string[] | undefined {
@@ -1161,7 +1167,7 @@ export function exactCommandCeiling(value: unknown, field: string): string[] | u
     throw new DomainError("VALIDATION_ERROR", `${field} must be an array of exact command names`);
   }
   const normalized = [...new Set(value.map((entry) => (entry as string).trim()))].sort();
-  if (normalized.some((entry) => !isHumanGrantableCommandCapability(entry))) {
+  if (normalized.some((entry) => (!isHumanGrantableCommandCapability(entry) || entry === "MANAGE_ROOM_CATALOG"))) {
     throw new DomainError("VALIDATION_ERROR", `${field} contains a non-grantable command`);
   }
   return normalized;

@@ -1,0 +1,79 @@
+.room-catalog-page { display: grid; gap: 24px; min-width: 0; }
+.catalog-page-actions, .catalog-tabs, .catalog-toolbar, .catalog-section-heading, .catalog-detail-heading, .catalog-type-footer { display: flex; align-items: center; gap: 12px; }
+.catalog-toolbar, .catalog-section-heading, .catalog-detail-heading, .catalog-type-footer { justify-content: space-between; }
+.catalog-tabs { gap: 4px; flex-wrap: wrap; }
+.catalog-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 14px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; }
+.catalog-tabs button:hover { background: var(--surface-muted); }
+.catalog-tabs button.is-selected { background: var(--brand-soft); color: var(--brand); font-weight: 650; }
+.catalog-check { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.catalog-check input { width: 16px; height: 16px; margin: 0; }
+.catalog-workspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 24px; align-items: start; }
+.catalog-type-list { display: grid; border: 1px solid var(--border); background: var(--surface); border-radius: 12px; overflow: hidden; }
+.catalog-type-list button { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--border); padding: 18px 16px; color: var(--text); font: inherit; }
+.catalog-type-list button:last-child { border-bottom: 0; }
+.catalog-type-list button:hover { background: var(--surface-muted); }
+.catalog-type-list button.is-selected { color: var(--brand); background: var(--brand-soft); }
+.catalog-type-list strong { font-size: 15px; font-weight: 650; }
+.catalog-type-list small, .catalog-bed-list { display: block; color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 3px; }
+.catalog-type-list button > span:last-child { flex-shrink: 0; font-size: 12px; color: var(--muted); }
+.catalog-detail, .catalog-all-rooms, .catalog-history { min-width: 0; padding: 26px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.catalog-detail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.catalog-detail > section { min-width: 0; }
+.catalog-detail h2, .catalog-all-rooms h2, .catalog-history h2 { font-size: 21px; }
+.catalog-detail p, .catalog-all-rooms p { margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.6; text-wrap: pretty; }
+.catalog-section-heading { margin-bottom: 15px; flex-wrap: wrap; }
+.catalog-section-heading h3, .catalog-trial h3 { font-size: 16px; }
+.catalog-prices { border-top: 1px solid var(--border); padding-top: 24px; }
+.catalog-price-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--canvas); border-radius: 10px; padding: 20px 6px; }
+.catalog-price-grid > div { padding: 0 14px; border-right: 1px solid var(--border); }
+.catalog-price-grid > div:last-child { border-right: 0; }
+.catalog-price-grid dt { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.catalog-price-grid dd { color: var(--text); font-size: clamp(17px, 1.6vw, 23px); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.catalog-rate-history { margin-top: 20px; font-size: 13px; }
+.catalog-rate-history summary { color: var(--brand); padding: 8px 0; }
+.catalog-rate-history > div { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.catalog-rate-history span { margin-left: 12px; color: var(--muted); }
+.catalog-room-table { border: 1px solid var(--border); border-radius: 8px; }
+.catalog-room-table table { min-width: 630px; }
+.catalog-bed-list { max-width: 220px; white-space: normal; overflow-wrap: anywhere; }
+.catalog-status { display: inline-block; font-size: 12px; color: var(--brand); background: var(--brand-soft); border-radius: 5px; padding: 4px 8px; white-space: nowrap; }
+.catalog-status.is-inactive { background: var(--surface-muted); color: var(--muted); }
+.catalog-type-footer { border-top: 1px solid var(--border); padding-top: 18px; flex-wrap: wrap; }
+.catalog-type-footer > span { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.catalog-empty { display: grid; justify-items: center; gap: 12px; padding: 28px; color: var(--muted); background: var(--canvas); border-radius: 8px; }
+.catalog-form { display: grid; gap: 18px; min-width: 0; }
+.catalog-form-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.catalog-form .field { display: grid; gap: 7px; min-width: 0; }
+.catalog-form input, .catalog-form select, .catalog-form textarea { width: 100%; min-width: 0; }
+.catalog-hint { color: var(--muted); font-size: 13px; line-height: 1.65; text-wrap: pretty; }
+.catalog-price-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.catalog-trial { display: grid; gap: 15px; padding: 18px; background: var(--canvas); border: 1px solid var(--border); border-radius: 9px; }
+.catalog-trial .catalog-check input { width: 16px; }
+.catalog-trial > button { justify-self: start; }
+.catalog-trial-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--brand); }
+.catalog-trial-result strong { font-size: 23px; }
+.catalog-notice { background: var(--success-soft); color: var(--success); padding: 12px 16px; border-radius: 8px; }
+.catalog-history > p { margin-top: 8px; font-size: 13px; }
+.catalog-history article { padding: 22px 0; border-bottom: 1px solid var(--border); }
+.catalog-history article:last-child { border-bottom: 0; }
+.catalog-history article header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.catalog-history h3 { font-size: 16px; }
+.catalog-history article p, .catalog-history time { margin-top: 8px; color: var(--muted); font-size: 13px; }
+.catalog-history ul { font-size: 13px; line-height: 1.8; padding-left: 20px; margin-bottom: 0; }
+@media (max-width: 1050px) { .catalog-workspace { grid-template-columns: 185px minmax(0, 1fr); gap: 16px; } .catalog-detail { padding: 20px; } }
+@media (max-width: 760px) {
+  .room-catalog-page { gap: 18px; }
+  .catalog-toolbar { align-items: flex-start; flex-direction: column; }
+  .catalog-workspace { grid-template-columns: minmax(0, 1fr); }
+  .catalog-type-list { display: flex; overflow-x: auto; border-radius: 8px; }
+  .catalog-type-list button { min-width: 165px; border-bottom: 0; border-right: 1px solid var(--border); padding: 14px; }
+  .catalog-detail, .catalog-all-rooms, .catalog-history { padding: 17px; }
+  .catalog-detail-heading { flex-wrap: wrap; }
+  .catalog-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 0; }
+  .catalog-price-grid > div:nth-child(2) { border-right: 0; }
+  .catalog-price-grid dd { font-size: 22px; }
+  .catalog-tabs button { padding: 10px; font-size: 13px; }
+  .catalog-form-pair, .catalog-price-inputs { gap: 12px; }
+  .catalog-page-actions { flex-wrap: wrap; }
+  .catalog-type-footer .row-actions { flex-wrap: wrap; }
+}

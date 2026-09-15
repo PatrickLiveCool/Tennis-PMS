@@ -35,6 +35,7 @@ export const ordinaryStaffCommandGrants = [
 
 export const administratorCommandGrants = [
   ...ordinaryStaffCommandGrants,
+  "MANAGE_ROOM_CATALOG",
   "REVOKE_CHECK_OUT",
   "CORRECT_ORDER_OCCUPANT",
   "CORRECT_HISTORICAL_STAY_ARRANGEMENTS",
@@ -90,6 +91,9 @@ export function commandFeatureEnabled(commandType: CommandCapability | string): 
 export const enabledAdministratorCommandGrants = administratorCommandGrants
   .filter((commandType) => commandFeatureEnabled(commandType));
 
+export const enabledAdministratorTokenCommandGrants = enabledAdministratorCommandGrants
+  .filter((commandType) => commandType !== "MANAGE_ROOM_CATALOG");
+
 function asSet(values: ReadonlySet<string> | readonly string[] | null | undefined): ReadonlySet<string> {
   if (!values) return new Set();
   return new Set(Array.isArray(values) ? values : [...values]);
@@ -118,7 +122,7 @@ export function evaluateCommandAuthorization(options: {
 
   if (options.credentialType === "TOKEN") {
     const tokenCommandCeiling = asSet(options.tokenCommandCeiling);
-    if (!tokenCommandCeiling.has(options.commandType)) {
+    if (options.commandType === "MANAGE_ROOM_CATALOG" || !tokenCommandCeiling.has(options.commandType)) {
       return { allowed: false, reason: "TOKEN_COMMAND_CEILING_MISSING" };
     }
   }

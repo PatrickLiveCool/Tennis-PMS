@@ -408,6 +408,7 @@ export const HistoricalCreateOrderReplayEnvelopeSchema = strictObject({
 });
 
 export const CommandEnvelopeSchema = Type.Union([
+  Type.Object({ commandType: Type.Literal("MANAGE_ROOM_CATALOG"), input: RoomCatalogInputSchema }, { additionalProperties: false }),
   commandEnvelope("CREATE_MEMBER", strictObject({
     ...PropertyInput,
     fullName: ShortText,
@@ -971,6 +972,7 @@ const RevokeCheckOutEffectSchema = strictObject({
 });
 
 export const CommandEffectSchema = Type.Union([
+  RoomCatalogEffectSchema,
   RevokeCheckOutEffectSchema,
   strictObject({
     operation: Type.Literal("CREATE_MEMBER_PROFILE"),
@@ -2165,6 +2167,7 @@ const MembershipVoidReconvertedResultSchema = strictObject({
 });
 
 export const ExecutedCommandResultSchema = Type.Union([
+  RoomCatalogResultSchema,
   strictObject({ operation: Type.Literal("MANAGE_ORDER_OCCUPANTS"),
     ...TemporaryOtherRoomLifecycleEvidenceFields,
     action: Type.Union([Type.Literal("ADD"), Type.Literal("REMOVE")]),
@@ -3620,3 +3623,4 @@ export const HistoricalStoredPreviewResponseSchema = Type.Union([
 
 export const IdParams = strictObject({ id: Id });
 export const PreviewParams = strictObject({ previewId: Id });
+import { RoomCatalogInputSchema, RoomCatalogEffectSchema, RoomCatalogResultSchema } from "./room-catalog-schemas.ts";

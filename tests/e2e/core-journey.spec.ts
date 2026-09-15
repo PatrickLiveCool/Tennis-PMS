@@ -531,7 +531,7 @@ async function forceNavigateAwayAndBackToTokens(page: Page) {
     history.pushState({}, "", "/tokens");
     window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
   });
-  await expect(page.getByRole("heading", { name: "外部访问" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "智能体与外部访问" })).toBeVisible();
   await expect(page.getByText("正在载入 Token", { exact: true })).toBeHidden();
 }
 
@@ -1550,7 +1550,7 @@ test("desktop Token lifecycle retains client secrets and uses Preview Confirm Re
   await login(page, administratorCredentials);
   await page.getByRole("link", { name: "设置", exact: true }).click();
   await page.getByRole("navigation", { name: "设置导航", exact: true }).getByRole("link", { name: /^外部访问/ }).click();
-  await expect(page.getByRole("heading", { name: "外部访问" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "智能体与外部访问" })).toBeVisible();
 
   await page.getByRole("button", { name: "签发 Token" }).click();
   await page.getByLabel("标签").fill("E2E external agent");
@@ -1717,7 +1717,7 @@ test("desktop Token lifecycle ignores deferred callbacks from unmounted command 
   await login(page, administratorCredentials);
   await page.getByRole("link", { name: "设置", exact: true }).click();
   await page.getByRole("navigation", { name: "设置导航", exact: true }).getByRole("link", { name: /^外部访问/ }).click();
-  await expect(page.getByRole("heading", { name: "外部访问" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "智能体与外部访问" })).toBeVisible();
 
   await page.getByRole("button", { name: "签发 Token" }).click();
   await page.getByLabel("标签").fill("E2E deferred callback agent");
@@ -1873,7 +1873,7 @@ test("responsive shell and 200 percent zoom stay contiguous without page overflo
     await assertShellDoesNotOverlap(page, width);
 
     await page.goto("/tokens");
-    await expect(page.getByRole("heading", { name: "外部访问" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "智能体与外部访问" })).toBeVisible();
     await assertNoPageOverflow(page);
     await assertShellDoesNotOverlap(page, width);
   }

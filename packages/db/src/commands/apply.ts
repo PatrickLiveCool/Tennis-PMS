@@ -306,6 +306,7 @@ async function resolveQuoteMemberEntitlementOwner(
 export async function lockCommandResources(trx: Transaction<Database>, commandType: CommandType, rawInput: unknown): Promise<void> {
   const input = requireObject(rawInput);
   const propertyId = requireString(input, "propertyId");
+  if (commandType === "MANAGE_ROOM_CATALOG") return;
 
   if (commandType === HISTORICAL_STAY_ARRANGEMENT_CORRECTION_COMMAND) {
     await lockHistoricalStayArrangementCorrectionResources(trx, rawInput);
@@ -616,6 +617,7 @@ export async function applyCommand(trx: Transaction<Database>, options: {
   const input = requireObject(options.input);
   const propertyId = requireString(input, "propertyId");
   const effect = options.effect;
+  if (options.commandType === "MANAGE_ROOM_CATALOG") return applyRoomCatalogEffect(trx, options.commandId, effect, options.reason.note);
 
   if (isMemberCorrectionCommandType(options.commandType)) {
     return applyMemberCorrectionCommand(trx, {
@@ -2709,3 +2711,4 @@ export async function applyCommand(trx: Transaction<Database>, options: {
 
   throw new DomainError("VALIDATION_ERROR", `Unsupported command: ${options.commandType}`);
 }
+import { applyRoomCatalogEffect } from "../room-catalog.ts";

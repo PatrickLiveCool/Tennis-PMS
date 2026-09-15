@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, onSessionExpired } from "./api";
 import { AppShell, LoginPage, ServiceFailureState, WorkspaceProvider } from "./session";
 import type { PrincipalDto } from "./types";
 import { LoadingBlock } from "./uiBasic";
+import { SettingsPage } from "./pages/SettingsPage";
 
 const InventoryPage = lazy(() => import("./pages/InventoryPage").then((module) => ({ default: module.InventoryPage })));
 const MembersPage = lazy(() => import("./pages/MembersPage").then((module) => ({ default: module.MembersPage })));
@@ -11,7 +12,7 @@ const OrderDetailPage = lazy(() => import("./pages/OrderDetailPage").then((modul
 const OrdersPage = lazy(() => import("./pages/OrdersPage").then((module) => ({ default: module.OrdersPage })));
 const TodayPage = lazy(() => import("./pages/TodayPage").then((module) => ({ default: module.TodayPage })));
 const TokensPage = lazy(() => import("./pages/TokensPage").then((module) => ({ default: module.TokensPage })));
-const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+const RoomCatalogPage = lazy(() => import("./pages/RoomCatalogPage").then((module) => ({ default: module.RoomCatalogPage })));
 
 function SettingsRedirect({ section }: { section: string }) {
   const location = useLocation();
@@ -70,24 +71,23 @@ export default function App() {
   return (
     <BrowserRouter>
       <WorkspaceProvider key={principal.subjectId} principal={principal}>
-        <Suspense fallback={<main className="startup-state"><LoadingBlock label="正在载入页面" /></main>}>
-          <Routes>
-            <Route element={<AppShell onLogout={() => setPrincipal(undefined)} />}>
-              <Route index element={<InventoryPage />} />
-              <Route path="members" element={<MembersPage />} />
-              <Route path="orders" element={<OrdersPage />} />
-              <Route path="orders/:orderId" element={<OrderDetailPage />} />
-              <Route path="today" element={<TodayPage />} />
-              <Route path="settings" element={<SettingsPage />}>
-                <Route path="tokens" element={<TokensPage />} />
-                <Route path="accounts" element={<AccountsPage />} />
-              </Route>
-              <Route path="tokens" element={<SettingsRedirect section="tokens" />} />
-              <Route path="accounts" element={<SettingsRedirect section="accounts" />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+        <Routes>
+          <Route element={<AppShell onLogout={() => setPrincipal(undefined)} />}>
+            <Route index element={<InventoryPage />} />
+            <Route path="members" element={<MembersPage />} />
+            <Route path="orders" element={<OrdersPage />} />
+            <Route path="orders/:orderId" element={<OrderDetailPage />} />
+            <Route path="today" element={<TodayPage />} />
+            <Route path="settings" element={<SettingsPage />}>
+              <Route path="rooms" element={<RoomCatalogPage />} />
+              <Route path="tokens" element={<TokensPage />} />
+              <Route path="accounts" element={<AccountsPage />} />
             </Route>
-          </Routes>
-        </Suspense>
+            <Route path="tokens" element={<SettingsRedirect section="tokens" />} />
+            <Route path="accounts" element={<SettingsRedirect section="accounts" />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
       </WorkspaceProvider>
     </BrowserRouter>
   );

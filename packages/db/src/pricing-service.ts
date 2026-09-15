@@ -402,7 +402,7 @@ export async function resolveTemporaryOtherRoomCoverage(db: DbExecutor, options:
 
 export type StoredQuote = StoredQuoteDto;
 
-export async function loadPricingPolicy(db: DbExecutor, propertyId: string, policyVersionId: string): Promise<PricingPolicy> {
+export async function loadPricingPolicy(db: DbExecutor, propertyId: string, policyVersionId: string, lockedForOrder = false): Promise<PricingPolicy> {
   const row = await db.selectFrom("pricing_policy_versions")
     .selectAll()
     .where("id", "=", policyVersionId)
@@ -418,8 +418,8 @@ export async function loadPricingPolicy(db: DbExecutor, propertyId: string, poli
     calculationKind: row.calculation_kind,
     nightlyRateMinor: row.nightly_rate_minor,
     productAnchorRatesMinor,
-    effectiveFrom: row.effective_from,
-    effectiveUntil: row.effective_until,
+    effectiveFrom: lockedForOrder && row.code === "MANAGED_ROOM_PRICES" ? "0001-01-01" : row.effective_from,
+    effectiveUntil: lockedForOrder && row.code === "MANAGED_ROOM_PRICES" ? null : row.effective_until,
     roundingRule: row.rounding_rule,
     currency: row.currency
   };
@@ -504,6 +504,9 @@ async function enforceQuoteQuota(db: Transaction<Database>, propertyId: string, 
 }
 
 export async function createQuoteInTransaction(db: Transaction<Database>, request: QuoteRequest): Promise<StoredQuote> {
+  const { assertCurrentCatalogQuote, lockRoomCatalog } = await import("./room-catalog.ts");
+  await lockRoomCatalog(db, request.propertyId);
+  if (request.stayType !== "FREE") await assertCurrentCatalogQuote(db, request.propertyId, request.pricingPolicyVersionId, request.arrivalDate);
   await enforceQuoteQuota(db, request.propertyId, request.requesterSubjectId);
   const unit = await loadInventoryUnit(db, request.propertyId, request.inventoryUnitId);
   const policy = await loadPricingPolicy(db, request.propertyId, request.pricingPolicyVersionId);

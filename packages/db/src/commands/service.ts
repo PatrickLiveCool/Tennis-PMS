@@ -99,6 +99,7 @@ function isExecutableCommandType(commandType: string): commandType is Executable
 }
 
 const roomStatusVisibleCommands = new Set<CommandType>([
+  "MANAGE_ROOM_CATALOG",
   "REVOKE_CHECK_OUT",
   "CREATE_ORDER",
   "CORRECT_ORDER_OCCUPANT",
@@ -1470,6 +1471,7 @@ export async function executeQuoteCommand(
     return withQuoteQuotaLock(lockedDb, quoteQuotaLockKey, () => (
       lockedDb.transaction().setIsolationLevel("repeatable read").execute(async (trx) => {
       await lockCommandProtocolEpoch(trx);
+      await lockRoomCatalog(trx, propertyId);
       await authorizeCommandAccess(db, trx, principal, {
         propertyId,
         commandType,
@@ -1589,6 +1591,7 @@ export async function createCommandPreview(db: Kysely<Database>, principal: Auth
 
   return withCommandAuthorizationAudit(db, () => withExecutionLock(db, commandLockKey, (lockedDb) => lockedDb.transaction().setIsolationLevel("repeatable read").execute(async (trx) => {
     await lockCommandProtocolEpoch(trx);
+    await lockRoomCatalog(trx, requestedPropertyId);
     await authorizeCommandAccess(db, trx, principal, {
       propertyId: requestedPropertyId,
       commandType: normalizedEnvelope.commandType,
@@ -1789,6 +1792,7 @@ export async function confirmCommandPreview(db: Kysely<Database>, principal: Aut
       try {
         return await lockedDb.transaction().execute(async (trx) => {
         await lockCommandProtocolEpoch(trx);
+        await lockRoomCatalog(trx, propertyId, commandType === "MANAGE_ROOM_CATALOG");
         const previewIdentity = await trx.selectFrom("command_previews")
           .selectAll()
           .where("id", "=", previewId)
@@ -1960,7 +1964,7 @@ export async function confirmCommandPreview(db: Kysely<Database>, principal: Aut
               || (commandType === "CREATE_ORDER" && error.code === "VALIDATION_ERROR")
               || ((commandType === "RESCHEDULE_STAY" || commandType === "EXTEND_STAY" || commandType === "SHORTEN_STAY") && error.code === "VALIDATION_ERROR")
               || (commandType === "MOVE_UNIT" && error.code === "VALIDATION_ERROR")
-              || (commandType === "MANAGE_ORDER_OCCUPANTS" && ["VALIDATION_ERROR", "NOT_FOUND"].includes(error.code))
+              || (["MANAGE_ORDER_OCCUPANTS", "MANAGE_ROOM_CATALOG"].includes(commandType) && ["VALIDATION_ERROR", "NOT_FOUND"].includes(error.code))
               || (commandType === "COMPLETE_STAY" && error.code === "VALIDATION_ERROR")
               || (commandType === "CONVERT_STAY_COLLECTIONS_TO_MEMBERSHIP" && error.code === "VALIDATION_ERROR")
               || (commandType === "CORRECT_HISTORICAL_STAY_ARRANGEMENTS" && error.code === "VALIDATION_ERROR")
@@ -2318,3 +2322,4 @@ export async function resolveCommandResult(
     return receipt;
   }));
 }
+import { lockRoomCatalog } from "../room-catalog.ts";

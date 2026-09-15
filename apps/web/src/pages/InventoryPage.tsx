@@ -111,7 +111,7 @@ import {
   type RoomStatusSelection,
   type RoomStatusViewState
 } from "../room-status";
-import { roomStatusRoomTypeLabel } from "../room-status/roomStatusPresentation";
+import { roomStatusRoomTypeLabel, roomStatusUnitDescription } from "../room-status/roomStatusPresentation";
 
 export function orderContextInventoryUnits<T extends { id: string }>(
   activeUnits: readonly T[],
@@ -1408,9 +1408,13 @@ function QuoteWorkbench({
     : initialStayType === "FREE" && !backfill
       ? "FREE"
       : paidStayTypeForDates(arrivalDate, departureDate);
-  const selectedPolicy = policies.find((policy) => stayType === "FREE"
-    ? policy.calculation_kind === "FREE" && policy.stay_type === "FREE"
-    : policy.calculation_kind === "DURATION_BAND_TOTAL" && policy.stay_type === null);
+  const selectedPolicy = stayType === "FREE"
+    ? policies.find((policy) => policy.calculation_kind === "FREE" && policy.stay_type === "FREE")
+    : policies.filter((policy) => policy.calculation_kind === "DURATION_BAND_TOTAL" && policy.stay_type === null
+      && policy.effective_from !== null && policy.effective_from <= arrivalDate
+      && (policy.effective_until === null || arrivalDate < policy.effective_until))
+      .sort((a, b) => (b.effective_from ?? "").localeCompare(a.effective_from ?? "")
+        || Number(b.code === "MANAGED_ROOM_PRICES") - Number(a.code === "MANAGED_ROOM_PRICES") || b.version - a.version)[0];
   const policyId = selectedPolicy?.id ?? "";
   const initialMemberLookup = useMemberChoices(propertyId, "", initialMemberId ?? "", Boolean(initialMemberId), true);
   const initialMember = !backfill && initialStayType !== "FREE" && !recoveryQuoteInput
@@ -5834,7 +5838,12 @@ export function InventoryPage() {
   const roomStatusToolbar = renderedBoard ? (
     <RoomStatusToolbar
       filters={viewState.filters}
-      filterOptions={filterOptions}
+      filterOptions={{ ...filterOptions, roomTypeLabels: Object.fromEntries([
+        ...meta.inventoryUnits.filter((unit) => unit.property_id === propertyId && unit.kind === "ROOM" && unit.room_type_code)
+          .map((unit) => [unit.room_type_code!, roomStatusUnitDescription({ ...unit, buildingCode: unit.building_code, roomTypeCode: unit.room_type_code })]),
+        ...(renderedBoard?.rooms ?? []).filter((unit) => unit.roomTypeCode)
+          .map((unit) => [unit.roomTypeCode!, roomStatusUnitDescription(unit)])
+      ]) }}
       focusSearchRequestToken={filterFocusRequestToken}
       actions={!isMobile && currentPropertyAllowedActions.has("CREATE_ORDER") ? <>
         <button type="button" className="button button-primary" onClick={() => setCreateSelectionOpen(true)} disabled={!renderedBoard || commandsBlocked}>新建住宿</button>

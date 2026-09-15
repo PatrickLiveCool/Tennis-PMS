@@ -1,5 +1,5 @@
 import type { AccessLevel, AuthPrincipal, CommandCapability, CommandCatalogType } from "@qintopia/contracts";
-import { administratorCommandGrants, enabledAdministratorCommandGrants, ordinaryStaffCommandGrants } from "@qintopia/domain";
+import { administratorCommandGrants, enabledAdministratorTokenCommandGrants, ordinaryStaffCommandGrants } from "@qintopia/domain";
 
 const defaultTestPropertyId = "prop_qintopia_demo";
 
@@ -14,7 +14,7 @@ export function commandGrantsForProfile(profile: CommandProfile): CommandCapabil
 
 export function tokenCeilingForProfile(profile: CommandProfile): CommandCapability[] {
   return profile === "administrator"
-    ? [...enabledAdministratorCommandGrants]
+    ? [...enabledAdministratorTokenCommandGrants]
     : [...ordinaryStaffCommandGrants];
 }
 

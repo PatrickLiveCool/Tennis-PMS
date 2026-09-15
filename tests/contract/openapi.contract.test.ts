@@ -19,7 +19,7 @@ const publicCommandEnvelopeTypes = commandTypes.filter((commandType): commandTyp
   (humanGrantableCommandTypes as readonly string[]).includes(commandType)
 );
 
-const commandInputContract: Record<PublicCommandEnvelopeType, { required: string[]; properties: string[] }> = {
+const commandInputContract: Record<Exclude<PublicCommandEnvelopeType, "MANAGE_ROOM_CATALOG">, { required: string[]; properties: string[] }> = {
   MANAGE_ORDER_OCCUPANTS: { required: ["propertyId", "orderId", "action"], properties: ["propertyId", "orderId", "action", "guest", "occupantId"] },
   CREATE_MEMBER: {
     required: ["propertyId", "fullName", "nickname", "phone", "wechat"],
@@ -290,6 +290,28 @@ describe("OpenAPI 3.1 command contract", () => {
       const input = (variant.properties as Record<string, JsonSchema>).input!;
       expect(variant.additionalProperties, commandType).toBe(false);
       expect(variant.required, commandType).toEqual(["commandType", "input"]);
+      if (commandType === "MANAGE_ROOM_CATALOG") {
+        const shapes: Record<string, { required: string[]; optional?: string[] }> = {
+          SAVE_TYPE: { required: ["name", "bathroom", "saleMode", "bedCount", "capacity"], optional: ["typeCode"] },
+          DELETE_TYPE: { required: ["typeCode"] }, SET_TYPE_ACTIVE: { required: ["typeCode", "active"] },
+          SAVE_ROOM: { required: ["typeCode", "code", "buildingCode", "bedCount", "capacity"], optional: ["roomId"] },
+          SET_ROOM_ACTIVE: { required: ["roomId", "active"] }, PUBLISH_RATES: { required: ["typeCode", "effectiveFrom", "anchors"] }
+        };
+        expect(input.discriminator).toEqual({ propertyName: "action" });
+        const actions = input.oneOf as JsonSchema[];
+        expect(actions).toHaveLength(6);
+        for (const shape of actions) {
+          const properties = shape.properties as Record<string, JsonSchema>;
+          const actionName = (properties.action!.const ?? (properties.action!.enum as string[])[0]) as string;
+          const expected = shapes[actionName]!;
+          expect(expected).toBeDefined();
+          expect(shape.additionalProperties).toBe(false);
+          const required = ["propertyId", "expectedVersion", "action", ...expected.required];
+          expect([...(shape.required as string[])].sort()).toEqual(required.sort());
+          expect(Object.keys(properties).sort()).toEqual([...required, ...(expected.optional ?? [])].sort());
+        }
+        continue;
+      }
       expect(input.additionalProperties, commandType).toBe(false);
       expect((input.required as string[]).sort(), commandType).toEqual([...commandInputContract[commandType].required].sort());
       expect(Object.keys(input.properties as object).sort(), commandType).toEqual([...commandInputContract[commandType].properties].sort());

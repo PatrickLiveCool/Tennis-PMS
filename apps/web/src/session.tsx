@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { Suspense, createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { AlertCircle, BadgeCheck, BedDouble, Building2, ClipboardList, KeyRound, LogOut, PanelLeftClose, PanelLeftOpen, RefreshCw, Smartphone, Settings, UserRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { version as applicationVersion } from "../../../package.json";
@@ -415,7 +415,9 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
             </button>
           </section>
         ) : null}
-        <main id="main-content" className="main-content" tabIndex={-1}><Outlet /></main>
+        <main id="main-content" className="main-content" tabIndex={-1}>
+          <Suspense fallback={<LoadingBlock label="正在载入页面" />}><Outlet /></Suspense>
+        </main>
       </div>
       <Navigation principal={principal} propertyId={propertyId} mobile />
     </div>

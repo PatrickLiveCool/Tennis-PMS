@@ -400,6 +400,11 @@ describe("room status unit presentation", () => {
     expect(roomStatusRoomTypeLabel("private_bath_standard")).toBe("标间（独卫）");
     expect(roomStatusRoomTypeLabel("PUBLIC_FOUR_BED")).toBe("四人间（公卫）");
   });
+  it("uses configurable room type names without duplicating the room code", () => {
+    const unit = { kind: "ROOM", code: "G01", name: "G01 花园双床房", buildingCode: "花园", roomTypeCode: "type_custom" } as const;
+    expect(roomStatusUnitDescription(unit)).toBe("花园双床房");
+    expect(roomStatusUnitLabel(unit)).toBe("花园栋 G01 花园双床房");
+  });
 
   it("uses the parent room location for a named bed", () => {
     const unit = { kind: "BED", code: "101-A", name: "101 · 床位 A", buildingCode: "1" } as const;

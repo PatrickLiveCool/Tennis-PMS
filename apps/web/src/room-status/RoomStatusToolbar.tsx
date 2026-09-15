@@ -88,7 +88,7 @@ export function RoomStatusToolbar({
         <label>房型
           <select value={filters.roomTypeCode} onChange={(event) => updateFilter(filters, "roomTypeCode", event.target.value, onFiltersChange)}>
             <option value="ALL">全部房型</option>
-            {filterOptions.roomTypeCodes.map((code) => <option key={code} value={code}>{roomStatusRoomTypeLabel(code)}</option>)}
+            {filterOptions.roomTypeCodes.map((code) => <option key={code} value={code}>{filterOptions.roomTypeLabels?.[code] ?? roomStatusRoomTypeLabel(code)}</option>)}
           </select>
         </label>
         <label>状态

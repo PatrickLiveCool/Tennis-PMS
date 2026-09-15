@@ -117,7 +117,7 @@ export function AccountsPage() {
     setDialog({ action, ...(target ? { target } : {}) }); setNotice("");
   }
   return <div className="accounts-page">
-    <header className="page-header"><div><h1>账号</h1></div><button className="button button-secondary" title="刷新账号" onClick={() => setRevision((value) => value + 1)} disabled={passwordChanged}><RefreshCw size={17} aria-hidden="true" />刷新</button></header>
+    <header className="page-header"><div><h1>账号管理</h1></div><button className="button button-secondary" title="刷新账号" onClick={() => setRevision((value) => value + 1)} disabled={passwordChanged}><RefreshCw size={17} aria-hidden="true" />刷新</button></header>
     {passwordChanged ? <section role="status"><p>密码已修改，请使用新密码重新登录。</p><button className="button button-primary" onClick={() => window.location.assign("/accounts")}>重新登录</button></section> : <>
       {notice ? <p role="status" className="account-notice">{notice}</p> : null}
       {error ? <div role="alert" className="inline-error">{errorMessage(error)}</div> : !context ? <LoadingBlock label="正在读取账号" /> : <>

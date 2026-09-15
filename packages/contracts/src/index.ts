@@ -1,4 +1,5 @@
 export * from "./account-management.ts";
+export * from "./room-catalog.ts";
 
 export const accessLevels = ["READ", "WRITE"] as const;
 export type AccessLevel = (typeof accessLevels)[number];
@@ -43,6 +44,7 @@ export const currentReleaseFeatures = {
 } as const;
 
 export const commandTypes = [
+  "MANAGE_ROOM_CATALOG",
   "CREATE_MEMBER",
   "CREATE_MEMBERSHIP_ORDER",
   "RECORD_MEMBERSHIP_PAYMENT",

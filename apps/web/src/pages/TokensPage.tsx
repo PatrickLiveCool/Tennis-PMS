@@ -529,7 +529,7 @@ export function TokensPage() {
   return (
     <div className="tokens-page">
       <header className="page-heading page-heading-actions">
-        <div><p className="eyebrow">外部系统接入</p><h1>外部访问</h1><p>管理外部系统的访问密钥（Token）、可用权限与有效期</p></div>
+        <div><p className="eyebrow">外部系统接入</p><h1>智能体与外部访问</h1><p>管理外部系统的访问密钥（Token）、可用权限与有效期</p></div>
         <div className="token-page-actions"><button className="button button-secondary" type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading || !canManage}><RefreshCw className={loading ? "spin" : ""} aria-hidden="true" size={17} />刷新</button><button className="button button-primary" type="button" onClick={() => setSecretAction({ operation: "ISSUE" })} disabled={!canIssue || loading || Boolean(error) || commandRecovery.blocked || Boolean(retainedTokenSecret) || Boolean(pendingTokenCommand) || targets.length === 0}><KeyRound aria-hidden="true" size={17} />签发 Token</button></div>
       </header>
 

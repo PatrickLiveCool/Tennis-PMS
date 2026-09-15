@@ -669,7 +669,7 @@ async function priceSingleUnit(db: DbExecutor, options: {
       preserved,
       ...(options.memberContractId ? { memberContractId: options.memberContractId } : {})
     });
-  const policy = await loadPricingPolicy(db, options.propertyId, options.policyVersionId);
+  const policy = await loadPricingPolicy(db, options.propertyId, options.policyVersionId, Boolean(options.orderId));
   return calculatePricing({
     propertyId: options.propertyId,
     inventoryUnitId: unit.id,
@@ -866,7 +866,7 @@ async function priceStayTimeline(db: DbExecutor, options: {
     });
   const candidates = [...preserved.filter((item) => !allocationDates.includes(item.serviceDate)), ...allocated]
     .sort((left, right) => left.serviceDate.localeCompare(right.serviceDate));
-  const policy = await loadPricingPolicy(db, options.propertyId, options.policyVersionId);
+  const policy = await loadPricingPolicy(db, options.propertyId, options.policyVersionId, true);
   if (policy.calculationKind === "DURATION_BAND_TOTAL") {
     return calculateDurationTimelinePricing({
       propertyId: options.propertyId,
@@ -1026,6 +1026,7 @@ export async function buildCommandEffect(db: DbExecutor, commandType: CommandTyp
 async function buildRawCommandEffect(db: DbExecutor, commandType: CommandType, rawInput: unknown): Promise<BuiltCommandEffect> {
   const input = requireObject(rawInput);
   const propertyId = requireString(input, "propertyId");
+  if (commandType === "MANAGE_ROOM_CATALOG") return buildRoomCatalogEffect(db, input);
 
   if (commandType === HISTORICAL_STAY_ARRANGEMENT_CORRECTION_COMMAND) {
     return buildHistoricalStayArrangementCorrectionEffect(db, rawInput);
@@ -1292,6 +1293,7 @@ async function buildRawCommandEffect(db: DbExecutor, commandType: CommandType, r
     });
     const quote = await loadStoredQuote(db, quoteId);
     if (quote.propertyId !== propertyId) throw new DomainError("RESOURCE_SCOPE_DENIED", "Quote belongs to another property", 403);
+    if (quote.stayType !== "FREE") await assertCurrentCatalogQuote(db, propertyId, quote.pricingPolicyVersionId, quote.arrivalDate);
     const temporaryOtherRoomArrangement = quote.temporaryOtherRoomArrangement;
     const temporaryOtherRoomReason = temporaryOtherRoomArrangement
       ? requireTemporaryOtherRoomReason(input)
@@ -3620,3 +3622,4 @@ export function projectCommandEffectForRead(commandType: string, effect: Record<
   }
   return effect;
 }
+import { buildRoomCatalogEffect, assertCurrentCatalogQuote } from "../room-catalog.ts";

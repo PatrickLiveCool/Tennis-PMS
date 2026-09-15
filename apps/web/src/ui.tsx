@@ -392,6 +392,7 @@ function scalar(value: unknown): string {
 }
 
 export const commandCapabilityBusinessLabels: Record<CommandCapability, string> = {
+  MANAGE_ROOM_CATALOG: "管理房型与价格",
   CREATE_MEMBER: "创建会员档案",
   CREATE_MEMBERSHIP_ORDER: "创建会员订单",
   RECORD_MEMBERSHIP_PAYMENT: "收款",
@@ -1997,6 +1998,11 @@ export function u1PreviewHasBusinessEvidence(
   const hasStayIdentity = (isRecord(effect.primaryGuest) && nonblankString(effect.primaryGuest.nickname))
     || (Array.isArray(effect.occupants) && effect.occupants.length > 0);
   switch (commandType) {
+    case "MANAGE_ROOM_CATALOG":
+      return effect.operation === "MANAGE_ROOM_CATALOG" && effect.propertyId === input.propertyId && effect.action === input.action
+        && effect.beforeVersion === input.expectedVersion && isRecord(effect.after) && effect.after.version === Number(input.expectedVersion) + 1
+        && nonblankString(effect.title) && Array.isArray(effect.description) && effect.description.length > 0
+        && effect.description.every((item) => typeof item === "string");
     case "CREATE_ORDER":
       return Boolean(inventoryUnit
         && nonblankString(inventoryUnit.code)
@@ -2471,6 +2477,9 @@ function historicalCorrectionOccupantLabel(value: unknown): string {
 
 export function EffectSummary({ preview, fulfillment = false, businessCommand, reasonNote, commandTitle, bookingChannelCode: stableBookingChannelCode, inventoryUnitLabels, orderLifecycleContext, historicalStayCorrectionContexts, commandInput }: { preview: PreviewDto; fulfillment?: boolean; businessCommand?: CommandType; reasonNote?: string; commandTitle?: string; bookingChannelCode?: string | null; inventoryUnitLabels?: Record<string, string>; orderLifecycleContext?: { guestName: string; arrivalDate: string; departureDate: string }; historicalStayCorrectionContexts?: Record<string, { guestName: string }>; commandInput?: Record<string, unknown> }) {
   const effect = preview.effect;
+  if (preview.commandType === "MANAGE_ROOM_CATALOG") return <div className="effect-summary" data-testid="command-effect">
+    <section className="effect-section"><h3>{String(effect.title)}</h3><ul>{Array.isArray(effect.description) ? effect.description.map((line, index) => <li key={index}>{String(line)}</li>) : null}</ul></section>
+  </div>;
   const before = isRecord(effect.before) ? effect.before : undefined;
   const after = isRecord(effect.after) ? effect.after : undefined;
   if (businessCommand === "REVOKE_CHECK_OUT") {
@@ -3685,6 +3694,10 @@ export function ReceiptPanel({ receipt, onNavigateToResource, businessCommand, c
   bookingChannelCode?: string | null;
 }) {
   const result = isRecord(receipt.result) ? receipt.result : undefined;
+  if (businessCommand === "MANAGE_ROOM_CATALOG" || commandType === "MANAGE_ROOM_CATALOG") return <section className={`receipt-panel ${receipt.businessCommitted ? "receipt-success" : "receipt-rejected"}`} data-testid="command-receipt">
+    <h3>{receipt.businessCommitted ? "房型与价格设置已保存" : "设置未变更"}</h3>
+    <p>{receipt.businessCommitted ? String(result?.title ?? "操作已完成，可在修改记录中查看。") : receipt.error?.message}</p>
+  </section>;
   const orderId = result && typeof result.orderId === "string" ? result.orderId : undefined;
   const primaryGuest = result && isRecord(result.primaryGuest) ? result.primaryGuest : undefined;
   const occupants = occupantSummaryItems(result?.occupants);
@@ -6898,6 +6911,12 @@ export function CommandDialog({
             {...(request.initialReason?.note ? { reasonNote: request.initialReason.note } : {})}
             {...(summaryBusinessCommand ? { businessCommand: summaryBusinessCommand } : {})}
           />
+          {request.commandType === "MANAGE_ROOM_CATALOG" ? <section className="reason-section" aria-labelledby="catalog-reason-heading">
+            <h3 id="catalog-reason-heading">修改原因</h3>
+            <label>填写后保留在修改记录中
+              <textarea value={reasonNote} onChange={(event) => setReasonNote(event.target.value)} required maxLength={500} rows={2} data-testid="reason-note" />
+            </label>
+          </section> : null}
           {!businessFacing ? <section className="reason-section" aria-labelledby="reason-heading">
             <h3 id="reason-heading">确认原因</h3>
             <div className="form-grid form-grid-two">

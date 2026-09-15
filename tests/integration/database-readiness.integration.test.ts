@@ -580,6 +580,8 @@ describe.sequential("authoritative database readiness", () => {
         SET identity_card_number = 'READINESS-' || id
         WHERE identity_card_number IS NULL
       `.execute(trx);
+      // Run the existing deferred guards before changing this table's schema (PG18).
+      await sql`SET CONSTRAINTS ALL IMMEDIATE`.execute(trx);
       await sql`ALTER TABLE members ALTER COLUMN identity_card_number SET NOT NULL`.execute(trx);
       await sql`
         CREATE TRIGGER members_protect_identity
@@ -593,7 +595,7 @@ describe.sequential("authoritative database readiness", () => {
     });
 
     await expectReadinessFailure("member phone uniqueness", async (trx) => {
-      await sql`ALTER TABLE members DROP CONSTRAINT members_phone_unique`.execute(trx);
+      await sql`DROP INDEX members_phone_unique`.execute(trx);
     });
 
     await expectReadinessFailure("member optional identity nonblank constraint", async (trx) => {

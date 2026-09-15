@@ -338,6 +338,9 @@ type RoomStatusSalesPresentationUnit = Pick<RoomStatusUnitDto, "kind" | "salesMo
 type RoomStatusUnitIdentity = Pick<RoomStatusUnitDto, "kind" | "code" | "name" | "buildingCode"> & Partial<Pick<RoomStatusUnitDto, "roomTypeCode">>;
 
 function roomStatusUnitNameParts(unit: RoomStatusUnitIdentity): string[] {
+  if (!unit.name.includes("·") && unit.name.startsWith(`${unit.code} `)) {
+    return [unit.code, unit.name.slice(unit.code.length + 1).trim()];
+  }
   return unit.name.split(/\s*·\s*/).map((part) => part.trim()).filter(Boolean);
 }
 

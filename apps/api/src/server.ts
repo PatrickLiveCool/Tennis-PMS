@@ -1,3 +1,4 @@
+import { projectCatalogUnitNames } from "../../../packages/db/src/room-catalog-labels.ts";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { version as applicationVersion } from "../../../package.json";
@@ -537,7 +538,7 @@ async function replayHistoricalCreateOrderPreview(
 
 export async function buildServer(db: Kysely<Database>) {
   const allowedWebOrigins = webOriginAllowlist();
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" }, genReqId: () => crypto.randomUUID() });
+  const app = Fastify({ ajv: { customOptions: { discriminator: true } }, logger: { level: process.env.LOG_LEVEL ?? "info" }, genReqId: () => crypto.randomUUID() });
   await app.register(compress, { global: true, threshold: 1_024 });
   await app.register(cookie);
   await app.register(cors, { origin: [...allowedWebOrigins], credentials: true });
@@ -660,6 +661,7 @@ export async function buildServer(db: Kysely<Database>) {
   });
 
   registerAccountManagement(app, db);
+  registerRoomCatalog(app, db);
   registerPmsIntegration(app, db);
   registerExternalPayments(app, db);
 
@@ -672,7 +674,7 @@ export async function buildServer(db: Kysely<Database>) {
       propertyIds.length ? db.selectFrom("pricing_policy_versions").selectAll().where("property_id", "in", propertyIds).orderBy("code").execute() : [],
       propertyIds.length ? db.selectFrom("membership_products").selectAll().where("status", "=", "PUBLISHED").orderBy("code").execute() : []
     ]);
-    return { properties, inventoryUnits: units, pricingPolicyVersions: policies, members: [], memberContracts: [], membershipProducts };
+    return { properties, inventoryUnits: await projectCatalogUnitNames(db, units), pricingPolicyVersions: policies, members: [], memberContracts: [], membershipProducts };
   });
 
   app.get("/api/v1/properties/:id/availability", {
@@ -1074,3 +1076,4 @@ export async function buildServer(db: Kysely<Database>) {
   app.addHook("onClose", async () => db.destroy());
   return app;
 }
+import { registerRoomCatalog } from "./room-catalog.ts";
