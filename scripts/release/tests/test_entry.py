@@ -74,7 +74,7 @@ class EntryTests(unittest.TestCase):
     def test_shell_injection_interaction_recovery_and_bad_identity_rejected(self):
         revision, digest = "a" * 40, "b" * 64
         request = f"deploy v1.2.4 {revision} greenpms/releases/v1.2.4/{revision}/ {digest}"
-        for value in ("", "bash", "maintenance; id", "maintenance\n", "recover", "adopt", "rollback-local",
+        for value in ("", "bash", "maintenance; id", "maintenance\n", "recover", "adopt", "rollback-local", "configure-ai",
                       request + " ; id", request + " --help", request.replace("v1.2.4/", "v1.2.3/"),
                       request.replace("greenpms/releases/", "other/releases/"), request.replace("v1.2.4", "v01.2.4")):
             with self.subTest(request=value):

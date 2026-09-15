@@ -101,7 +101,7 @@ Retention 支持 `dry-run`，输出保留、保护、跳过、候选和待删除
 
 ## 5. 服务器切换和状态
 
-服务器受限入口只接受已验证的版本、40 位 revision、固定 `greenpms/releases/` key 和 manifest SHA。SSH key 使用 `restrict`，固定 known_hosts，禁止 TTY、转发、任意 shell 和任意 Docker 命令。root-owned sudo wrapper 只允许 deploy、rollback 和 maintenance 固定入口；adopt、recover 和 `rollback-local` 只可由管理员本地执行。
+服务器受限入口只接受已验证的版本、40 位 revision、固定 `greenpms/releases/` key 和 manifest SHA。SSH key 使用 `restrict`，固定 known_hosts，禁止 TTY、转发、任意 shell 和任意 Docker 命令。root-owned sudo wrapper 只允许 deploy、rollback 和 maintenance 固定入口；adopt、recover、`rollback-local` 和 `configure-ai` 只可由管理员本地执行。
 
 一次部署持有 flock，并按以下顺序执行：
 
@@ -357,3 +357,7 @@ rtk proxy ssh "$ADMIN_ALIAS" \
 本地 fake harness 验证 COS、Docker、SSH 接口和失败场景；它不替代目标服务器的 sshd、sudo、Docker Compose 和一次真实 COS/CAM 现场验收。残余风险包括：拥有服务器管理员 Docker 权限的人仍可绕过此入口；archive 禁止文件扫描不是对所有未知秘密的数学证明；保留镜像不提供数据库回退能力；真实网络 endpoint、CAM 条件和腾讯云套餐需要现场确认。
 
 官方契约参考：[COS 禁止覆盖上传](https://cloud.tencent.com/document/product/436/7749)、[COS 版本控制](https://cloud.tencent.com/document/product/436/19889)、[COS List 前缀权限](https://cloud.tencent.com/document/product/436/71307)、[GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)。
+
+## AI 密钥保护初始化
+
+既有实例缺少 AI 加密配置时，使用管理员 `configure-ai` 事务入口，操作和恢复见 [AI 助手部署说明](ai-assistant.md#既有生产实例补齐密钥保护)。该入口只处理 AI 密钥初始化，不接受任意配置覆盖或密钥轮换；现有配置 hash 防护仍生效。

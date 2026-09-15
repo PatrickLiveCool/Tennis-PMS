@@ -277,6 +277,10 @@ class Deployer:
         if not self.journal.exists():
             return
         transaction = json.loads(self.journal.read_bytes())
+        if transaction.get("kind") == "ai-configuration":
+            from ai_config import recover
+            recover(self, transaction)
+            return
         old = transaction["before"]
         require(old["configurationSha256"] == self.config_hash(), "recovery configuration changed; administrator intervention required")
         # If state commit completed, restore that committed current instead of undoing success.
@@ -413,7 +417,7 @@ def signal_failure(_signum, _frame):
 
 def serve(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=["deploy", "rollback", "maintenance", "recover", "adopt", "rollback-local"])
+    parser.add_argument("operation", choices=["deploy", "rollback", "maintenance", "recover", "adopt", "rollback-local", "configure-ai"])
     parser.add_argument("args", nargs="*")
     arguments = parser.parse_args(argv)
     operation, args = arguments.operation, arguments.args
@@ -442,7 +446,10 @@ def serve(argv=None):
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, signal_failure)
     with deployment_lock(config["stateDir"]):
-        if operation == "adopt":
+        if operation == "configure-ai":
+            from ai_config import configure
+            result = configure(deployer)
+        elif operation == "adopt":
             root_owned(args[3])
             result = deployer.adopt(args[0], args[1], args[2], json.loads(Path(args[3]).read_bytes()))
         elif operation == "recover":
@@ -469,7 +476,7 @@ def serve(argv=None):
         else:
             result = deployer.deploy(*args, rollback=operation == "rollback")
         print(json.dumps(result, separators=(",", ":")), flush=True)
-        if operation in ("adopt", "recover", "rollback-local"):
+        if operation in ("adopt", "recover", "rollback-local", "configure-ai"):
             return
         # Hold flock until COS marker + all deletes finish. Lost SSH never means success.
         # No lease expiry while a live client may still be deleting COS objects.
