@@ -2,6 +2,20 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.4.1](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.4.0...v1.4.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** allow approved forward migration extension ([386d666](https://github.com/qintopia-agent-studio/GreenPMS/commit/386d6666947c165f282933868fa55733d21dc52c))
+* **release:** allow approved forward migration extension ([142ece0](https://github.com/qintopia-agent-studio/GreenPMS/commit/142ece04fd6b04fb016fe8a6bd8da0edad5b6c7f))
+* **room-status:** 修复 iPad 日期栏吸顶空白 ([#31](https://github.com/qintopia-agent-studio/GreenPMS/issues/31)) ([ee244c8](https://github.com/qintopia-agent-studio/GreenPMS/commit/ee244c803b2a1dd4796c17ad6f195988a96293a0))
+
+
+### Documentation
+
+* define worktree creation and cleanup rules ([#30](https://github.com/qintopia-agent-studio/GreenPMS/issues/30)) ([248015e](https://github.com/qintopia-agent-studio/GreenPMS/commit/248015e48a87e299476087953b9577f956c22794))
+
 ## [1.4.0](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.3.4...v1.4.0) (2026-09-15)
 
 
