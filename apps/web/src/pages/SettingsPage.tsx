@@ -1,5 +1,6 @@
+import { useAssistant } from "../assistant/context";
 import { Component, Suspense, type ReactNode } from "react";
-import { ArrowLeft, BedDouble, KeyRound, Users } from "lucide-react";
+import { ArrowLeft, BedDouble, KeyRound, Users, Sparkles } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { canManageTokens, principalCan, useWorkspace } from "../session";
 import { LoadingBlock } from "../uiBasic";
@@ -17,6 +18,7 @@ class SettingsContentBoundary extends Component<{ children: ReactNode }, { faile
 }
 
 export function SettingsPage() {
+  const assistant = useAssistant();
   const { principal, propertyId } = useWorkspace();
   const { pathname } = useLocation();
   const index = pathname === "/settings" || pathname === "/settings/";
@@ -25,7 +27,9 @@ export function SettingsPage() {
       visible: principalCan(principal, propertyId, "MANAGE_ROOM_CATALOG") },
     { to: "/settings/accounts", label: "账号管理", detail: "管理工作人员账号、登录与操作权限", icon: Users, visible: true },
     { to: "/settings/tokens", label: "智能体与外部访问", detail: "管理 API Key（Token）、权限范围与有效期", icon: KeyRound,
-      visible: canManageTokens(principal, propertyId) }
+      visible: canManageTokens(principal, propertyId) },
+    { to: "/settings/ai", label: "AI 助手", detail: "模型服务、连接测试与启停", icon: Sparkles,
+      visible: Boolean(assistant?.settings?.canManage) }
   ].filter((entry) => entry.visible);
   const current = entries.find((entry) => pathname === entry.to || pathname.startsWith(entry.to + "/"));
   return <div className="settings-page">

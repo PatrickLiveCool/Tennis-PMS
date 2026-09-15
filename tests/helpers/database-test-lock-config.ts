@@ -1,6 +1,7 @@
 const defaultServerUrl = "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia";
 
 export const resetDatabaseTargets = [
+  ["ASSISTANT_TEST_DATABASE_URL", "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia_ai_contract"],
   ["ROOM_CATALOG_TEST_DATABASE_URL", "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia_room_catalog_test"],
   ["TEST_DATABASE_URL", "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia_test"],
   ["E2E_DATABASE_URL", "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia_e2e"],

@@ -1,3 +1,4 @@
+import { useAssistantOrderEntry } from "../assistant/context";
 import { createReadPoller } from "../readPoller";
 import { orderListBackHref } from "../orderListNavigation";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -2102,6 +2103,8 @@ function ScopedOrderDetailPage() {
     setCommandDraft(undefined);
     setCorrectingOccupant(occupant);
   }, [location.search, orderActionsBlocked, orderId, requestedAction, view]);
+
+  useAssistantOrderEntry(orderId, !loading && Boolean(view), orderActionsBlocked);
 
   if (loading) return <LoadingBlock label="正在载入订单详情" />;
   if (view && !orderViewMatchesPrincipalScope(loadedPrincipalOrderScope, principalOrderScope)) return <LoadingBlock label="正在切换订单访问权限" />;

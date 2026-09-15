@@ -4,6 +4,8 @@ QinTopia PMS is the source of truth for room/bed inventory, orders, stay fulfill
 
 Changes to `main` go through pull requests. See the [PR format and repository protection guide](docs/repository-contributing.md) for required checks, review, and merge permissions.
 
+AI 助手的提问记录保存在现有 PostgreSQL。Codex 同步和分析应先阅读 [AI 提问记录：存储位置与只读导出指南](docs/operations/ai-question-records.md)；无需额外分析界面，导出数据不得随代码提交。
+
 ## Releases
 
 Application versions follow semantic versioning, starting with `v1.0.0`. Every deployed release must have a unique Git tag, optimization notes and upgrade instructions. See [CHANGELOG](CHANGELOG.md) and the [release procedure](docs/releases/README.md). `npm run build` checks release metadata and documentation; `/api/v1/version` reports the running application version.

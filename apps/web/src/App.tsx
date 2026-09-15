@@ -1,3 +1,4 @@
+import { AssistantSettingsPage } from "./assistant/AssistantSettingsPage";
 import { lazy, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, onSessionExpired } from "./api";
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="today" element={<TodayPage />} />
             <Route path="settings" element={<SettingsPage />}>
               <Route path="rooms" element={<RoomCatalogPage />} />
+              <Route path="ai" element={<AssistantSettingsPage />} />
               <Route path="tokens" element={<TokensPage />} />
               <Route path="accounts" element={<AccountsPage />} />
             </Route>

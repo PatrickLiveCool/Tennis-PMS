@@ -12,7 +12,8 @@ export const RoomRateAnchorsSchema = obj(Object.fromEntries(["1","7","14","30"].
 const roomType = obj({ code: id, name, bathroom, saleMode: mode, bedCount: count, capacity: count, active: Type.Boolean(),
   products: Type.Array(obj({ code: id, kind: mode, multiplier: count })) });
 const rate = obj({ id, typeCode: id, effectiveFrom: date, anchors: RoomRateAnchorsSchema, version: Type.Integer({ minimum: 1 }) });
-const snapshot = obj({ version: Type.Integer({ minimum: 0 }), types: Type.Array(roomType), rates: Type.Array(rate) });
+const buildingOrder = Type.Array(name, { uniqueItems: true });
+const snapshot = obj({ buildingOrder: Type.Optional(buildingOrder), version: Type.Integer({ minimum: 0 }), types: Type.Array(roomType), rates: Type.Array(rate) });
 const action = Type.Union(roomCatalogActions.map((value) => Type.Literal(value)));
 const unit = obj({ id, property_id: id, kind: mode, parent_room_id: nullable(id), code: name, name: Type.String(), active: Type.Boolean(),
   catalog_version: id, building_code: name, room_type_code: id, pricing_product_code: id,
@@ -24,6 +25,7 @@ export const RoomCatalogEffectSchema = obj({ operation: Type.Literal("MANAGE_ROO
   roomLink: Type.Union([obj({ assetId: id, oldUnitId: nullable(id), newUnitId: id }), Type.Null()]),
   policies: Type.Array(obj({ id, effectiveFrom: date, anchors: Type.Record(Type.String(), RoomRateAnchorsSchema) })) });
 export const RoomCatalogInputSchema = Type.Unsafe({ type: "object", discriminator: { propertyName: "action" }, oneOf: [
+  obj({ propertyId: id, expectedVersion: Type.Integer({ minimum: 0 }), action: Type.Literal("SET_BUILDING_ORDER"), buildingOrder }),
   obj({ propertyId: id, expectedVersion: Type.Integer({ minimum: 0 }), action: Type.Literal("SAVE_TYPE"), typeCode: Type.Optional(id),
     name, bathroom, saleMode: mode, bedCount: count, capacity: count }),
   obj({ propertyId: id, expectedVersion: Type.Integer({ minimum: 0 }), action: Type.Literal("DELETE_TYPE"), typeCode: id }),

@@ -78,7 +78,10 @@ export const currentMigrationNames = [
   "058_integration_events.sql",
   "059_wecom_refund_reference.sql",
   "060_external_payments.sql",
-  "061_room_catalog_management.sql"
+  "061_room_catalog_management.sql",
+  "062_ai_assistant.sql",
+  "063_ai_question_records.sql",
+  "064_building_order.sql"
 ] as const;
 
 export function databaseUrl(): string {

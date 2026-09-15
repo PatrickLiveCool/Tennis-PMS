@@ -1,3 +1,5 @@
+import { registerAssistant } from "./assistant.ts";
+import type { ModelTransport } from "./assistant-model.ts";
 import { projectCatalogUnitNames } from "../../../packages/db/src/room-catalog-labels.ts";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -536,7 +538,7 @@ async function replayHistoricalCreateOrderPreview(
   return { preview, receipt };
 }
 
-export async function buildServer(db: Kysely<Database>) {
+export async function buildServer(db: Kysely<Database>, options: { assistantTransport?: ModelTransport } = {}) {
   const allowedWebOrigins = webOriginAllowlist();
   const app = Fastify({ ajv: { customOptions: { discriminator: true } }, logger: { level: process.env.LOG_LEVEL ?? "info" }, genReqId: () => crypto.randomUUID() });
   await app.register(compress, { global: true, threshold: 1_024 });
@@ -661,6 +663,7 @@ export async function buildServer(db: Kysely<Database>) {
   });
 
   registerAccountManagement(app, db);
+  registerAssistant(app, db, options.assistantTransport);
   registerRoomCatalog(app, db);
   registerPmsIntegration(app, db);
   registerExternalPayments(app, db);

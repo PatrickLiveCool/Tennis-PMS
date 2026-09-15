@@ -77,3 +77,20 @@
   .catalog-page-actions { flex-wrap: wrap; }
   .catalog-type-footer .row-actions { flex-wrap: wrap; }
 }
+
+.catalog-building-editor { max-width: 560px; }
+.catalog-building-order { list-style: none; margin: 20px 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.catalog-building-order li { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.catalog-building-order li:last-child { border-bottom: 0; }
+.catalog-building-position { color: var(--muted); font-size: 12px; width: 16px; font-variant-numeric: tabular-nums; }
+.catalog-building-order li > svg { color: var(--muted); flex-shrink: 0; }
+.catalog-building-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.catalog-building-name strong { font-size: 15px; font-weight: 600; }
+.catalog-building-name small { display: block; color: var(--muted); margin-top: 4px; font-size: 12px; }
+.catalog-building-moves { display: flex; gap: 6px; flex-shrink: 0; }
+.catalog-building-moves button { min-height: 36px; }
+@media (max-width: 600px) {
+  .catalog-building-order li { gap: 8px; padding: 10px; }
+  .catalog-building-moves button { min-height: 44px; min-width: 44px; padding: 8px; }
+  .catalog-building-moves button span { display: none; }
+}

@@ -1,3 +1,4 @@
+import { AssistantGuide } from "./assistant/context";
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { AlertCircle, Check, CircleHelp, LoaderCircle, X } from "lucide-react";
 import type { MoneyDto } from "@qintopia/contracts";
@@ -332,7 +333,7 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
           </button>
         </header>
         {modal && modalNotice ? <div className="modal-notice">{modalNotice}</div> : null}
-        <div className="modal-body" tabIndex={0}>{children}</div>
+        <div className="modal-body" tabIndex={0}><AssistantGuide />{children}</div>
         {footer ? <footer className="modal-footer">{footer}</footer> : null}
       </div>
     </dialog>

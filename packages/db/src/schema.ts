@@ -9,6 +9,7 @@ type NullableInsert<T> = ColumnType<T | null, T | null | undefined, T | null>;
 type Json = ColumnType<unknown, unknown, unknown>;
 
 export interface Database {
+  ai_model_settings: { scope_id: string; management_property_id: string; version: number; enabled: boolean; base_url: string; model: string; encrypted_key: string; updated_by: string; updated_at: GeneratedTimestamp };
   room_catalog_state: { property_id: string; version: number; snapshot: Json };
   room_catalog_links: { unit_id: string; asset_id: string; version: number };
   room_catalog_heads: { property_id: string; effective_from: string; policy_id: string };

@@ -9,6 +9,8 @@
     "preview": "vite preview --port 4173"
   },
   "dependencies": {
-    "@qintopia/contracts": "0.1.0"
+    "@qintopia/contracts": "0.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }

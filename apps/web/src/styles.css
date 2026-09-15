@@ -463,6 +463,7 @@ textarea:focus-visible {
 .sidebar-is-collapsed .sidebar-brand-product,
 .sidebar-is-collapsed .nav-link span,
 .sidebar-is-collapsed .sidebar-property select,
+.sidebar-is-collapsed .sidebar-property-chevron,
 .sidebar-is-collapsed .sidebar-user div {
   display: none;
 }
@@ -484,6 +485,7 @@ textarea:focus-visible {
 .sidebar-is-collapsed .sidebar-user {
   grid-template-columns: 1fr;
   justify-items: center;
+  padding-inline: 0;
 }
 
 .primary-navigation {
@@ -533,27 +535,39 @@ textarea:focus-visible {
   color: var(--brand-hover);
 }
 
-.sidebar-property {
-  min-width: 0;
+.sidebar-utilities {
   margin-top: auto;
+}
+
+.sidebar-utilities > * {
+  min-height: 52px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-property {
+  position: relative;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 8px 5px 9px;
-  border-top: 1px solid var(--border);
+  gap: 8px;
+  padding: 8px;
   color: var(--muted);
 }
+
+.sidebar-property > svg { flex-shrink: 0; }
+.sidebar-property-chevron { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 
 .sidebar-property select {
   min-width: 0;
   width: 100%;
   min-height: 28px;
-  padding: 3px 24px 3px 0;
-  border-color: transparent;
+  padding: 3px 22px 3px 0;
+  appearance: none;
+  border: 0;
   background-color: transparent;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .sidebar-property select:hover,
@@ -562,15 +576,15 @@ textarea:focus-visible {
 }
 
 .sidebar-user {
-  margin-top: 8px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 40px;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
   align-items: center;
   gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
+  padding: 8px;
   color: var(--muted);
 }
+
+.sidebar-user > .icon-button { width: 28px; height: 32px; min-height: 32px; padding: 0; }
 
 .sidebar-user div {
   min-width: 0;
@@ -581,6 +595,7 @@ textarea:focus-visible {
   overflow: hidden;
   color: var(--text);
   font-size: 13px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4165,6 +4180,7 @@ pre {
   }
 
   .primary-navigation,
+  .sidebar-utilities,
   .sidebar-property,
   .sidebar-user {
     display: none;

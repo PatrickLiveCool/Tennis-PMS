@@ -6,6 +6,7 @@ import { catalogAnchorsAt, parseLocalDate, stableHash, validateRoomRateAnchors }
 import type { DbExecutor } from "./inventory.ts";
 import type { Database } from "./schema.ts";
 import { propertyLocalToday } from "./members.ts";
+import { resolveBuildingOrder, sortRoomsByBuilding } from "./building-order.ts";
 
 const managedPolicyCode = "MANAGED_ROOM_PRICES";
 
@@ -82,7 +83,8 @@ async function catalogBasis(db: DbExecutor, propertyId: string) {
     }
     snapshot = { version: 0, types: types.sort((a, b) => a.code.localeCompare(b.code)), rates: [] };
   }
-  return { property, units, rooms, snapshot, baselines };
+  snapshot = { ...snapshot, buildingOrder: resolveBuildingOrder(units.filter((unit) => unit.kind === "ROOM"), snapshot.buildingOrder) };
+  return { property, units, rooms: sortRoomsByBuilding(rooms, snapshot.buildingOrder!), snapshot, baselines };
 }
 
 function baselineAt(baselines: Awaited<ReturnType<typeof catalogBasis>>["baselines"], date: string) {
@@ -182,7 +184,18 @@ export async function buildRoomCatalogEffect(db: DbExecutor, raw: Record<string,
     effect.retireUnitIds = rooms.flatMap((room) => [room.unitId, ...room.beds.map((bed) => bed.id)]).sort();
   };
 
-  if (input.action === "SAVE_TYPE") {
+  if (input.action === "SET_BUILDING_ORDER") {
+    const current = basis.snapshot.buildingOrder!;
+    const order = input.buildingOrder;
+    if (!Array.isArray(order) || order.length !== current.length || new Set(order).size !== order.length
+      || order.some((code) => typeof code !== "string" || !current.includes(code))) {
+      throw new DomainError("VALIDATION_ERROR", "楼栋列表已变化或排序不完整，请刷新后重新调整");
+    }
+    if (order.every((code, index) => code === current[index])) throw new DomainError("VALIDATION_ERROR", "楼栋顺序没有变化");
+    next.buildingOrder = [...order];
+    effect.title = "调整楼栋顺序";
+    effect.description = [`原顺序：${current.map((code) => `${code}栋`).join(" → ")}`, `新顺序：${order.map((code) => `${code}栋`).join(" → ")}`];
+  } else if (input.action === "SAVE_TYPE") {
     const name = text(input.name, "房型名称", 60);
     if (!["PRIVATE", "SHARED"].includes(input.bathroom ?? "") || !["ROOM", "BED"].includes(input.saleMode ?? "")) throw new DomainError("VALIDATION_ERROR", "请选择卫浴类型和销售方式");
     if (next.types.some((type) => type.code !== selectedType?.code && type.name === name)) throw new DomainError("VALIDATION_ERROR", "已有同名房型");
@@ -229,6 +242,7 @@ export async function buildRoomCatalogEffect(db: DbExecutor, raw: Record<string,
       if (!type?.active) throw new DomainError("VALIDATION_ERROR", "请先启用目标房型");
       const code = text(input.action === "SET_ROOM_ACTIVE" ? old!.code : input.code, "房号", 40);
       const building = text(input.action === "SET_ROOM_ACTIVE" ? old!.buildingCode : input.buildingCode, "楼栋", 40);
+      if (!next.buildingOrder!.includes(building)) next.buildingOrder!.push(building);
       const bedCount = count(input.action === "SET_ROOM_ACTIVE" ? old!.bedCount : input.bedCount, "床数");
       const capacity = count(input.action === "SET_ROOM_ACTIVE" ? old!.capacity : input.capacity, "可住人数");
       if (type.saleMode === "BED" && capacity !== bedCount) throw new DomainError("VALIDATION_ERROR", "按床售卖时可住人数须与床数相同");

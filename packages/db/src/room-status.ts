@@ -1,3 +1,4 @@
+import { readBuildingOrder, sortRoomsByBuilding } from "./building-order.ts";
 import { projectCatalogUnitNames } from "./room-catalog-labels.ts";
 import { sql, type Kysely, type Transaction } from "kysely";
 import {
@@ -1225,7 +1226,8 @@ export async function getRoomStatusBoard(db: Kysely<Database>, options: {
       .where("kind", "in", ["ROOM", "BED"])
       .orderBy("code")
       .execute());
-    const roomRows = inventoryRows.filter((unit) => unit.kind === "ROOM");
+    const buildingOrder = await readBuildingOrder(trx, options.propertyId, inventoryRows.filter((unit) => unit.kind === "ROOM"));
+    const roomRows = sortRoomsByBuilding(inventoryRows.filter((unit) => unit.kind === "ROOM"), buildingOrder);
     const bedRows = inventoryRows.filter((unit) => unit.kind === "BED");
 
     const operationalOrderCandidates = await trx.selectFrom("orders as order")

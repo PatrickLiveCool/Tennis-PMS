@@ -1,5 +1,6 @@
+import { AssistantProvider, AssistantTrigger } from "./assistant/Assistant";
 import { Suspense, createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { AlertCircle, BadgeCheck, BedDouble, Building2, ClipboardList, KeyRound, LogOut, PanelLeftClose, PanelLeftOpen, RefreshCw, Smartphone, Settings, UserRound } from "lucide-react";
+import { AlertCircle, BadgeCheck, BedDouble, Building2, ChevronDown, ClipboardList, KeyRound, LogOut, PanelLeftClose, PanelLeftOpen, RefreshCw, Smartphone, Settings, UserRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { version as applicationVersion } from "../../../package.json";
 import { api, ApiError } from "./api";
@@ -362,7 +363,7 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className={`app-shell${sidebarCollapsed ? " sidebar-is-collapsed" : ""}`}>
+    <AssistantProvider key={`${principal.subjectId}:${propertyId}`}><div className={`app-shell${sidebarCollapsed ? " sidebar-is-collapsed" : ""}`}>
       <a className="skip-link" href="#main-content">跳至主要内容</a>
       <aside className="sidebar">
           <div className="sidebar-brand-row">
@@ -386,20 +387,25 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
           >
             {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" size={18} /> : <PanelLeftClose aria-hidden="true" size={18} />}
           </button>
+          <AssistantTrigger mobile />
           <button className="mobile-logout icon-button" type="button" onClick={() => void logout()} disabled={loggingOut} aria-label="退出登录" title="退出登录"><LogOut aria-hidden="true" size={19} /></button>
         </div>
         <Navigation principal={principal} propertyId={propertyId} collapsed={sidebarCollapsed} />
-        <div className="sidebar-property" title={propertyLabel}>
-          <Building2 aria-hidden="true" size={15} />
-          <label className="sr-only" htmlFor="property-select">门店</label>
-          <select id="property-select" value={propertyId} onChange={(event) => setPropertyId(event.target.value)} data-testid="property-select" aria-label="门店">
-            {meta.properties.map((item) => <option key={item.id} value={item.id}>{propertyDisplayName(item)}</option>)}
-          </select>
-        </div>
-        <div className="sidebar-user">
-          <UserRound aria-hidden="true" size={18} />
-          <div><strong>{principal.displayName}</strong><span>{principal.propertyAccess[propertyId] === "WRITE" ? "可写" : "只读"}</span></div>
-          <button className="icon-button" type="button" onClick={() => void logout()} disabled={loggingOut} aria-label="退出登录" title="退出登录"><LogOut aria-hidden="true" size={18} /></button>
+        <div className="sidebar-utilities">
+          <div className="assistant-sidebar-slot"><AssistantTrigger /></div>
+          <div className="sidebar-property" title={propertyLabel}>
+            <Building2 aria-hidden="true" size={18} />
+            <label className="sr-only" htmlFor="property-select">门店</label>
+            <select id="property-select" value={propertyId} onChange={(event) => setPropertyId(event.target.value)} data-testid="property-select" aria-label="门店">
+              {meta.properties.map((item) => <option key={item.id} value={item.id}>{propertyDisplayName(item)}</option>)}
+            </select>
+            <ChevronDown className="sidebar-property-chevron" aria-hidden="true" size={14} />
+          </div>
+          <div className="sidebar-user">
+            <UserRound aria-hidden="true" size={18} />
+            <div title={principal.displayName}><strong>{principal.displayName}</strong><span>{principal.propertyAccess[propertyId] === "WRITE" ? "可写" : "只读"}</span></div>
+            <button className="icon-button" type="button" onClick={() => void logout()} disabled={loggingOut} aria-label="退出登录" title={`退出登录 · ${principal.displayName}`}><LogOut aria-hidden="true" size={16} /></button>
+          </div>
         </div>
       </aside>
       <div className="workspace">
@@ -420,6 +426,6 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
         </main>
       </div>
       <Navigation principal={principal} propertyId={propertyId} mobile />
-    </div>
+    </div></AssistantProvider>
   );
 }

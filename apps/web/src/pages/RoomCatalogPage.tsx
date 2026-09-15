@@ -6,6 +6,7 @@ import { principalCan, useWorkspace } from "../session";
 import type { CommandRequest } from "../types";
 import { CommandDialog, CommandRecoveryBar, DamagedCommandRecoveryNotice, EmptyState, InlineError, LoadingBlock, Modal,
   QuoteRecoveryConflictNotice, formatDateTime, formatMinor, isTerminalCommandRecovery, recoveryCommandRequest, usePersistentCommandRecovery } from "../ui";
+import { BuildingOrderEditor } from "./BuildingOrderEditor";
 import "./room-catalog.css";
 
 const nights = ["1", "7", "14", "30"] as const;
@@ -120,6 +121,8 @@ export function RoomCatalogPage() {
   const [tab, setTab] = useState<"TYPES" | "ROOMS" | "HISTORY">("TYPES");
   const [selected, setSelected] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [buildingDraft, setBuildingDraft] = useState<string[]>();
+  const [ordering, setOrdering] = useState(false);
   const [editor, setEditor] = useState<Editor>();
   const [editorDraft, setEditorDraft] = useState<{ input: RoomCatalogInput; reason: string }>();
   useEffect(() => { if (!editor) setEditorDraft(undefined); }, [editor]);
@@ -135,7 +138,7 @@ export function RoomCatalogPage() {
     catch (nextError) { if (loadLease.current === lease) setError(nextError); }
     finally { if (loadLease.current === lease) setLoading(false); }
   }
-  useEffect(() => { setData(undefined); setSelected(""); setEditor(undefined); setCommand(undefined); void refresh(); return () => { loadLease.current += 1; }; }, [propertyId]);
+  useEffect(() => { setData(undefined); setOrdering(false); setSelected(""); setEditor(undefined); setCommand(undefined); void refresh(); return () => { loadLease.current += 1; }; }, [propertyId]);
   const blocked = loading || Boolean(error) || recovery.blocked || !canManage;
   const visibleTypes = data?.types.filter((type) => showInactive || type.active) ?? [];
   const activeType = visibleTypes.find((type) => type.code === selected) ?? visibleTypes[0];
@@ -143,7 +146,7 @@ export function RoomCatalogPage() {
   const price = data?.prices.find((item) => item.typeCode === activeType?.code);
   function submit(input: RoomCatalogInput, reason: string) {
     setRecovering(false); setNotice("");
-    setCommand({ commandType: "MANAGE_ROOM_CATALOG", input: { ...input }, title: "核对房型与价格修改",
+    setCommand({ commandType: "MANAGE_ROOM_CATALOG", input: { ...input }, title: input.action === "SET_BUILDING_ORDER" ? "核对楼栋顺序" : "核对房型与价格修改",
       description: "请核对修改内容，确认后保存并保留操作记录。", initialReason: { code: "ROOM_CATALOG_CHANGE", note: reason } });
   }
   function simple(input: Omit<RoomCatalogInput, "propertyId" | "expectedVersion">, title: string) {
@@ -198,15 +201,24 @@ export function RoomCatalogPage() {
           <button className="button button-secondary button-compact danger-text-button" disabled={blocked || typeRooms.length > 0 || data.rates.some((rate) => rate.typeCode === activeType.code)}
             title="仅未关联房间、价格或会员的误建房型可删除" onClick={() => simple({ action: "DELETE_TYPE", typeCode: activeType.code }, "删除误建房型")}>删除误建房型</button></div></footer>
       </section> : <EmptyState title="暂无房型" detail="新增房型后可以分配房间并设置价格。" />}</div>
-      : tab === "ROOMS" ? <section className="catalog-all-rooms"><div className="catalog-section-heading"><div><h2>实际房间与床位</h2><p>{data.rooms.filter((room) => room.active).length} 间启用 · 物理床与可单卖床位分别管理</p></div></div>{roomRows(data.rooms)}</section>
+      : tab === "ROOMS" ? <section className="catalog-all-rooms"><div className="catalog-section-heading"><div><h2>实际房间与床位</h2><p>{data.rooms.filter((room) => room.active).length} 间启用 · 物理床与可单卖床位分别管理</p></div><button className="button button-secondary button-compact" disabled={blocked || (data.buildingOrder?.length ?? 0) < 2} onClick={() => { setBuildingDraft(undefined); setOrdering(true); }}><Settings2 size={15} aria-hidden="true" />调整楼栋顺序</button></div>{roomRows(data.rooms)}</section>
       : <section className="catalog-history"><h2>最近修改</h2><p className="muted">保留操作人、时间、原因和前后内容，最多展示最近 100 次操作。</p>{data.history.length ? data.history.map((item) => <article key={item.id}><header><h3>{item.title}</h3><time>{formatDateTime(item.createdAt)}</time></header><p>{item.operator} · {item.reason}</p><ul>{item.description.map((line, index) => <li key={index}>{line}</li>)}</ul></article>) : <EmptyState title="暂无修改记录" detail="首次保存或发布价格后，记录会显示在这里。" />}</section>}
     </> : null}
+    {ordering && data && !command ? <BuildingOrderEditor data={data} {...(buildingDraft ? { draft: buildingDraft } : {})} onClose={() => setOrdering(false)} onSubmit={(buildingOrder) => {
+      setBuildingDraft(buildingOrder);
+      submit({ propertyId, expectedVersion: data.version, action: "SET_BUILDING_ORDER", buildingOrder }, "调整库存日历楼栋显示顺序");
+    }} /> : null}
     {editor && data && !command ? <CatalogEditor editor={editor} data={data} {...(editorDraft ? { draft: editorDraft } : {})} onClose={() => setEditor(undefined)} onSubmit={submit} /> : null}
     {command ? <CommandDialog key={recovering ? recovery.pending?.confirmationKey : "catalog-command"} request={command}
       {...(recovering && recovery.pending ? { initialConfirmationKey: recovery.pending.confirmationKey } : {})}
-      onProgress={(progress) => recovery.track(command, progress)} onReturnToEdit={(draft) => { setCommand(undefined); setEditor(editor); setEditorDraft({ input: draft.input as unknown as RoomCatalogInput, reason: draft.initialReason?.note ?? "" }); }}
-      onCommitted={async () => { await Promise.all([refresh(), refreshMeta()]); setNotice("设置已保存，房态与新订单已使用最新配置。"); }}
-      onClose={async (context) => { setCommand(undefined); setEditor(undefined); setRecovering(false);
+      onProgress={(progress) => recovery.track(command, progress)} onReturnToEdit={(draft) => {
+        setCommand(undefined);
+        if (draft.input.action === "SET_BUILDING_ORDER") {
+          setOrdering(true); setBuildingDraft((draft.input as unknown as RoomCatalogInput).buildingOrder);
+        } else { setEditor(editor); setEditorDraft({ input: draft.input as unknown as RoomCatalogInput, reason: draft.initialReason?.note ?? "" }); }
+      }}
+      onCommitted={async () => { setOrdering(false); await Promise.all([refresh(), refreshMeta()]); setNotice("设置已保存，房态与新订单已使用最新配置。"); }}
+      onClose={async (context) => { setCommand(undefined); setEditor(undefined); setOrdering(false); setRecovering(false);
         if (context || (recovery.pending && isTerminalCommandRecovery(recovery.pending.state))) await recovery.clearResolved(); }} /> : null}
   </div>;
 }

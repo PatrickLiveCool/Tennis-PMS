@@ -1,4 +1,4 @@
-export const roomCatalogActions = ["SAVE_TYPE", "DELETE_TYPE", "SET_TYPE_ACTIVE", "SAVE_ROOM", "SET_ROOM_ACTIVE", "PUBLISH_RATES"] as const;
+export const roomCatalogActions = ["SAVE_TYPE", "DELETE_TYPE", "SET_TYPE_ACTIVE", "SAVE_ROOM", "SET_ROOM_ACTIVE", "PUBLISH_RATES", "SET_BUILDING_ORDER"] as const;
 export type RoomCatalogAction = (typeof roomCatalogActions)[number];
 export type RoomRateAnchors = Record<"1" | "7" | "14" | "30", number>;
 export interface ManagedRoomType {
@@ -30,6 +30,8 @@ export interface RoomRateChange {
   version: number;
 }
 export interface RoomCatalogSnapshot {
+  /** Optional for receipts written before building ordering was introduced. */
+  buildingOrder?: string[];
   version: number;
   types: ManagedRoomType[];
   rates: RoomRateChange[];
@@ -55,6 +57,7 @@ export interface RoomCatalogInput {
   roomId?: string;
   code?: string;
   buildingCode?: string;
+  buildingOrder?: string[];
   effectiveFrom?: string;
   anchors?: RoomRateAnchors;
 }

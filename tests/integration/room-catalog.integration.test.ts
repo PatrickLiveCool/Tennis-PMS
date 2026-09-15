@@ -10,6 +10,7 @@ import { demo } from "../../packages/db/src/seed.ts";
 import { readRoomCatalog, resolveCatalogPolicyId } from "../../packages/db/src/room-catalog.ts";
 import { createQuoteForTesting } from "../../packages/db/src/pricing-service.ts";
 import { loadInventoryUnit } from "../../packages/db/src/inventory.ts";
+import { getRoomStatusBoard } from "../../packages/db/src/room-status.ts";
 import { buildServer } from "../../apps/api/src/server.ts";
 
 const url = process.env.ROOM_CATALOG_TEST_DATABASE_URL ?? "postgres://qintopia:qintopia@127.0.0.1:55432/qintopia_room_catalog_test";
@@ -287,4 +288,79 @@ describe.sequential("administrator room catalog with the restricted runtime role
     expect(after.currentSegment).toEqual(before.currentSegment);
     expect(after.order.pricing_policy_version_id).toBe(before.order.pricing_policy_version_id);
   });
+  it("persists building order before pagination, appends new buildings and preserves business facts", async () => {
+    const beforeNew = await readRoomCatalog(db, demo.propertyId);
+    await change({ action: "SAVE_ROOM", code: "000-F", buildingCode: "F", typeCode: "private_bath_standard", bedCount: 2, capacity: 2 });
+    const current = await readRoomCatalog(db, demo.propertyId);
+    expect(current.buildingOrder).toEqual([...beforeNew.buildingOrder!, "F"]);
+    const order = current.buildingOrder!.filter((code) => code !== "F");
+    order.splice(order.indexOf("E") + 1, 0, "F");
+    const units = await owner.selectFrom("inventory_units").selectAll().orderBy("id").execute();
+    const policies = await owner.selectFrom("pricing_policy_versions").selectAll().orderBy("id").execute();
+    const claims = await owner.selectFrom("inventory_claims").selectAll().orderBy("id").execute();
+    const draft = await preview({ action: "SET_BUILDING_ORDER", buildingOrder: order });
+    const key = metadata();
+    const result = await commit(draft, key);
+    expect((await commit(draft, key)).receiptId).toBe(result.receiptId);
+    const reloaded = await readRoomCatalog(db, demo.propertyId);
+    expect(reloaded.buildingOrder).toEqual(order);
+    expect(reloaded.history[0]?.title).toBe("调整楼栋顺序");
+    expect(await owner.selectFrom("inventory_units").selectAll().orderBy("id").execute()).toEqual(units);
+    expect(await owner.selectFrom("pricing_policy_versions").selectAll().orderBy("id").execute()).toEqual(policies);
+    expect(await owner.selectFrom("inventory_claims").selectAll().orderBy("id").execute()).toEqual(claims);
+    const options = { propertyId: demo.propertyId, arrivalDate: "2028-12-01", departureDate: "2028-12-02",
+      accessLevel: "READ" as const, commandGrants: new Set<string>(), requestingSubjectId: admin.subjectId };
+    const all = await getRoomStatusBoard(db, { ...options, pageSize: 200 });
+    const visibleOrder = [...new Set(all.rooms.map((room) => room.buildingCode))];
+    expect(visibleOrder.indexOf("F")).toBe(visibleOrder.indexOf("E") + 1);
+    const firstPage = await getRoomStatusBoard(db, { ...options, pageSize: 3 });
+    expect(firstPage.rooms.map((room) => room.id)).toEqual(all.rooms.slice(0, 3).map((room) => room.id));
+    await change({ action: "SAVE_ROOM", code: "000-G", buildingCode: "新楼栋", typeCode: "private_bath_standard", bedCount: 2, capacity: 2 });
+    expect((await readRoomCatalog(db, demo.propertyId)).buildingOrder).toEqual([...order, "新楼栋"]);
+  });
+  it("rejects incomplete, duplicate, unknown, stale and unauthorized building order changes", async () => {
+    const current = await readRoomCatalog(db, demo.propertyId);
+    const order = current.buildingOrder!;
+    for (const invalid of [order.slice(1), [...order.slice(1), order[1]!], [...order.slice(1), "不存在"]]) {
+      await expect(preview({ action: "SET_BUILDING_ORDER", buildingOrder: invalid })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    }
+    const reversed = [...order].reverse();
+    const stale = await preview({ action: "SET_BUILDING_ORDER", buildingOrder: reversed });
+    await newType("排序并发测试房型");
+    const rejected = await confirmCommandPreview(db, admin, stale.preview.previewId, { propertyId: demo.propertyId,
+      commandType: "MANAGE_ROOM_CATALOG", expectedEffectHash: stale.preview.effectHash, confirmation: true,
+      reason: { code: "ROOM_CATALOG_CHANGE", note: "过期排序" } }, metadata());
+    expect(rejected.businessCommitted).toBe(false);
+    expect(rejected.error?.code).toBe("PREVIEW_STALE");
+    expect((await readRoomCatalog(db, demo.propertyId)).buildingOrder).toEqual(order);
+    const input = { propertyId: demo.propertyId, expectedVersion: current.version, action: "SET_BUILDING_ORDER", buildingOrder: reversed };
+    const staff = { ...admin, subjectId: demo.agentSubjectId, ...authScope({ credentialType: "SESSION" }) };
+    await expect(createCommandPreview(db, staff, { commandType: "MANAGE_ROOM_CATALOG", input }, metadata())).rejects.toMatchObject({ code: "INSUFFICIENT_ACCESS" });
+    await expect(createCommandPreview(db, admin, { commandType: "MANAGE_ROOM_CATALOG", input: { ...input, propertyId: "ungranted" } }, metadata())).rejects.toMatchObject({ code: "INSUFFICIENT_ACCESS" });
+  });
+
+  it("rejects forged ordering effects at the database boundary and rolls back", async () => {
+    const current = await readRoomCatalog(db, demo.propertyId);
+    const draft = await preview({ action: "SET_BUILDING_ORDER", buildingOrder: [...current.buildingOrder!].reverse() });
+    const invalidOrder = structuredClone(draft.preview.effect) as unknown as RoomCatalogEffect;
+    invalidOrder.after.buildingOrder = ["other-property-building"];
+    const invalidPricing = structuredClone(draft.preview.effect) as unknown as RoomCatalogEffect;
+    invalidPricing.after.types[0]!.name = "cannot change types while sorting";
+    for (const [effect, message] of [[invalidOrder, "building order must contain each property building exactly once"],
+      [invalidPricing, "building order cannot change inventory or pricing"]] as const) {
+      await expect(owner.transaction().execute(async (trx) => {
+        const source = await trx.selectFrom("command_previews").selectAll().where("id", "=", draft.preview.previewId).executeTakeFirstOrThrow();
+        await trx.insertInto("command_previews").values({ ...source, id: `forged_order_preview_${++sequence}`,
+          effect: effect as unknown as Record<string, unknown> }).execute();
+        await sql`set local role qintopia_runtime`.execute(trx);
+        const id = `catalog_bad_order_${++sequence}`;
+        await trx.insertInto("command_executions").values({ id, subject_id: admin.subjectId,
+          credential_id: admin.credentialId, property_id: demo.propertyId, command_type: "MANAGE_ROOM_CATALOG",
+          idempotency_key: id, request_hash: sha256(id), correlation_id: id, state: "EXECUTING", completed_at: null }).execute();
+        await sql`select qintopia_apply_room_catalog(${id}, ${JSON.stringify(effect)}::jsonb, 'database boundary probe')`.execute(trx);
+      })).rejects.toThrow(message);
+    }
+    expect(await readRoomCatalog(db, demo.propertyId)).toEqual(current);
+  });
+
 });
