@@ -7,7 +7,7 @@
 }
 
 .room-status-page {
-  --room-status-sticky-toolbar-height: 83px;
+  --room-status-sticky-toolbar-height: 0px;
   --room-status-grid-header-height: 58px;
 }
 
@@ -2024,10 +2024,6 @@
 }
 
 @media (min-width: 1200px) and (max-width: 1399px) {
-  .room-status-page {
-    --room-status-sticky-toolbar-height: 154px;
-  }
-
   .room-status-filter-row {
     grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(104px, 0.6fr)) minmax(max-content, auto);
   }
@@ -2038,10 +2034,6 @@
 }
 
 @media (max-width: 1199px) {
-  .room-status-page {
-    --room-status-sticky-toolbar-height: 154px;
-  }
-
   .room-status-toolbar-primary {
     grid-template-columns: minmax(140px, 0.7fr) minmax(460px, 2fr);
   }

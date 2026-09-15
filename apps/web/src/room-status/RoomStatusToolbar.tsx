@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Eraser, Search } from "lucide-react";
 import {
   hasActiveRoomStatusFilters,
@@ -60,6 +60,24 @@ export function RoomStatusToolbar({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedCount = Number(filters.salesMode !== "ALL") + Number(filters.kind !== "ALL") + Number(filters.minimumCapacity !== null);
   const filtersActive = hasActiveRoomStatusFilters(filters);
+  const toolbarRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    const page = toolbar?.closest<HTMLElement>(".room-status-page");
+    if (!toolbar || !page) return;
+    const updateHeight = () => {
+      page.style.setProperty("--room-status-sticky-toolbar-height", `${toolbar.getBoundingClientRect().height}px`);
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(toolbar);
+    return () => {
+      observer.disconnect();
+      page.style.removeProperty("--room-status-sticky-toolbar-height");
+    };
+  }, []);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const lastFocusSearchRequestToken = useRef(focusSearchRequestToken);
 
@@ -71,7 +89,7 @@ export function RoomStatusToolbar({
   }, [focusSearchRequestToken]);
 
   return (
-    <section className="room-status-toolbar" aria-label="房态范围与筛选">
+    <section ref={toolbarRef} className="room-status-toolbar" aria-label="房态范围与筛选">
       <div className="room-status-filter-row">
         <label className="room-status-search-field">搜索房间或床位
           <span>
