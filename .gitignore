@@ -1,4 +1,6 @@
 node_modules/
+.worktrees/
+.local-workspace/
 apps/web/dist/
 apps/web/dist-e2e/
 apps/web/dist-e2e-ui-fixes/

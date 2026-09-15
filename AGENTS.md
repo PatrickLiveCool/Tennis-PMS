@@ -3,6 +3,15 @@
 - 修改通过 PR 合入 main；标题、正文与合并保护见 `docs/repository-contributing.md`，模板为 `.github/PULL_REQUEST_TEMPLATE.md`。
 - PR 格式本地验证：`node --test scripts/check-pr-tests.mjs`。保护配置记录在 `.github/main-protection.json`；不要通过降低保护要求绕过失败检查或待审批。
 
+## Worktree 使用与收尾
+
+- 默认复用项目根目录或已有的合适工作目录，在功能分支上开发；新任务、创建分支或提交 PR 本身不构成新建 worktree 的理由。
+- 只有用户明确要求隔离、并行任务需要独立文件状态、现有未提交工作阻碍本次安全操作，或必须同时运行不同版本时才新建。先检查 `git worktree list`、分支和未提交状态，优先复用；无关的未提交文件不自动构成隔离理由。
+- 创建前说明具体隔离原因、路径、分支和收尾条件；在已授权任务内自主执行，不新增逐步审批。手工创建的 worktree 统一放在目标仓库已忽略的 `.worktrees/<任务名>/`，不在 `/tmp` 或 `/private/tmp` 长期开发；用户指定或应用托管的目录遵循其已有管理方式。
+- 交付时核对 PR 实际合并状态（包括 squash merge）、未提交和未跟踪文件、被忽略的配置与验收资料，以及运行中的预览。仅清理本任务已完成且可恢复的目录；有待验收工作则保留并说明用途。资料归档到已忽略的 `.local-workspace/`，不得把凭据或业务快照随代码提交。
+- 分支合并、任务归档和 worktree 清理是独立动作，不能把其中之一当作其他动作已完成。整理主目录时先保存所有工作，在不打断其他任务的前提下恢复到最新 `main`；不强制覆盖或一并删除历史分支。
+- 跨仓库操作先定位目标 Git 根目录并读取其 `AGENTS.md`。Codex 中的项目分组不改变磁盘目录层级或 Git 仓库边界；从 QinTopia Agent OS 任务操作本仓库时同样遵循本节。
+
 ## 发布 harness 索引
 
 - 日常发布、回退与首次配置：`docs/operations/production-release-quickstart.md`；实现细节与恢复：`docs/operations/production-release-runbook.md`；参考方案映射：`docs/operations/production-release-investigation.md`。
