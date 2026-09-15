@@ -157,12 +157,21 @@ def runtime_image_id(release):
 
 def compatible(source, target, *, rollback):
     a, b = source["manifest"], target["manifest"]
-    require(a["requiredMigrations"] == b["requiredMigrations"],
-            "migration baseline changed: direct image switch refused; use an approved forward fix or database recovery plan")
     if rollback:
+        require(a["requiredMigrations"] == b["requiredMigrations"],
+                "migration baseline changed: direct image switch refused; use an approved forward fix or database recovery plan")
         require(a["rollbackCompatibility"]["mode"] == "same-migrations-only"
                 and b["rollbackCompatibility"]["mode"] == "same-migrations-only",
                 "forward-only release: direct rollback refused; forward fix or database recovery required")
+        return
+
+    source_migrations = a["requiredMigrations"]
+    target_migrations = b["requiredMigrations"]
+    if source_migrations != target_migrations:
+        require(b["rollbackCompatibility"]["mode"] == "forward-only"
+                and len(target_migrations) > len(source_migrations)
+                and target_migrations[:len(source_migrations)] == source_migrations,
+                "migration baseline changed: direct image switch refused; use an approved forward fix or database recovery plan")
 
 
 def cleanup_images(docker, state, dry_run=False):
