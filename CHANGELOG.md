@@ -2,6 +2,13 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.4.0](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.3.4...v1.4.0) (2026-09-15)
+
+
+### Features
+
+* **settings:** 管理房型房间床位与生效价格 ([#25](https://github.com/qintopia-agent-studio/GreenPMS/issues/25)) ([80e0a5e](https://github.com/qintopia-agent-studio/GreenPMS/commit/80e0a5e1e9727c07f14023a3bfde3d97159fc354))
+
 ## [1.3.4](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.3.3...v1.3.4) (2026-09-11)
 
 
