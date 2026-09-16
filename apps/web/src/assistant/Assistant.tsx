@@ -86,6 +86,21 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     else if (!open) returnFocus.current?.focus({ preventScroll: true });
   }, [open, dialogOpen]);
   useEffect(() => { const el = messagesRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, busy, error]);
+  useEffect(() => {
+    if (!open || dialogOpen) return;
+    const outside = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || event.target.closest("#ai-assistant-panel, .assistant-trigger, dialog")) return;
+      setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      event.preventDefault();
+      setOpen(false);
+    };
+    document.addEventListener("click", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("click", outside); document.removeEventListener("keydown", escape); };
+  }, [open, dialogOpen]);
   useEffect(() => { if (guide && guide.orderId && location.pathname !== `/orders/${encodeURIComponent(guide.orderId)}`) { setGuide(undefined); setPending(undefined); } }, [location.pathname, guide]);
   const close = () => { setOpen(false); };
   const toggle = () => { if (open) close(); else { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setOpen(true); } };

@@ -1789,8 +1789,9 @@ textarea:focus-visible {
   overscroll-behavior: contain;
 }
 
-/* Order detail tables need horizontal containment, but their vertical wheel
+/* Order tables need horizontal containment, but their vertical wheel
    gestures should continue scrolling the page instead of trapping the user. */
+.orders-table-region,
 .order-detail-page .table-region {
   overscroll-behavior-y: auto;
 }

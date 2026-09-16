@@ -242,7 +242,33 @@ const useDialogVisibilityEffect = typeof window === "undefined" ? useEffect : us
 export function Modal({ title, onClose, children, footer, size = "default", closeDisabled = false, modal = true, className }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const edited = useRef(false);
+  const outsidePress = useRef(false);
   const modalNotice = useContext(ModalNoticeContext);
+
+  function dismissDrawer() {
+    if (size !== "drawer" || closeDisabled) return;
+    if (edited.current && !window.confirm("有尚未提交的编辑，确定收起并放弃这些修改吗？")) return;
+    onClose();
+  }
+
+  useEffect(() => {
+    if (size !== "drawer" || modal) return;
+    const pointerDown = (event: PointerEvent) => {
+      outsidePress.current = event.target instanceof Node && !dialogRef.current?.contains(event.target);
+    };
+    const outside = (event: MouseEvent) => {
+      const dialog = dialogRef.current;
+      if (!outsidePress.current) return;
+      outsidePress.current = false;
+      if (!dialog || !(event.target instanceof Element) || dialog.contains(event.target)) return;
+      if (document.querySelector("dialog:modal") || event.target.closest("dialog, #ai-assistant-panel")) return;
+      dismissDrawer();
+    };
+    document.addEventListener("pointerdown", pointerDown, true);
+    document.addEventListener("click", outside);
+    return () => { document.removeEventListener("pointerdown", pointerDown, true); document.removeEventListener("click", outside); };
+  }, [size, modal, closeDisabled, onClose]);
 
   useDialogVisibilityEffect(() => {
     const dialog = dialogRef.current;
@@ -280,11 +306,11 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
   }, [modal]);
 
   function trapFocus(event: KeyboardEvent<HTMLDialogElement>) {
-    // Dismiss only through an explicit close/cancel control. Escape may still
-    // dismiss a child picker, but must not discard the surrounding form.
     if (event.key === "Escape") {
+      if (event.defaultPrevented || event.nativeEvent.isComposing) return;
       event.preventDefault();
       event.stopPropagation();
+      dismissDrawer();
       return;
     }
     if (!modal) return;
@@ -321,8 +347,24 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
       tabIndex={-1}
       aria-labelledby={titleId}
       onKeyDown={trapFocus}
+      onChangeCapture={() => { edited.current = true; }}
+      onClickCapture={(event) => {
+        // Some form choices (for example a room picker) are buttons, not inputs.
+        if (event.target instanceof Element && event.target.closest("form button")) edited.current = true;
+      }}
+      onPointerDown={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        outsidePress.current = event.target === event.currentTarget && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);
+      }}
+      onClick={(event) => {
+        if (size !== "drawer" || !outsidePress.current || event.target !== event.currentTarget) return;
+        outsidePress.current = false;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismissDrawer();
+      }}
       onCancel={(event) => {
         event.preventDefault();
+        dismissDrawer();
       }}
     >
       <div className="modal-shell">
