@@ -2,6 +2,14 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.4.2](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.4.1...v1.4.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* **deploy:** initialize AI encryption with recoverable configuration transaction ([#33](https://github.com/qintopia-agent-studio/GreenPMS/issues/33)) ([0491c67](https://github.com/qintopia-agent-studio/GreenPMS/commit/0491c679af7af86ed8cd04639cc5618cc29f5fae))
+* **orders:** improve list scrolling and drawer dismissal ([dcee2d8](https://github.com/qintopia-agent-studio/GreenPMS/commit/dcee2d80f8fab48574ca21d45242c2a0087c8f2b))
+
 ## [1.4.1](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.4.0...v1.4.1) (2026-09-15)
 
 

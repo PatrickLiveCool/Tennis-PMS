@@ -1,6 +1,6 @@
 {
   "application": "greenpms",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "rollbackCompatibility": {
     "mode": "forward-only",
     "reason": "061 增加运营房型、库存版本和价格生效引用；执行迁移后不得仅回退旧应用镜像，应前向修复，或按正式恢复流程核验并恢复整套备份。"
