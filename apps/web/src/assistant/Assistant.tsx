@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight, MessageSquare, Plus, Send, Settings, Sparkles, X } from "lucide-react";
 import { api } from "../api";
@@ -32,6 +33,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [conversationId, setConversationId] = useState<string>();
   const [guide, setGuide] = useState<AssistantEntry>(), [pending, setPending] = useState<AssistantEntry>();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogHost, setDialogHost] = useState<HTMLDialogElement | null>(null);
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches);
   const generation = useRef(0), controller = useRef<AbortController | undefined>(undefined), inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null), returnFocus = useRef<HTMLElement | null>(null);
@@ -57,6 +59,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       const next = Boolean(document.querySelector("dialog[open]"));
       if (previouslyOpen && !next) setGuide(undefined);
       previouslyOpen = next; setDialogOpen(next);
+      setDialogHost([...document.querySelectorAll<HTMLDialogElement>("dialog:modal")].at(-1) ?? null);
     };
     const observer = new MutationObserver(inspect); observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] }); inspect();
     return () => observer.disconnect();
@@ -67,41 +70,37 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", change);
   }, []);
   useEffect(() => {
-    if (!mobile || !open || dialogOpen) return;
-    const shell = document.querySelector<HTMLElement>(".app-shell");
-    if (!shell) return;
-    const previous = shell.inert; shell.inert = true;
-    const trap = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...document.querySelectorAll<HTMLElement>("#ai-assistant-panel button:not(:disabled), #ai-assistant-panel textarea")];
-      const first = controls[0], last = controls.at(-1);
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-    };
-    document.addEventListener("keydown", trap);
-    return () => { shell.inert = previous; document.removeEventListener("keydown", trap); };
-  }, [mobile, open, dialogOpen]);
+    if (!open) return;
+    document.body.classList.add("assistant-is-open");
+    if (dialogHost) dialogHost.dataset.assistantOpen = "true";
+    return () => { document.body.classList.remove("assistant-is-open"); if (dialogHost) delete dialogHost.dataset.assistantOpen; };
+  }, [open, dialogHost]);
   useEffect(() => {
-    if (open && !dialogOpen) inputRef.current?.focus({ preventScroll: true });
-    else if (!open) returnFocus.current?.focus({ preventScroll: true });
-  }, [open, dialogOpen]);
+    if (open) inputRef.current?.focus({ preventScroll: true });
+    else {
+      const activeDialog = document.querySelector<HTMLDialogElement>("dialog:modal");
+      const target = activeDialog?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled)") ?? returnFocus.current;
+      target?.focus({ preventScroll: true });
+    }
+  }, [open]);
   useEffect(() => { const el = messagesRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, busy, error]);
   useEffect(() => {
-    if (!open || dialogOpen) return;
-    const outside = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || event.target.closest("#ai-assistant-panel, .assistant-trigger, dialog")) return;
-      setOpen(false);
-    };
+    if (!open) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (event.target instanceof Element && event.target.closest("dialog") && !event.target.closest("#ai-assistant-panel")) return;
       event.preventDefault();
       setOpen(false);
     };
-    document.addEventListener("click", outside);
     document.addEventListener("keydown", escape);
-    return () => { document.removeEventListener("click", outside); document.removeEventListener("keydown", escape); };
-  }, [open, dialogOpen]);
-  useEffect(() => { if (guide && guide.orderId && location.pathname !== `/orders/${encodeURIComponent(guide.orderId)}`) { setGuide(undefined); setPending(undefined); } }, [location.pathname, guide]);
+    return () => document.removeEventListener("keydown", escape);
+  }, [open]);
+  const previousPath = useRef(location.pathname);
+  useEffect(() => {
+    const changed = previousPath.current !== location.pathname;
+    previousPath.current = location.pathname;
+    if (changed && guide?.orderId && location.pathname !== `/orders/${encodeURIComponent(guide.orderId)}`) { setGuide(undefined); setPending(undefined); }
+  }, [location.pathname, guide]);
   const close = () => { setOpen(false); };
   const toggle = () => { if (open) close(); else { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setOpen(true); } };
   const openEntry = (entry: AssistantEntry) => {
@@ -109,12 +108,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (!path) { setError("助手返回的入口不可用。"); return; }
     if (document.querySelector("dialog[open]")) { setError("请先完成或取消当前表单，再打开新的入口。"); return; }
     setGuide(entry); setPending(entry.action ? entry : undefined); setError(undefined);
-    if (entry.action || window.matchMedia("(max-width: 720px)").matches) setOpen(false);
     navigate(path);
   };
   const finishEntry = (failure?: string) => {
     setPending(undefined);
-    if (failure) { setGuide(undefined); setError(failure); setOpen(true); }
+    if (failure) { setGuide(undefined); setError(failure); }
   };
   useEffect(() => {
     if (!pending) return;
@@ -147,10 +145,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     } catch (e) { if (ticket === generation.current) { setError(errorMessage(e)); setDraft(message); } }
     finally { if (ticket === generation.current) { sending.current = false; setBusy(false); } }
   }
-  return <AssistantContext.Provider value={{ open, toggle, settings, refreshSettings, guide, pending, finishEntry }}>
-    {children}
-    {open && !dialogOpen ? <aside id="ai-assistant-panel" className="assistant-panel" role={mobile ? "dialog" : "complementary"} aria-modal={mobile ? true : undefined} aria-label="AI 助手" data-testid="ai-assistant-panel">
-      <header className="assistant-header"><div><Sparkles size={18} aria-hidden="true" /><strong>AI 助手</strong></div><div><button type="button" className="icon-button" aria-label="新建对话" title="新建对话" onClick={newConversation}><Plus size={18} /></button>{settings?.canManage ? <button type="button" className="icon-button" aria-label="模型设置" title="模型设置" onClick={() => { close(); navigate("/settings/ai"); }}><Settings size={18} /></button> : null}<button type="button" className="icon-button" aria-label="关闭 AI 助手" onClick={close}><X size={19} /></button></div></header>
+  const panel = open ? <aside id="ai-assistant-panel" className="assistant-panel" role="complementary" aria-label="AI 助手" data-testid="ai-assistant-panel" onKeyDown={event => {
+      if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close(); }
+      if (event.key === "Tab" && dialogHost) {
+        const controls = [...dialogHost.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])")].filter(el => el.getClientRects().length > 0);
+        if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus(); }
+        if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
+      }
+    }}>
+      <header className="assistant-header"><div><Sparkles size={18} aria-hidden="true" /><strong>AI 助手</strong></div><div><button type="button" className="icon-button" aria-label="新建对话" title="新建对话" onClick={newConversation}><Plus size={18} /></button>{settings?.canManage ? <button type="button" className="icon-button" aria-label="模型设置" title="模型设置" onClick={() => { if (dialogOpen) { setError("请先完成或取消当前表单，再打开模型设置。"); return; } navigate("/settings/ai"); }}><Settings size={18} /></button> : null}<button type="button" className="icon-button" aria-label="关闭 AI 助手" onClick={close}><X size={19} /></button></div></header>
       <div className="assistant-messages" ref={messagesRef} aria-live="polite" aria-busy={busy}>
         {!messages.length ? <div className="assistant-welcome"><MessageSquare size={27} aria-hidden="true" /><h2>需要帮你做什么？</h2><p>问我怎么操作，或让我查找房态、订单与会员资料。</p>{settings && !settings.enabled ? <p className="assistant-notice">助手尚未启用，请管理员在设置中配置模型连接。</p> : null}<div className="assistant-suggestions">{suggestions.map(({ title, prompt }) => <button type="button" key={title} onClick={() => void send(undefined, prompt)} disabled={busy || !settings?.enabled}><span><strong>{title}</strong><small>{prompt}</small></span><ChevronRight size={16} aria-hidden="true" /></button>)}</div></div> : messages.map((m, i) => <article className={`assistant-message assistant-message-${m.role}`} key={i}><span className="assistant-message-author">{m.role === "user" ? "你" : "AI 助手"}</span>{m.role === "assistant" ? <AssistantMessageContent text={m.text} /> : <div className="assistant-message-text">{m.text}</div>}{m.entries?.map((entry, index) => <div className="assistant-entry" key={index}><button type="button" className="button button-secondary" onClick={() => openEntry(entry)}>打开{entry.label}</button><ol>{entry.steps.map(step => <li key={step}>{step}</li>)}</ol></div>)}{m.questionId ? <AssistantFeedback questionId={m.questionId} propertyId={propertyId} selected={m.feedback} onSaved={feedback => setMessages(current => current.map(message => message.questionId === m.questionId ? { ...message, feedback } : message))} /> : null}</article>)}
         {busy ? <p className="assistant-wait">正在查询和整理…</p> : null}
@@ -165,7 +168,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           <button className="button button-primary" type="submit" disabled={busy || !draft.trim() || !settings?.enabled}><Send size={16} aria-hidden="true" />发送</button>
         </div>
       </form>
-    </aside> : null}
+    </aside> : null;
+  return <AssistantContext.Provider value={{ open, toggle, settings, refreshSettings, guide, pending, finishEntry }}>
+    {children}
+    {dialogHost ? createPortal(panel, dialogHost) : panel}
     {!open && guide && !dialogOpen ? <button type="button" className="assistant-resume button button-secondary" onClick={() => setOpen(true)}><MessageSquare size={16} />返回 AI 对话</button> : null}
   </AssistantContext.Provider>;
 }

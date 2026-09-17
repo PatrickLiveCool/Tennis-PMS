@@ -30,7 +30,7 @@ async function enabledUi(page: Page) {
   // Only the model-facing UI response is simulated. Business data and form gates stay real.
   await page.route("**/api/v1/assistant/settings?*", async route => { const response = await route.fetch(); await route.fulfill({ response, json: { ...await response.json(), enabled: true } }); });
 }
-test("assistant overlay preserves calendar geometry and scroll; settings fit the viewport", async ({ page }) => {
+test("assistant reserves working space and preserves scroll; settings fit the viewport", async ({ page }) => {
   await login(page);
   const hasCalendar = await page.locator(".room-status-grid-scroll").count() > 0;
   const before = await page.locator(".main-content").boundingBox();
@@ -40,7 +40,7 @@ test("assistant overlay preserves calendar geometry and scroll; settings fit the
   await page.getByRole("button", { name: "AI 助手", exact: true }).filter({ visible: true }).click();
   await expect(page.getByTestId("ai-assistant-panel")).toBeVisible();
   const after = await page.locator(".main-content").boundingBox();
-  expect(after?.width).toBe(before?.width); expect(after?.x).toBe(before?.x);
+  expect(after?.width).toBe(before!.width - (await page.evaluate(() => innerWidth > 860) ? 400 : 0)); expect(after?.x).toBe(before?.x);
   if (hasCalendar) expect(await scroller.evaluate(el => [el.scrollLeft, el.scrollTop])).toEqual(position);
   await page.getByRole("button", { name: "关闭 AI 助手", exact: true }).click();
   await expect(page.getByRole("button", { name: "AI 助手", exact: true }).filter({ visible: true })).toBeFocused();
@@ -124,19 +124,95 @@ test("assistant distinguishes suggested questions and saves explicit feedback wi
   await expect(page.locator(".assistant-feedback")).toHaveCount(2); expect(sources).toEqual(["SUGGESTION", "USER"]);
 });
 test("assistant opens the real stay-date form with durable guidance and no business submission", async ({ page }) => {
-  await login(page); const orderId = await order(page.request);
+  await login(page); const orderId = process.env.ASSISTANT_TEST_ORDER_ID ?? await order(page.request);
   await enabledUi(page);
-  await page.route("**/api/v1/assistant/chat", route => route.fulfill({ json: { conversationId: "synthetic-ui", text: "请在已打开的表单核对新离店日期。", entries: [{ page: "order", orderId, action: "EXTEND_STAY", ...assistantGuides.EXTEND_STAY }] } }));
+  const requests: Array<{conversationId?: string}> = [];
+  let releaseFirst!: () => void;
+  await page.route("**/api/v1/assistant/chat", async route => {
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) await new Promise<void>(resolve => { releaseFirst = resolve; });
+    return route.fulfill({ json: { conversationId: "synthetic-ui", text: requests.length === 1 ? "请在已打开的表单核对新离店日期。" : "仍在处理同一个订单。", entries: requests.length === 1 ? [{ page: "order", orderId, action: "EXTEND_STAY", ...assistantGuides.EXTEND_STAY }] : [] } });
+  });
   await page.goto(`/orders/${orderId}`); await expect(page.locator('[data-order-action="ADJUST_DEPARTURE"]')).toBeEnabled();
+  await page.goto("/orders");
   let writes = 0; page.on("request", request => { if (request.method() === "POST" && /command-previews|\/quotes/.test(request.url())) writes++; });
   await page.getByRole("button", { name: "AI 助手", exact: true }).filter({ visible: true }).click();
   await page.getByLabel("向 AI 助手提问").fill("打开这个订单的续住入口"); await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  await page.getByLabel("向 AI 助手提问").fill("跳转前保留的草稿");
+  releaseFirst();
   const dialog = page.locator("dialog[open]"); await expect(dialog.locator(".assistant-operation-guide")).toBeVisible();
+  await expect(page.getByLabel("向 AI 助手提问")).toHaveValue("跳转前保留的草稿");
   await page.screenshot(); // flush rendering; catches StrictMode cleanup hiding the guide immediately after mount
   await expect(dialog.locator(".assistant-operation-guide")).toBeVisible();
-  await expect(page.getByTestId("ai-assistant-panel")).toHaveCount(0); expect(writes).toBe(0);
+  const panel = page.getByTestId("ai-assistant-panel");
+  await expect(panel).toBeVisible(); expect(writes).toBe(0);
+  const formBounds = await dialog.locator(":scope > .modal-shell").boundingBox();
+  const assistantBounds = await panel.boundingBox();
+  expect(formBounds && assistantBounds && (formBounds.x + formBounds.width <= assistantBounds.x + 1 || formBounds.y + formBounds.height <= assistantBounds.y + 1)).toBe(true);
+  await page.screenshot({path: test.info().outputPath("assistant-with-form.png")});
+  await expect(page).toHaveURL(new RegExp(`/orders/${orderId}$`));
+  await page.getByLabel("向 AI 助手提问").fill("还需要核对什么？");
+  await panel.getByRole("button", {name: "发送", exact: true}).click();
+  await expect(panel).toContainText("仍在处理同一个订单。");
+  expect(requests[1]?.conversationId).toBe("synthetic-ui");
+  await page.getByLabel("向 AI 助手提问").fill("保留的后续问题");
+  const note = dialog.locator(".modal-shell textarea").last();
+  await note.fill("同一个问题的操作备注");
+  await expect(panel).toBeVisible();
+  await expect(page.getByLabel("向 AI 助手提问")).toHaveValue("保留的后续问题");
+  await page.getByLabel("向 AI 助手提问").press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(note).toHaveValue("同一个问题的操作备注");
   await dialog.getByRole("button", { name: "关闭", exact: true }).click();
-  await page.locator('[data-order-action="MOVE_UNIT"]').click();
+  await page.getByRole("button", { name: "AI 助手", exact: true }).filter({ visible: true }).click();
+  await expect(page.getByLabel("向 AI 助手提问")).toHaveValue("保留的后续问题");
+  await page.locator('[data-order-action="ADJUST_DEPARTURE"]').click();
+  await expect(panel).toBeVisible();
   await expect(page.locator("dialog[open] .assistant-operation-guide")).toHaveCount(0);
   await page.locator("dialog[open]").getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(panel).toBeVisible();
+  await expect(page.getByLabel("向 AI 助手提问")).toHaveValue("保留的后续问题");
+});
+
+test("all five suggestions keep the assistant open while their buttons unmount", async ({ page }) => {
+  await enabledUi(page);
+  let releaseReply: (() => void) | undefined;
+  const received: Array<{ source: string; message: string }> = [];
+  await page.route("**/api/v1/assistant/chat", async route => {
+    received.push(route.request().postDataJSON());
+    await new Promise<void>(resolve => { releaseReply = resolve; });
+    await route.fulfill({ json: { conversationId: "suggestion-dismiss-regression", text: "已收到默认问题。", entries: [] } });
+  });
+  await login(page);
+  const trigger = page.getByRole("button", { name: "AI 助手", exact: true }).filter({ visible: true });
+  const panel = page.getByTestId("ai-assistant-panel");
+  await trigger.click();
+  try {
+    for (let index = 0; index < 5; index++) {
+      if (index) await panel.getByRole("button", { name: "新建对话", exact: true }).click();
+      const suggestions = panel.locator(".assistant-suggestions button");
+      await expect(suggestions).toHaveCount(5);
+      const prompt = await suggestions.nth(index).locator("small").innerText();
+      // Cover clicks on descendants as well as keyboard activation of the button.
+      if (index === 4) { await suggestions.nth(index).focus(); await page.keyboard.press("Enter"); }
+      else await suggestions.nth(index).locator(index % 2 ? "small" : "strong").click();
+      await expect.poll(() => received.length).toBe(index + 1);
+      await expect(panel).toBeVisible();
+      await expect(panel.locator(".assistant-wait")).toBeVisible();
+      expect(received[index]).toMatchObject({ source: "SUGGESTION", message: prompt });
+      releaseReply?.();
+      await expect(panel.locator(".assistant-message-assistant")).toContainText("已收到默认问题。");
+    }
+    if (await page.evaluate(() => innerWidth > 860)) {
+      await page.locator(".main-content").click({ position: { x: 20, y: 20 } });
+      await expect(panel).toBeVisible();
+      await trigger.click();
+      await expect(panel).toBeHidden();
+      await trigger.click();
+      await expect(panel.locator(".assistant-message-assistant")).toBeVisible();
+    }
+    await page.getByLabel("向 AI 助手提问").press("Escape");
+    await expect(panel).toBeHidden();
+  } finally { releaseReply?.(); }
 });
