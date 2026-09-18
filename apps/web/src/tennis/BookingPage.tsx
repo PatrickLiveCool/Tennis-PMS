@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import type { TennisApi } from "./api";
+import { isWithinOpeningHours } from "../../../../packages/domain/src/tennis-pricing";
 import { OccupancyPanel } from "./OccupancyPanel";
 import { CustomerPicker } from "./CustomerPicker";
 import type { CustomerRecord, OrderRecord, QuoteRecord, Schedule, SelectionLine, Session, VenueRecord } from "./types";
@@ -69,6 +70,68 @@ export function BookingPage({
     () => api<Schedule>(`/venues/${venue.id}/schedule?date=${draft.date}`),
     [api, venue.id, draft.date],
   );
+  const selectionDates = [
+    ...new Set(
+      draft.lines.flatMap((line) => [
+        dateValue(new Date(line.startAt), venue.timezone),
+        dateValue(new Date(Date.parse(line.endAt) - 1), venue.timezone),
+      ]),
+    ),
+  ]
+    .sort()
+    .join(",");
+  const selectedSchedules = useLoad(async () => {
+    if (!schedule.data) return [] as Schedule[];
+    return Promise.all(
+      selectionDates
+        .split(",")
+        .filter(Boolean)
+        .map((date) =>
+          date === draft.date
+            ? Promise.resolve(schedule.data!)
+            : api<Schedule>(`/venues/${venue.id}/schedule?date=${date}`),
+        ),
+    );
+  }, [api, venue.id, draft.date, selectionDates, schedule.data]);
+  const selectionIssues = useMemo(() => {
+    if (!selectedSchedules.data?.length) return draft.lines.map(() => "");
+    return draft.lines.map((line) => {
+      const snapshot = selectedSchedules.data!.find((item) => item.courts.some((court) => court.id === line.courtId));
+      const court = snapshot?.courts.find((item) => item.id === line.courtId);
+      if (!court || !court.active || !snapshot?.venue.active) return "球场或场馆已停用，请移除此时段或更换球场。";
+      if (court.hourlyPriceCents === null) return "球场尚未配置价格，请先核对价目。";
+      if (Date.parse(line.startAt) <= now) return "开始时间已到，请调整时段。";
+      if (
+        selectedSchedules.data!.some((item) =>
+          item.occupancies.some(
+            (occupancy) =>
+              occupancy.courtId === line.courtId && occupancy.startAt < line.endAt && occupancy.endAt > line.startAt,
+          ),
+        )
+      )
+        return "该时段已被占用，请移除后重新选择空场。";
+      try {
+        if (!isWithinOpeningHours(line, snapshot.venue.timezone, snapshot.venue.openingHours))
+          return "该时段超出当前营业时间，请调整。";
+      } catch {
+        return "该时段不能出售，请重新选择。";
+      }
+      if (
+        snapshot.venue.minimumBookingMinutes !== null &&
+        (Date.parse(line.endAt) - Date.parse(line.startAt)) / 60_000 < snapshot.venue.minimumBookingMinutes
+      )
+        return "该时长低于当前最短可售时长，请调整。";
+      return "";
+    });
+  }, [selectedSchedules.data, draft.lines, now]);
+  const issuesKey = selectionIssues.join("|");
+  const hasSelectionIssues = selectionIssues.some(Boolean);
+  const pendingConfirmation = pendingCommands(scope).some((item) => item.intent.startsWith("quote.confirm:"));
+  useEffect(() => {
+    if (!hasSelectionIssues || pendingConfirmation) return;
+    selectionVersion.current++;
+    if (draft.quote) setDraft((current) => ({ ...current, quote: null }));
+  }, [issuesKey, draft.quote?.id, pendingConfirmation]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -127,6 +190,8 @@ export function BookingPage({
     update({ date: date.toISOString().slice(0, 10) });
   }
   async function quote() {
+    if (hasSelectionIssues || schedule.busy || schedule.error || selectedSchedules.busy || selectedSchedules.error)
+      return;
     if (pendingCommands(scope).some((p) => p.intent.startsWith("quote.confirm:"))) {
       setError(new Error("有一笔预订提交结果待核实，请先查询原操作结果，再建立新报价。"));
       return;
@@ -150,7 +215,15 @@ export function BookingPage({
     }
   }
   async function confirm() {
-    if (!draft.quote) return;
+    if (
+      !draft.quote ||
+      hasSelectionIssues ||
+      schedule.busy ||
+      schedule.error ||
+      selectedSchedules.busy ||
+      selectedSchedules.error
+    )
+      return;
     try {
       const [holdDate = "", holdTime = ""] = draft.until.split("T");
       const [holdHour = 0, holdMinute = 0] = holdTime.split(":").map(Number);
@@ -174,7 +247,7 @@ export function BookingPage({
     }
   }
   const quoteExpired = draft.quote && Date.parse(draft.quote.expiresAt) <= now;
-  const stale = Boolean(schedule.error) || schedule.busy;
+  const stale = Boolean(schedule.error || selectedSchedules.error) || schedule.busy || selectedSchedules.busy;
   return (
     <>
       <PageHeading title="场地排期" description={`${venue.name} · 按 15 分钟调度，常用预订 1 小时`}>
@@ -206,7 +279,13 @@ export function BookingPage({
           <span className="is-course">课程 / 维护</span>
         </div>
       </div>
-      <ErrorNotice error={schedule.error} retry={() => void schedule.refresh()} />
+      <ErrorNotice error={schedule.error || selectedSchedules.error} retry={() => void schedule.refresh()} />
+      {hasSelectionIssues && (
+        <p className="tennis-note is-warning" role="status">
+          {pendingConfirmation ? "原预订提交结果尚待核实，请先查询原操作。" : "已选时段需要调整，原报价已失效。"}
+          预订人和明细已保留，请按下方提示核对。
+        </p>
+      )}
       <div className="tennis-booking-layout">
         <section className="tennis-panel tennis-schedule-panel">
           <div className="panel-heading">
@@ -391,6 +470,7 @@ export function BookingPage({
                       <span>
                         {dateTime(line.startAt, venue.timezone)}–{clock(line.endAt, venue.timezone)}
                       </span>
+                      {selectionIssues[i] && <span className="tennis-note is-warning">{selectionIssues[i]}</span>}
                     </div>
                     {!draft.quote && (
                       <button
@@ -482,6 +562,7 @@ export function BookingPage({
                       (draft.staffHold && !permits(session, "hold_unpaid")) ||
                       command.busy ||
                       Boolean(quoteExpired) ||
+                      hasSelectionIssues ||
                       stale ||
                       (draft.staffHold && (!draft.until || !draft.reason.trim()))
                     }
@@ -496,7 +577,12 @@ export function BookingPage({
                 type="button"
                 onClick={() => void quote()}
                 disabled={
-                  quoteBusy || stale || !canBook || !draft.lines.length || (!draft.customer && !session.customerId)
+                  quoteBusy ||
+                  stale ||
+                  hasSelectionIssues ||
+                  !canBook ||
+                  !draft.lines.length ||
+                  (!draft.customer && !session.customerId)
                 }
               >
                 {quoteBusy ? "正在核对场地与价格…" : "核对场地与报价"}

@@ -3,7 +3,12 @@ import type pg from "pg";
 import { recordTenantAudit, TenantAccessError, type TenantActor } from "./access.ts";
 import { isCustomerActor, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { requireBookingVenue } from "./booking.ts";
-import { issueDelegationInTransaction, type Conversation } from "./external-agent.ts";
+import {
+  issueDelegationInTransaction,
+  validateConversationContext,
+  type AssistantContext,
+  type Conversation,
+} from "./external-agent.ts";
 import { bindGatewayIdentity, GatewayAccessError } from "./gateway-guard.ts";
 import { lockTenantTransactions } from "./transaction-locks.ts";
 
@@ -132,77 +137,96 @@ export async function listGatewayBindings(db: pg.Pool, actor: BookingActor) {
     };
   });
 }
-export async function gatewayBindingTargets(db: pg.Pool, actor: BookingActor, q = "") {
+export type GatewayBindingTarget =
+  | { actorKind: "staff"; subjectId: string; customerId: null; name: string }
+  | { actorKind: "customer"; subjectId: string | null; customerId: string; name: string };
+export type GatewayBindingInput = {
+  integrationId: string;
+  externalSubjectId: string;
+  reason: string;
+} & (
+  | { actorKind: "staff"; subjectId: string; customerId?: never }
+  | { actorKind: "customer"; customerId: string; subjectId?: never }
+  | { actorKind: "customer"; subjectId: string; customerId?: never }
+);
+export async function gatewayBindingTargets(db: pg.Pool, actor: BookingActor, q = ""): Promise<GatewayBindingTarget[]> {
   return withBookingTransaction(db, actor, async (tx) => {
     await admin(tx, actor);
     return (
-      await tx.query(
+      await tx.query<GatewayBindingTarget>(
         `SELECT * FROM (
  SELECT m.subject_id AS "subjectId",'staff'::text AS "actorKind",s.display_name AS name,NULL::text AS "customerId" FROM tennis.tenant_memberships m JOIN tennis.subjects s ON s.id=m.subject_id WHERE m.tenant_id=$1 AND m.active
- UNION ALL SELECT c.subject_id,'customer',c.nickname,c.id FROM tennis.customers c WHERE c.tenant_id=$1 AND c.active AND c.subject_id IS NOT NULL
- ) targets WHERE NOT EXISTS(SELECT 1 FROM tennis.local_accounts a WHERE a.subject_id=targets."subjectId" AND NOT a.active) AND ($2='' OR strpos(lower(name),lower($2))>0) ORDER BY name,"subjectId","actorKind" LIMIT 100`,
+ UNION ALL SELECT c.subject_id,'customer',c.nickname,c.id FROM tennis.customers c WHERE c.tenant_id=$1 AND c.active
+ ) targets WHERE NOT EXISTS(SELECT 1 FROM tennis.local_accounts a WHERE a.subject_id=targets."subjectId" AND NOT a.active) AND ($2='' OR strpos(lower(name),lower($2))>0) ORDER BY name,"actorKind","customerId","subjectId" LIMIT 100`,
         [actor.tenantId, q.trim().slice(0, 200)],
       )
     ).rows;
   });
 }
-export async function createGatewayBinding(
-  db: pg.Pool,
-  actor: BookingActor,
-  input: {
-    integrationId: string;
-    externalSubjectId: string;
-    subjectId: string;
-    actorKind: "staff" | "customer";
-    reason: string;
-  },
-) {
+export async function createGatewayBinding(db: pg.Pool, actor: BookingActor, input: GatewayBindingInput) {
   const externalSubject = text(input.externalSubjectId),
-    reason = text(input.reason, 2000);
+    reason = text(input.reason, 2000),
+    integrationId = text(input.integrationId);
+  const hasSubject = "subjectId" in input,
+    hasCustomer = "customerId" in input;
+  if (
+    hasSubject === hasCustomer ||
+    (input.actorKind !== "staff" && input.actorKind !== "customer") ||
+    (input.actorKind === "staff" && !hasSubject)
+  )
+    throw new GatewayAccessError("INVALID_GATEWAY_INPUT");
+  const targetId = text((hasCustomer ? input.customerId : input.subjectId) as string);
   return withBookingTransaction(db, actor, async (tx) => {
     await admin(tx, actor);
     if (
       (
         await tx.query("SELECT id FROM tennis.gateway_integrations WHERE tenant_id=$1 AND id=$2 AND active FOR SHARE", [
           actor.tenantId,
-          input.integrationId,
+          integrationId,
         ])
       ).rowCount !== 1
     )
       throw new TenantAccessError("RESOURCE_NOT_FOUND");
     let customerId: string | null = null;
+    let subjectId = targetId;
     if (input.actorKind === "customer") {
       const customer = (
-        await tx.query<{ id: string }>(
-          "SELECT id FROM tennis.customers WHERE tenant_id=$1 AND subject_id=$2 AND active FOR SHARE",
-          [actor.tenantId, input.subjectId],
+        await tx.query<{ id: string; subject_id: string | null; nickname: string }>(
+          `SELECT id,subject_id,nickname FROM tennis.customers WHERE tenant_id=$1 AND ${hasCustomer ? "id" : "subject_id"}=$2 AND active FOR UPDATE`,
+          [actor.tenantId, targetId],
         )
       ).rows[0];
       if (!customer) throw new TenantAccessError("RESOURCE_NOT_FOUND");
       customerId = customer.id;
+      if (customer.subject_id === null) {
+        subjectId = randomUUID();
+        await tx.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,$2)", [subjectId, customer.nickname]);
+        await tx.query("UPDATE tennis.customers SET subject_id=$1 WHERE tenant_id=$2 AND id=$3", [
+          subjectId,
+          actor.tenantId,
+          customer.id,
+        ]);
+      } else subjectId = customer.subject_id;
     } else if (
-      input.actorKind !== "staff" ||
       (
         await tx.query(
           "SELECT subject_id FROM tennis.tenant_memberships WHERE tenant_id=$1 AND subject_id=$2 AND active FOR SHARE",
-          [actor.tenantId, input.subjectId],
+          [actor.tenantId, subjectId],
         )
       ).rowCount !== 1
     )
       throw new TenantAccessError("RESOURCE_NOT_FOUND");
-    if (
-      (
-        await tx.query("SELECT subject_id FROM tennis.local_accounts WHERE subject_id=$1 AND NOT active", [
-          input.subjectId,
-        ])
-      ).rowCount
-    )
-      throw new TenantAccessError("RESOURCE_NOT_FOUND");
+    // Keep any existing account's enabled state stable until the binding commits.
+    const accounts = await tx.query<{ active: boolean }>(
+      "SELECT active FROM tennis.local_accounts WHERE subject_id=$1 FOR SHARE",
+      [subjectId],
+    );
+    if (accounts.rows.some((account) => !account.active)) throw new TenantAccessError("RESOURCE_NOT_FOUND");
     if (
       (
         await tx.query(
           "SELECT id FROM tennis.gateway_bindings WHERE integration_id=$1 AND external_subject=$2 AND active",
-          [input.integrationId, externalSubject],
+          [integrationId, externalSubject],
         )
       ).rowCount
     )
@@ -214,9 +238,9 @@ export async function createGatewayBinding(
         [
           id,
           actor.tenantId,
-          input.integrationId,
+          integrationId,
           externalSubject,
-          input.subjectId,
+          subjectId,
           customerId,
           input.actorKind,
           actor.subjectId,
@@ -225,8 +249,9 @@ export async function createGatewayBinding(
       )
     ).rows[0];
     await recordTenantAudit(tx, actor, "gateway.bind", id, {
-      integrationId: input.integrationId,
-      subjectId: input.subjectId,
+      integrationId,
+      subjectId,
+      customerId,
       actorKind: input.actorKind,
       reason,
     });
@@ -296,7 +321,13 @@ async function gatewayConversation(tx: pg.PoolClient, p: GatewayPrincipal, conve
 export async function receiveGatewayMessage(
   db: pg.Pool,
   p: GatewayPrincipal,
-  input: { externalConversationId: string; externalMessageId: string; venueId: string; content: string },
+  input: {
+    externalConversationId: string;
+    externalMessageId: string;
+    venueId: string;
+    content: string;
+    context?: AssistantContext;
+  },
 ) {
   const externalConversation = text(input.externalConversationId),
     externalMessage = text(input.externalMessageId),
@@ -332,9 +363,17 @@ export async function receiveGatewayMessage(
         [p.actor.tenantId, p.integrationId, p.bindingId, externalConversation, conv.id],
       );
     }
+    const context = await validateConversationContext(tx, p.actor, conv, input.context);
     const existing = (
-      await tx.query<{ id: string; binding_id: string; conversation_id: string; content_hash: string }>(
-        "SELECT id,binding_id,conversation_id,content_hash FROM tennis.gateway_messages WHERE integration_id=$1 AND external_message=$2",
+      await tx.query<{
+        id: string;
+        binding_id: string;
+        conversation_id: string;
+        content_hash: string;
+        context_page: string | null;
+        context_order_id: string | null;
+      }>(
+        "SELECT g.id,g.binding_id,g.conversation_id,g.content_hash,m.context_page,m.context_order_id FROM tennis.gateway_messages g JOIN tennis.agent_messages m ON m.tenant_id=g.tenant_id AND m.id=g.id WHERE g.integration_id=$1 AND g.external_message=$2",
         [p.integrationId, externalMessage],
       )
     ).rows[0];
@@ -342,15 +381,25 @@ export async function receiveGatewayMessage(
       if (
         existing.binding_id !== p.bindingId ||
         existing.conversation_id !== conv.id ||
-        existing.content_hash !== hash(content)
+        existing.content_hash !== hash(content) ||
+        existing.context_page !== (context?.page ?? null) ||
+        existing.context_order_id !== (context?.orderId ?? null)
       )
         throw new GatewayAccessError("GATEWAY_MESSAGE_CONFLICT");
       return { conversation: conv, messageId: existing.id, duplicate: true };
     }
     const messageId = randomUUID();
     await tx.query(
-      "INSERT INTO tennis.agent_messages(id,tenant_id,conversation_id,role,subject_id,content) VALUES($1,$2,$3,'user',$4,$5)",
-      [messageId, p.actor.tenantId, conv.id, p.actor.subjectId, content],
+      "INSERT INTO tennis.agent_messages(id,tenant_id,conversation_id,role,subject_id,content,context_page,context_order_id) VALUES($1,$2,$3,'user',$4,$5,$6,$7)",
+      [
+        messageId,
+        p.actor.tenantId,
+        conv.id,
+        p.actor.subjectId,
+        content,
+        context?.page ?? null,
+        context?.orderId ?? null,
+      ],
     );
     await tx.query(
       "INSERT INTO tennis.gateway_messages(id,tenant_id,integration_id,binding_id,conversation_id,external_message,generation,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
@@ -388,7 +437,8 @@ export interface GatewayGrantSnapshot {
   requestId: string;
   expiresAt: string;
   conversation: Omit<Conversation, "updatedAt"> & { updatedAt: string };
-  messages: { id: string; role: string; content: string; createdAt: string }[];
+  context?: AssistantContext | null;
+  messages: { id: string; role: string; content: string; createdAt: string; context?: AssistantContext | null }[];
 }
 export async function grantGatewayMessage(
   db: pg.Pool,
@@ -430,6 +480,7 @@ export async function grantGatewayMessage(
     const grant = await issueDelegationInTransaction(tx, p.actor, conversationId, messageId);
     const { token } = grant;
     const snapshot: GatewayGrantSnapshot = {
+      context: grant.context,
       requestId: grant.requestId,
       expiresAt: grant.expiresAt.toISOString(),
       conversation: { ...grant.conversation, updatedAt: grant.conversation.updatedAt.toISOString() },

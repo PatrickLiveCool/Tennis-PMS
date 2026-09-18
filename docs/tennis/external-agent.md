@@ -68,3 +68,7 @@ PMS 向配置的 `externalAgentUrl` POST JSON（`protocol: tennis-agent/v1`）�
 ## 尚待真实接入
 
 具体微信入口产品、账号、商户号、外部 Runtime 服务和真实部署地址均未提供。当前已有本地可信登录和上述适配契约；不代表企业微信/微信客服或真实微信支付已联调完成。已提供人工绑定及渠道无关 Gateway 入口，但真实微信身份验证和收发适配仍需在确定渠道后接入，不能直接把微信昵称或消息中的客户 ID 当作可信身份。
+
+## F11 人工会话工作流
+
+消息和直接人工接管持久保存已验证 page/orderId；客户会话里员工也只能关联该客户订单。相同 messageId 重试必须保留原文和 context。会话详情增加 latestOrderContext，Agent /context 使用当前请求原消息的 context；历史消息无关联时为空，不猜测。新 /assistant/conversation-directory 提供按场馆、mode/q/pageSize/cursor 分页目录；旧 /assistant/conversations 数组接口兼容保留。参见 [人工协作完成规格](operator-completion.md)。

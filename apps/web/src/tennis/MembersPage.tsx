@@ -1,3 +1,4 @@
+import { TopupHistoryPanel } from "./TopupHistoryPanel";
 import { useRef, useState } from "react";
 import { Plus, Wallet as WalletIcon } from "lucide-react";
 import type { TennisApi } from "./api";
@@ -51,7 +52,9 @@ export function MembersPage({
         : Promise.resolve(null),
     [api, customerId, cursor],
   );
+  const [topupRevision, setTopupRevision] = useState(0);
   const refreshWallet = () => {
+    setTopupRevision((value) => value + 1);
     if (historyCursors.length) setHistoryCursors([]);
     else void wallet.refresh();
   };
@@ -118,6 +121,15 @@ export function MembersPage({
                 </div>
                 <p className="tennis-muted">按充值先后消费，每批按本金 / 赠送比例扣款；会员身份不另加折扣。</p>
               </Panel>
+              <TopupHistoryPanel
+                api={api}
+                session={session}
+                venue={venue}
+                scope={scope}
+                customerId={customerId}
+                revision={topupRevision}
+                onChanged={refreshWallet}
+              />
               <Panel title="资金明细">
                 {wallet.data.entries.length === 0 ? (
                   <EmptyState title="暂无资金明细" detail="充值、付款预留、扣款和退款会在这里记录。" />

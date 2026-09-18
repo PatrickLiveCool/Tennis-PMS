@@ -289,10 +289,12 @@ export function RecoveryNotice({
   scope,
   api,
   openOrder,
+  openTopup,
 }: {
   scope: string;
   api: TennisApi;
   openOrder: (id: string) => void;
+  openTopup?: (id: string) => void;
 }) {
   const [pending, setPending] = useState(() => pendingCommands(scope));
   const [error, setError] = useState<unknown>();
@@ -308,6 +310,7 @@ export function RecoveryNotice({
         const [kind, id] = item.intent.split(":");
         const path = kind === "payment.simulate" ? "payments" : kind === "refund.simulate" ? "refunds" : "topups";
         const result = await api<{ status: string; orderId?: string }>(`/${path}/${id}`);
+        if (kind === "topup.simulate" && id && openTopup) openTopup(id);
         if (["PENDING", "REQUESTED", "PROCESSING"].includes(result.status)) {
           setMessage("原付款 / 退款仍在处理中，请从原记录刷新或使用同一模拟操作重试。");
           return;
@@ -321,6 +324,10 @@ export function RecoveryNotice({
       if (!receipt) {
         setMessage("尚未查到已完成回执。请保留原输入，在原入口重试；系统会复用同一个操作编号。");
         return;
+      }
+      if (typeof receipt.result.topupId === "string" && openTopup) {
+        const payment = await api<{ id: string }>(`/topups/${encodeURIComponent(receipt.result.topupId)}`);
+        openTopup(payment.id);
       }
       forgetCommand(scope, item.key);
       setMessage("已查到原操作成功回执，请刷新相关订单或余额核对最新状态。");

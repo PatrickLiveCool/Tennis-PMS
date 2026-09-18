@@ -1,3 +1,4 @@
+import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
@@ -200,6 +201,8 @@ const messages: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: "该操作编号已用于其他内容，请先核实原操作结果。",
   PHONE_ALREADY_EXISTS: "该手机号已有客户档案，请搜索后选择。",
   INVALID_DATE: "请选择有效日期。",
+  INVALID_TOPUP_QUERY: "充值查询条件无效，请检查状态和每页条数。",
+  INVALID_TOPUP_CURSOR: "充值列表位置已失效，请返回首页重新查询。",
   INVALID_ORDER_QUERY: "订单查询条件无效，请检查关键词、状态、日期或每页条数。",
   INVALID_ORDER_CURSOR: "订单翻页位置已失效，请返回第一页重试。",
   INVALID_HOLD: "保留预约需要未来的付款截止时间和原因。",
@@ -680,6 +683,9 @@ export async function buildTennisServer(options: TennisServerOptions) {
   );
   write("POST", "/topup-quotes/:id/confirm", obj({ commandKey }), (request, input) =>
     beginTopupPayment(db, actor(request), gateway, { ...input, quoteId: params(request).id! }),
+  );
+  get("/venues/:id/customers/:customerId/topups", (request) =>
+    listCustomerTopups(db, actor(request), params(request).id!, params(request).customerId!, request.query),
   );
   get("/topups/:id", (request) => getTopupPayment(db, actor(request), params(request).id!));
   write("POST", "/topups/:id/simulate", simulateBody, async (request, input) => {

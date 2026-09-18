@@ -123,7 +123,13 @@ beforeEach(async () => {
   courtId = court.id;
   customerId = (await createCustomer(db, first.actor, { nickname: "本人客户" })).id;
   otherCustomerId = (await createCustomer(db, first.actor, { nickname: "他人私有客户" })).id;
-  app = await buildTennisServer({ db, gateway, allowSimulation: true, runExpiryWorker: false });
+  app = await buildTennisServer({
+    db,
+    gateway,
+    allowSimulation: true,
+    runExpiryWorker: false,
+    aiEncryptionKey: Buffer.alloc(32, 7),
+  });
   staff = await signIn(await account({ tenantId: first.actor.tenantId, role: "ADMIN" }));
   customer = await signIn(await account({ tenantId: first.actor.tenantId, customerId }));
   foreign = await signIn(await account({ tenantId: second.actor.tenantId, role: "ADMIN" }));
@@ -237,6 +243,47 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
     expect(
       (await request(foreign, "GET", `/customers/${customerId}/wallet?cursor=${firstPage.nextCursor}`)).statusCode,
     ).toBe(404);
+  });
+  it("recovers online topups from a scoped persistent directory without browser drafts", async () => {
+    const quote = await okay(customer, "POST", `/customers/${customerId}/topup-quotes`, {
+      venueId: first.venueId,
+      principalCents: 2300,
+    });
+    const payment = await okay(customer, "POST", `/topup-quotes/${quote.id}/confirm`, { commandKey: key() });
+    const path = `/venues/${first.venueId}/customers/${customerId}/topups`;
+    expect((await okay(customer, "GET", path + "?status=PENDING&pageSize=1")).items).toEqual([
+      expect.objectContaining({ id: payment.id, principalCents: 2300, status: "PENDING" }),
+    ]);
+    expect((await okay(staff, "GET", path)).items[0].id).toBe(payment.id);
+    expect(
+      (await request(customer, "GET", `/venues/${first.venueId}/customers/${otherCustomerId}/topups`)).statusCode,
+    ).toBe(404);
+    expect((await request(foreign, "GET", path)).statusCode).toBe(404);
+    expect((await request(customer, "GET", path + "?status=PENDING&status=FAILED")).statusCode).toBe(400);
+    await okay(customer, "POST", `/topups/${payment.id}/simulate`, { status: "SUCCEEDED" });
+    expect((await okay(customer, "GET", path + "?status=PENDING")).items).toHaveLength(0);
+    expect((await okay(customer, "GET", path + "?status=SUCCEEDED")).items[0].id).toBe(payment.id);
+  });
+  it("persists handoff order context and exposes only scoped conversation directory results", async () => {
+    const order = await booking();
+    const conversation = await okay(customer, "POST", "/assistant/conversations", { venueId: first.venueId });
+    const context = { page: "order", orderId: order.id };
+    await okay(customer, "POST", `/assistant/conversations/${conversation.id}/handoff`, {
+      mode: "HUMAN",
+      reason: "合成订单人工接管",
+      context,
+    });
+    const detail = await okay(staff, "GET", `/assistant/conversations/${conversation.id}`);
+    expect(detail.latestOrderContext).toMatchObject(context);
+    expect(detail.messages.at(-1).context).toEqual(context);
+    const path = `/assistant/conversation-directory?venueId=${first.venueId}&mode=HUMAN&q=${order.id}`;
+    expect((await okay(staff, "GET", path)).items).toEqual([
+      expect.objectContaining({ id: conversation.id, latestOrderId: order.id }),
+    ]);
+    expect((await okay(customer, "GET", path)).items[0].id).toBe(conversation.id);
+    expect((await request(foreign, "GET", path)).statusCode).toBe(404);
+    expect((await request(staff, "GET", path + "&pageSize=0")).statusCode).toBe(400);
+    expect((await request(staff, "GET", path + `&venueId=${first.venueId}`)).statusCode).toBe(400);
   });
   it("requires a server session and validates CSRF, workspace version and origin without leaking identity secrets", async () => {
     const anonymous = await app.inject({ method: "GET", url: "/api/tennis/venues" });

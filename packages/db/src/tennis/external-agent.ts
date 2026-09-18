@@ -28,6 +28,57 @@ export interface Conversation {
   takenBy: string | null;
   updatedAt: Date;
 }
+export interface AssistantContext {
+  page: string;
+  orderId?: string;
+}
+export interface LatestOrderContext {
+  messageId: string;
+  page: string;
+  orderId: string;
+  createdAt: Date;
+}
+/** Context is a reference, never an identity or grant of access. Caller owns the conversation transaction. */
+export async function validateConversationContext(
+  tx: pg.PoolClient,
+  actor: BookingActor,
+  conv: Conversation,
+  input?: AssistantContext,
+): Promise<AssistantContext | null> {
+  if (input === undefined) return null;
+  if (
+    !input ||
+    typeof input !== "object" ||
+    Array.isArray(input) ||
+    Object.keys(input).some((key) => key !== "page" && key !== "orderId") ||
+    typeof input.page !== "string" ||
+    input.page.length > 100 ||
+    (input.orderId !== undefined &&
+      (typeof input.orderId !== "string" || !input.orderId.trim() || input.orderId.length > 200))
+  )
+    throw new AgentAccessError("INVALID_AGENT_MESSAGE");
+  if (conv.tenantId !== actor.tenantId) throw new TenantAccessError("RESOURCE_NOT_FOUND");
+  const context: AssistantContext = {
+    page: input.page.trim(),
+    ...(input.orderId === undefined ? {} : { orderId: input.orderId.trim() }),
+  };
+  if (context.orderId) {
+    const order = (
+      await tx.query<{ customer_id: string; venue_id: string }>(
+        "SELECT customer_id,venue_id FROM tennis.orders WHERE tenant_id=$1 AND id=$2",
+        [actor.tenantId, context.orderId],
+      )
+    ).rows[0];
+    if (
+      !order ||
+      order.venue_id !== conv.venueId ||
+      (isCustomerActor(actor) && order.customer_id !== actor.customerId) ||
+      (conv.actorKind === "customer" && order.customer_id !== conv.customerId)
+    )
+      throw new TenantAccessError("RESOURCE_NOT_FOUND");
+  }
+  return context;
+}
 const conversationColumns = `id,tenant_id AS "tenantId",venue_id AS "venueId",subject_id AS "subjectId",customer_id AS "customerId",actor_kind AS "actorKind",mode,generation,taken_by AS "takenBy",updated_at AS "updatedAt"`;
 const configColumns = `enabled,model,base_url AS "baseUrl",external_agent_url AS "externalAgentUrl",encrypted_key AS "encryptedKey",(encrypted_key IS NOT NULL) AS "hasApiKey",revision`;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -201,6 +252,124 @@ export async function listConversations(db: pg.Pool, actor: BookingActor, venueI
     ).rows;
   });
 }
+export interface ConversationSummary extends Conversation {
+  displayName: string;
+  latestOrderId: string | null;
+}
+export interface ConversationPage {
+  items: ConversationSummary[];
+  nextCursor: string | null;
+}
+export class ConversationQueryError extends Error {
+  readonly statusCode = 400;
+  constructor(
+    readonly code: "INVALID_CONVERSATION_QUERY" | "INVALID_CONVERSATION_CURSOR" = "INVALID_CONVERSATION_QUERY",
+  ) {
+    super(code);
+    this.name = "ConversationQueryError";
+  }
+}
+/** A live inbox uses the original timestamp boundary, never a later reread of the pivot conversation. */
+export async function listConversationPage(
+  db: pg.Pool,
+  actor: BookingActor,
+  venueId: string,
+  input: unknown = {},
+): Promise<ConversationPage> {
+  if (typeof venueId !== "string" || !venueId.trim() || venueId.length > 200) throw new ConversationQueryError();
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ConversationQueryError();
+  const query = input as Record<string, unknown>;
+  if (
+    Object.keys(query).some((k) => !["mode", "q", "cursor", "pageSize"].includes(k)) ||
+    (query.mode !== undefined && query.mode !== "AGENT" && query.mode !== "HUMAN") ||
+    (query.q !== undefined && (typeof query.q !== "string" || query.q.length > 200)) ||
+    (query.pageSize !== undefined &&
+      typeof query.pageSize !== "number" &&
+      !(typeof query.pageSize === "string" && /^[1-9]\d*$/.test(query.pageSize)))
+  )
+    throw new ConversationQueryError();
+  const pageSize = query.pageSize === undefined ? 20 : Number(query.pageSize);
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ConversationQueryError();
+  const mode = query.mode as "AGENT" | "HUMAN" | undefined;
+  const q = (typeof query.q === "string" ? query.q : "").trim();
+  const scope = hash(
+    JSON.stringify([
+      actor.tenantId,
+      actor.subjectId,
+      isCustomerActor(actor) ? actor.customerId : null,
+      venueId,
+      mode ?? null,
+      q,
+    ]),
+  );
+  let pivot: { at: string; id: string } | null = null;
+  if (query.cursor !== undefined) {
+    if (typeof query.cursor !== "string" || query.cursor.length > 2000 || !/^[A-Za-z0-9_-]+$/.test(query.cursor))
+      throw new ConversationQueryError("INVALID_CONVERSATION_CURSOR");
+    try {
+      const value: unknown = JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8"));
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+      const cursor = value as Record<string, unknown>;
+      if (
+        Object.keys(cursor).sort().join(",") !== "at,id,scope,v" ||
+        cursor.v !== 1 ||
+        cursor.scope !== scope ||
+        typeof cursor.at !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(cursor.at) ||
+        !Number.isFinite(Date.parse(cursor.at)) ||
+        new Date(cursor.at).toISOString().slice(0, 19) !== cursor.at.slice(0, 19) ||
+        typeof cursor.id !== "string" ||
+        !cursor.id ||
+        cursor.id.length > 200
+      )
+        throw new Error();
+      pivot = { at: cursor.at, id: cursor.id };
+    } catch {
+      throw new ConversationQueryError("INVALID_CONVERSATION_CURSOR");
+    }
+  }
+  return withBookingTransaction(db, actor, async (tx) => {
+    await requireBookingVenue(tx, actor, venueId, isCustomerActor(actor) ? "read" : "book");
+    const rows = (
+      await tx.query<ConversationSummary & { cursorAt: string }>(
+        `SELECT c.id,c.tenant_id AS "tenantId",c.venue_id AS "venueId",c.subject_id AS "subjectId",c.customer_id AS "customerId",
+        c.actor_kind AS "actorKind",c.mode,c.generation,c.taken_by AS "takenBy",c.updated_at AS "updatedAt",
+        coalesce(customer.nickname,s.display_name) AS "displayName",
+        (SELECT context_order_id FROM tennis.agent_messages WHERE tenant_id=c.tenant_id AND conversation_id=c.id
+          AND context_order_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1) AS "latestOrderId",
+        to_char(c.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorAt"
+      FROM tennis.agent_conversations c JOIN tennis.subjects s ON s.id=c.subject_id
+      LEFT JOIN tennis.customers customer ON customer.tenant_id=c.tenant_id AND customer.id=c.customer_id
+      WHERE c.tenant_id=$1 AND c.venue_id=$2 AND ($3::text IS NULL OR (c.customer_id=$3 AND c.subject_id=$4))
+        AND ($5::text IS NULL OR c.mode=$5)
+        AND ($6='' OR strpos(lower(coalesce(customer.nickname,s.display_name)),lower($6))>0 OR strpos(lower(c.id),lower($6))>0
+          OR EXISTS(SELECT 1 FROM tennis.agent_messages m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.id AND strpos(lower(m.context_order_id),lower($6))>0))
+        AND ($7::timestamptz IS NULL OR (c.updated_at,c.id)<($7::timestamptz,$8::text))
+      ORDER BY c.updated_at DESC,c.id DESC LIMIT $9`,
+        [
+          actor.tenantId,
+          venueId,
+          isCustomerActor(actor) ? actor.customerId : null,
+          actor.subjectId,
+          mode ?? null,
+          q,
+          pivot?.at ?? null,
+          pivot?.id ?? null,
+          pageSize + 1,
+        ],
+      )
+    ).rows;
+    const page = rows.slice(0, pageSize);
+    const last = page.at(-1);
+    return {
+      items: page.map(({ cursorAt: _cursorAt, ...item }) => item),
+      nextCursor:
+        rows.length > pageSize && last
+          ? Buffer.from(JSON.stringify({ v: 1, scope, at: last.cursorAt, id: last.id })).toString("base64url")
+          : null,
+    };
+  });
+}
 export interface AssistantMessageFeedback {
   conversationId: string;
   messageId: string;
@@ -211,15 +380,32 @@ export async function getConversation(db: pg.Pool, actor: BookingActor, id: stri
   return withBookingTransaction(db, actor, async (tx) => {
     const item = await conversation(tx, actor, id);
     const messages = (
-      await tx.query<{ id: string; role: string; content: string; createdAt: Date; feedback: boolean | null }>(
-        `SELECT m.id,m.role,m.content,m.created_at AS "createdAt",f.resolved AS feedback
+      await tx.query<{
+        id: string;
+        role: string;
+        content: string;
+        createdAt: Date;
+        feedback: boolean | null;
+        context: AssistantContext | null;
+      }>(
+        `SELECT m.id,m.role,m.content,m.created_at AS "createdAt",f.resolved AS feedback,
+        CASE WHEN m.context_page IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('page',m.context_page,'orderId',m.context_order_id)) END AS context
       FROM (SELECT * FROM tennis.agent_messages WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY created_at DESC,id DESC LIMIT 200) m
       LEFT JOIN tennis.agent_message_feedback f ON f.tenant_id=m.tenant_id AND f.conversation_id=m.conversation_id AND f.message_id=m.id AND f.subject_id=$3
       ORDER BY m.created_at,m.id`,
         [actor.tenantId, id, actor.subjectId],
       )
     ).rows;
-    return { conversation: item, messages };
+    const latestOrderContext =
+      (
+        await tx.query<LatestOrderContext>(
+          `SELECT id AS "messageId",context_page AS page,context_order_id AS "orderId",created_at AS "createdAt"
+        FROM tennis.agent_messages WHERE tenant_id=$1 AND conversation_id=$2 AND context_order_id IS NOT NULL
+        ORDER BY created_at DESC,id DESC LIMIT 1`,
+          [actor.tenantId, id],
+        )
+      ).rows[0] ?? null;
+    return { conversation: item, messages, latestOrderContext };
   });
 }
 export interface AgentRequestSummary {
@@ -405,12 +591,13 @@ export async function handoffConversation(
   db: pg.Pool,
   actor: BookingActor,
   id: string,
-  input: { mode: "AGENT" | "HUMAN"; reason: string },
+  input: { mode: "AGENT" | "HUMAN"; reason: string; context?: AssistantContext },
 ): Promise<Conversation> {
   if (!input.reason.trim() || input.reason.length > 2000) throw new AgentAccessError("INVALID_AGENT_MESSAGE");
   if (isCustomerActor(actor) && input.mode !== "HUMAN") throw new TenantAccessError("TENANT_ACCESS_DENIED");
   return withBookingTransaction(db, actor, async (tx) => {
-    await conversation(tx, actor, id);
+    const existing = await conversation(tx, actor, id);
+    const context = await validateConversationContext(tx, actor, existing, input.context);
     const row = (
       await tx.query<Conversation>(
         `UPDATE tennis.agent_conversations SET mode=$3,generation=generation+1,taken_by=$4,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 RETURNING ${conversationColumns}`,
@@ -422,13 +609,15 @@ export async function handoffConversation(
       id,
     ]);
     await tx.query(
-      `INSERT INTO tennis.agent_messages(id,tenant_id,conversation_id,role,subject_id,content) VALUES($1,$2,$3,'system',$4,$5)`,
+      `INSERT INTO tennis.agent_messages(id,tenant_id,conversation_id,role,subject_id,content,context_page,context_order_id) VALUES($1,$2,$3,'system',$4,$5,$6,$7)`,
       [
         randomUUID(),
         actor.tenantId,
         id,
         actor.subjectId,
         `${input.mode === "HUMAN" ? "转人工处理" : "恢复智能体协作"}：${input.reason.trim()}`,
+        context?.page ?? null,
+        context?.orderId ?? null,
       ],
     );
     await recordTenantAudit(tx, actor, "agent.handoff", id, {
@@ -488,9 +677,10 @@ export async function issueDelegationInTransaction(
   // Anchor queued requests to their own message. Later user instructions must not
   // become the context of an earlier request, even with more than 200 queued messages.
   const messages = (
-    await tx.query<{ id: string; role: string; content: string; createdAt: Date }>(
+    await tx.query<{ id: string; role: string; content: string; createdAt: Date; context: AssistantContext | null }>(
       `
-    SELECT id,role,content,created_at AS "createdAt" FROM (
+    SELECT id,role,content,created_at AS "createdAt",
+      CASE WHEN context_page IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('page',context_page,'orderId',context_order_id)) END AS context FROM (
       SELECT * FROM tennis.agent_messages WHERE tenant_id=$1 AND conversation_id=$2
       AND ($3::text IS NULL OR (created_at,id)<=(SELECT created_at,id FROM tennis.agent_messages
         WHERE tenant_id=$1 AND conversation_id=$2 AND id=$3))
@@ -499,12 +689,13 @@ export async function issueDelegationInTransaction(
       [actor.tenantId, id, messageId ?? null],
     )
   ).rows;
-  return { token, expiresAt, conversation: row, messages, requestId };
+  const context = messageId ? (messages.find((message) => message.id === messageId)?.context ?? null) : null;
+  return { token, expiresAt, conversation: row, messages, requestId, context };
 }
 export async function resolveDelegation(
   db: pg.Pool,
   token: string,
-): Promise<{ actor: BookingActor; conversation: Conversation; requestId: string }> {
+): Promise<{ actor: BookingActor; conversation: Conversation; requestId: string; context: AssistantContext | null }> {
   if (!/^[a-zA-Z0-9_-]{43}$/.test(token)) throw new AgentAccessError("AGENT_DELEGATION_REVOKED");
   const row = (
     await db.query<Conversation & { requestId: string }>(
@@ -524,9 +715,21 @@ export async function resolveDelegation(
     venueId: row.venueId,
     generation: row.generation,
   });
-  await withBookingTransaction(db, actor, async (tx) => requireBookingVenue(tx, actor, row.venueId, "read"));
+  const context = await withBookingTransaction(db, actor, async (tx) => {
+    await requireBookingVenue(tx, actor, row.venueId, "read");
+    return (
+      (
+        await tx.query<{ context: AssistantContext | null }>(
+          `SELECT CASE WHEN m.context_page IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('page',m.context_page,'orderId',m.context_order_id)) END AS context
+        FROM tennis.agent_requests r LEFT JOIN tennis.agent_messages m ON m.tenant_id=r.tenant_id AND m.id=r.message_id
+        WHERE r.tenant_id=$1 AND r.conversation_id=$2 AND r.id=$3`,
+          [actor.tenantId, row.id, row.requestId],
+        )
+      ).rows[0]?.context ?? null
+    );
+  });
   const { requestId, ...item } = row;
-  return { actor, conversation: item, requestId };
+  return { actor, conversation: item, requestId, context };
 }
 export interface AgentTransport {
   (
@@ -539,7 +742,7 @@ export async function sendAssistantMessage(
   actor: BookingActor,
   key: Buffer,
   id: string,
-  input: { messageId: string; content: string; context?: { page: string; orderId?: string } },
+  input: { messageId: string; content: string; context?: AssistantContext },
   transport: AgentTransport = async (url, input) => fetch(url, { method: "POST", ...input, redirect: "error" }),
 ) {
   if (!input.content.trim() || input.content.length > 8000 || !input.messageId || input.messageId.length > 128)
@@ -548,34 +751,31 @@ export async function sendAssistantMessage(
     const conv = await conversation(tx, actor, id);
     if (conv.mode === "AGENT" && conv.subjectId !== actor.subjectId)
       throw new TenantAccessError("TENANT_ACCESS_DENIED");
-    if (input.context?.orderId) {
-      const order = (
-        await tx.query<{ customer_id: string; venue_id: string }>(
-          "SELECT customer_id,venue_id FROM tennis.orders WHERE tenant_id=$1 AND id=$2",
-          [actor.tenantId, input.context.orderId],
-        )
-      ).rows[0];
-      if (
-        !order ||
-        order.venue_id !== conv.venueId ||
-        (isCustomerActor(actor) && order.customer_id !== actor.customerId)
-      )
-        throw new TenantAccessError("RESOURCE_NOT_FOUND");
-    }
+    const context = await validateConversationContext(tx, actor, conv, input.context);
     const found = (
-      await tx.query<{ content: string; subject_id: string; conversation_id: string }>(
-        "SELECT content,subject_id,conversation_id FROM tennis.agent_messages WHERE id=$1",
+      await tx.query<{
+        content: string;
+        subject_id: string;
+        conversation_id: string;
+        context_page: string | null;
+        context_order_id: string | null;
+      }>(
+        "SELECT content,subject_id,conversation_id,context_page,context_order_id FROM tennis.agent_messages WHERE id=$1",
         [input.messageId],
       )
     ).rows[0];
     if (
       found &&
-      (found.subject_id !== actor.subjectId || found.conversation_id !== id || found.content !== input.content.trim())
+      (found.subject_id !== actor.subjectId ||
+        found.conversation_id !== id ||
+        found.content !== input.content.trim() ||
+        found.context_page !== (context?.page ?? null) ||
+        found.context_order_id !== (context?.orderId ?? null))
     )
       throw new AgentAccessError("INVALID_AGENT_MESSAGE");
     if (!found)
       await tx.query(
-        "INSERT INTO tennis.agent_messages(id,tenant_id,conversation_id,role,subject_id,content) VALUES($1,$2,$3,$4,$5,$6)",
+        "INSERT INTO tennis.agent_messages(id,tenant_id,conversation_id,role,subject_id,content,context_page,context_order_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
         [
           input.messageId,
           actor.tenantId,
@@ -583,6 +783,8 @@ export async function sendAssistantMessage(
           conv.mode === "HUMAN" && !isCustomerActor(actor) ? "staff" : "user",
           actor.subjectId,
           input.content.trim(),
+          context?.page ?? null,
+          context?.orderId ?? null,
         ],
       );
     const answered =
@@ -621,7 +823,7 @@ export async function sendAssistantMessage(
         generation: delegation.conversation.generation,
         model: config.model,
         baseUrl: config.baseUrl,
-        context: input.context ?? {},
+        context: delegation.context ?? {},
         workspace: {
           tenantId: actor.tenantId,
           venueId: delegation.conversation.venueId,

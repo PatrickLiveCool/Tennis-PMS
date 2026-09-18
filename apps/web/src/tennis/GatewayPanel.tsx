@@ -33,12 +33,12 @@ interface GatewayBinding {
   reason: string;
   createdAt: string;
 }
-interface BindingTarget {
-  subjectId: string;
-  actorKind: "staff" | "customer";
-  name: string;
-  customerId: string | null;
-}
+type BindingTarget =
+  | { actorKind: "staff"; subjectId: string; customerId: null; name: string }
+  | { actorKind: "customer"; subjectId: string | null; customerId: string; name: string };
+const targetKey = (target: BindingTarget) =>
+  target.actorKind === "customer" ? `customer:${target.customerId}` : `staff:${target.subjectId}`;
+const targetId = (target: BindingTarget) => (target.actorKind === "customer" ? target.customerId : target.subjectId);
 interface BindingList {
   integrations: GatewayIntegration[];
   bindings: GatewayBinding[];
@@ -389,8 +389,9 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
     const payload = {
       integrationId: draft.integrationId,
       externalSubjectId: draft.externalSubjectId.trim(),
-      subjectId: draft.target.subjectId,
-      actorKind: draft.target.actorKind,
+      ...(draft.target.actorKind === "customer"
+        ? { actorKind: "customer" as const, customerId: draft.target.customerId }
+        : { actorKind: "staff" as const, subjectId: draft.target.subjectId }),
       reason: draft.reason.trim(),
     };
     const result = await mutation.run<GatewayBinding>(
@@ -424,7 +425,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
       action={<RefreshButton busy={list.busy || mutation.busy} onClick={() => void list.refresh()} />}
     >
       <p className="tennis-muted">
-        仅租户管理员办理。先人工核对渠道账号与客户或员工本人身份，再选择已有的 PMS 身份；手机号不会自动建立绑定。
+        仅租户管理员办理。先人工核对渠道账号与本人身份，再选择已有客户档案或员工身份；新客户可先在会员页面建档，手机号不会自动建立绑定。
       </p>
       <ErrorNotice error={list.error ?? mutation.error} retry={() => void list.refresh()} />
       <PendingGateway mutation={mutation} refresh={list.refresh} />
@@ -473,11 +474,11 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
             />
           </label>
           <label>
-            查找 PMS 客户或员工
+            查找客户档案或员工身份
             <input
               value={search}
               disabled={disabled}
-              placeholder="输入姓名查询已有身份"
+              placeholder="输入姓名查询已有档案或员工"
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
@@ -485,25 +486,30 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
           {draft.target && (
             <p className="tennis-note">
               已选：{draft.target.name} · {draft.target.actorKind === "staff" ? "员工" : "客户"}
-              <small> 身份编号 {draft.target.subjectId}</small>
+              <small>
+                {" "}
+                {draft.target.actorKind === "customer" ? "客户档案编号" : "员工身份编号"} {targetId(draft.target)}
+              </small>
             </p>
           )}
           <div className="tennis-customer-results">
             {targets.data?.map((target) => (
-              <label className="tennis-check" key={`${target.subjectId}:${target.actorKind}`}>
+              <label className="tennis-check" key={targetKey(target)}>
                 <input
                   type="radio"
                   name="gateway-target"
                   disabled={disabled}
-                  checked={draft.target?.subjectId === target.subjectId && draft.target.actorKind === target.actorKind}
+                  checked={Boolean(draft.target && targetKey(draft.target) === targetKey(target))}
                   onChange={() => setDraft({ ...draft, target })}
                 />
                 {target.name} · {target.actorKind === "staff" ? "员工" : "客户"}
-                <small> {target.subjectId.slice(0, 8)}</small>
+                <small> {targetId(target).slice(0, 8)}</small>
               </label>
             ))}
             {targets.data?.length === 0 && (
-              <p className="tennis-muted">未找到已关联登录身份的客户或员工。请先核实档案与本人身份，再办理绑定。</p>
+              <p className="tennis-muted">
+                未找到匹配的客户档案或员工。新客户可先在会员页面建档，再核验本人身份并绑定。
+              </p>
             )}
           </div>
           <label>
@@ -540,7 +546,11 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
         list.data.bindings.map((binding) => {
           const integration = integrations.find((item) => item.id === binding.integrationId);
           const target = targets.data?.find(
-            (item) => item.subjectId === binding.subjectId && item.actorKind === binding.actorKind,
+            (item) =>
+              item.actorKind === binding.actorKind &&
+              (item.actorKind === "customer"
+                ? item.customerId === binding.customerId
+                : item.subjectId === binding.subjectId),
           );
           return (
             <div className="tennis-ledger-row" key={binding.id}>

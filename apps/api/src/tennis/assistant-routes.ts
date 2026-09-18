@@ -11,6 +11,7 @@ import {
   listConversationRequests,
   handoffConversation,
   listConversations,
+  listConversationPage,
   resolveDelegation,
   saveAIConfig,
   sendAssistantMessage,
@@ -87,6 +88,10 @@ export function registerAssistantRoutes(
   app.get(base + "/assistant/conversations", (request) =>
     listConversations(db, input.actor(request), query(request).venueId ?? ""),
   );
+  app.get(base + "/assistant/conversation-directory", (request) => {
+    const { venueId = "", ...filters } = query(request);
+    return listConversationPage(db, input.actor(request), venueId, filters);
+  });
   post("/assistant/conversations", obj({ venueId: id }), (request, body) =>
     createConversation(db, input.actor(request), body.venueId),
   );
@@ -106,7 +111,11 @@ export function registerAssistantRoutes(
   );
   post(
     "/assistant/conversations/:id/handoff",
-    obj({ mode: Type.Union([Type.Literal("AGENT"), Type.Literal("HUMAN")]), reason }),
+    obj({
+      mode: Type.Union([Type.Literal("AGENT"), Type.Literal("HUMAN")]),
+      reason,
+      context: Type.Optional(obj({ page: Type.String({ maxLength: 100 }), orderId: Type.Optional(id) })),
+    }),
     (request, body) => handoffConversation(db, input.actor(request), param(request), body),
   );
   post(
@@ -163,6 +172,7 @@ export function registerAssistantRoutes(
     customerId: principal(request).conversation.customerId,
     actorKind: principal(request).conversation.actorKind,
     mode: principal(request).conversation.mode,
+    context: principal(request).context,
   }));
   const discoveryQuery = obj({
     startAt: Type.String({ minLength: 17, maxLength: 40 }),

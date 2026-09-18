@@ -59,13 +59,11 @@ export function registerGatewayRoutes(
   app.get(base + "/gateway-binding-targets", (r) => gatewayBindingTargets(db, input.actor(r), query(r).q ?? ""));
   post(
     "/gateway-bindings",
-    obj({
-      integrationId: id,
-      externalSubjectId: id,
-      subjectId: id,
-      actorKind: Type.Union([Type.Literal("staff"), Type.Literal("customer")]),
-      reason,
-    }),
+    Type.Union([
+      obj({ integrationId: id, externalSubjectId: id, actorKind: Type.Literal("staff"), subjectId: id, reason }),
+      obj({ integrationId: id, externalSubjectId: id, actorKind: Type.Literal("customer"), customerId: id, reason }),
+      obj({ integrationId: id, externalSubjectId: id, actorKind: Type.Literal("customer"), subjectId: id, reason }),
+    ]),
     (r, b) => createGatewayBinding(db, input.actor(r), b),
   );
   post("/gateway-bindings/:id/revoke", obj({ reason }), (r, b) =>
@@ -96,6 +94,7 @@ export function registerGatewayRoutes(
       externalMessageId: id,
       venueId: id,
       content: Type.String({ minLength: 1, maxLength: 8000 }),
+      context: Type.Optional(obj({ page: Type.String({ maxLength: 100 }), orderId: Type.Optional(id) })),
     }),
     (r, b) => receiveGatewayMessage(db, p(r), b),
   );
@@ -124,10 +123,18 @@ export function registerGatewayRoutes(
     await requireGatewayConversation(db, p(r), params(r).id!);
     return getConversationRequest(db, p(r).actor, params(r).id!, params(r).requestId!);
   });
-  gatewayPost("/conversations/:id/handoff", obj({ reason }), async (r, b) => {
-    await requireGatewayConversation(db, p(r), params(r).id!);
-    return handoffConversation(db, p(r).actor, params(r).id!, { mode: "HUMAN", reason: b.reason });
-  });
+  gatewayPost(
+    "/conversations/:id/handoff",
+    obj({ reason, context: Type.Optional(obj({ page: Type.String({ maxLength: 100 }), orderId: Type.Optional(id) })) }),
+    async (r, b) => {
+      await requireGatewayConversation(db, p(r), params(r).id!);
+      return handoffConversation(db, p(r).actor, params(r).id!, {
+        mode: "HUMAN",
+        reason: b.reason,
+        ...(b.context ? { context: b.context } : {}),
+      });
+    },
+  );
   app.get(base + "/gateway/events", { onRequest: auth }, (r) =>
     pollBusinessEvents(db, p(r).actor, query(r).venueId ?? "", {
       ...(query(r).cursor === undefined ? {} : { cursor: query(r).cursor }),

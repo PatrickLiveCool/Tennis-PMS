@@ -190,7 +190,17 @@ describe("external assistant adapter and human handoff", () => {
       transport,
     );
     expect(result.messages.map((message) => message.content)).toEqual(["明天晚上有哪些场地？", "外部测试服务回复"]);
-    await sendAssistantMessage(db, customer, key, conv.id, { messageId, content: "明天晚上有哪些场地？" }, transport);
+    await expect(
+      sendAssistantMessage(db, customer, key, conv.id, { messageId, content: "明天晚上有哪些场地？" }, transport),
+    ).rejects.toMatchObject({ code: "INVALID_AGENT_MESSAGE" });
+    await sendAssistantMessage(
+      db,
+      customer,
+      key,
+      conv.id,
+      { messageId, content: "明天晚上有哪些场地？", context: { page: "schedule" } },
+      transport,
+    );
     expect(count).toBe(1);
     expect(
       (await db.query("SELECT * FROM tennis.agent_delegations WHERE tenant_id=$1", [first.actor.tenantId])).rowCount,

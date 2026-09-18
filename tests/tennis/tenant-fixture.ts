@@ -54,6 +54,7 @@ export async function removeTenantFixture(db: pg.Pool, fixture: TenantFixture): 
       "gateway_integrations",
       "agent_command_links",
       "agent_requests",
+      "agent_conversations",
       "command_receipts",
       "audit_events",
       "topup_events",

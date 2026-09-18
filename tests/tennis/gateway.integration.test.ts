@@ -145,6 +145,80 @@ afterEach(async () => {
 });
 afterAll(() => db.end());
 describe("trusted gateway boundary and recoverable delivery", () => {
+  it("anchors persisted order context to the original message and rejects changed-context retries", async () => {
+    const quote = await createQuote(db, customer, selection());
+    const order = await confirmQuote(db, customer, { quoteId: quote.id, commandKey: randomUUID() });
+    const input = { ...incoming(), context: { page: "order", orderId: order.id } };
+    const received = await receiveGatewayMessage(db, principal, input);
+    expect((await receiveGatewayMessage(db, principal, input)).duplicate).toBe(true);
+    await expect(
+      receiveGatewayMessage(db, principal, { ...input, context: { page: "different", orderId: order.id } }),
+    ).rejects.toMatchObject({ code: "GATEWAY_MESSAGE_CONFLICT" });
+    await expect(
+      receiveGatewayMessage(db, principal, {
+        ...incoming({ externalMessageId: "foreign-context" }),
+        context: { page: "order", orderId: randomUUID() },
+      }),
+    ).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
+    await receiveGatewayMessage(db, principal, {
+      ...incoming({ externalMessageId: "later-page", content: "新的问题" }),
+      context: { page: "wallet" },
+    });
+    const granted = await grantGatewayMessage(
+      db,
+      principal,
+      encryptionKey,
+      received.conversation.id,
+      received.messageId,
+      received.conversation.generation,
+    );
+    expect(granted.context).toEqual(input.context);
+    expect(granted.messages.at(-1)).toMatchObject({ id: received.messageId, context: input.context });
+    expect((await resolveDelegation(db, granted.token)).context).toEqual(input.context);
+    const replay = await grantGatewayMessage(
+      db,
+      principal,
+      encryptionKey,
+      received.conversation.id,
+      received.messageId,
+      received.conversation.generation,
+    );
+    expect(replay).toMatchObject({
+      token: granted.token,
+      expiresAt: granted.expiresAt,
+      context: input.context,
+      replayed: true,
+    });
+    const detail = await getConversation(db, first.actor, received.conversation.id);
+    expect(detail.latestOrderContext?.orderId).toBe(order.id);
+  });
+  it("persists HUMAN gateway order messages without granting new agent authority", async () => {
+    const quote = await createQuote(db, customer, selection());
+    const order = await confirmQuote(db, customer, { quoteId: quote.id, commandKey: randomUUID() });
+    const received = await receiveGatewayMessage(db, principal, incoming());
+    await handoffConversation(db, principal.actor, received.conversation.id, {
+      mode: "HUMAN",
+      reason: "合成接管",
+      context: { page: "order", orderId: order.id },
+    });
+    const human = await receiveGatewayMessage(db, principal, {
+      ...incoming({ externalMessageId: "human-message", content: "这单需要员工帮助" }),
+      context: { page: "order", orderId: order.id },
+    });
+    expect(human.conversation.mode).toBe("HUMAN");
+    const detail = await getConversation(db, first.actor, received.conversation.id);
+    expect(detail.messages.at(-1)).toMatchObject({ context: { page: "order", orderId: order.id } });
+    await expect(
+      grantGatewayMessage(
+        db,
+        principal,
+        encryptionKey,
+        human.conversation.id,
+        human.messageId,
+        human.conversation.generation,
+      ),
+    ).rejects.toMatchObject({ code: "GATEWAY_SCOPE_CHANGED" });
+  });
   it("allows only platform provisioning and tenant admins binding existing identities", async () => {
     await expect(
       createGatewayIntegration(db, second.actor.subjectId, { tenantId: first.actor.tenantId, name: "rogue" }),
@@ -425,9 +499,7 @@ describe("trusted gateway boundary and recoverable delivery", () => {
       expect(detail.json().commands).toEqual([
         expect.objectContaining({
           commandKey,
-          resources: expect.arrayContaining([
-            expect.objectContaining({ type: "order", id: order.id, status: "HELD" }),
-          ]),
+          resources: expect.arrayContaining([expect.objectContaining({ type: "order", id: order.id, status: "HELD" })]),
         }),
       ]);
       expect(await listOrders(db, first.actor, first.venueId)).toHaveLength(1);

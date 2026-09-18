@@ -22,6 +22,7 @@ import { PlatformPage } from "./PlatformPage";
 import { SettingsPage, NewVenue } from "./SettingsPage";
 import { AssistantPanel } from "./AssistantPanel";
 import { MembersPage } from "./MembersPage";
+import { TopupRecordDialog } from "./TopupHistoryPanel";
 import {
   Badge,
   dateTime,
@@ -358,7 +359,7 @@ function Workspace({
               api={api}
               session={session}
               venue={venue}
-              scope={`${identityScope}:${venue.id}`}
+              scope={`${identityScope}:${session.contextVersion}:${venue.id}`}
               page={currentPage}
               onVenueChange={() => void venues.refresh()}
             />
@@ -372,7 +373,7 @@ function Workspace({
                 api={api}
                 session={session}
                 venue={venue}
-                scope={`${identityScope}:${venue.id}`}
+                scope={`${identityScope}:${session.contextVersion}:${venue.id}`}
                 context={{ page: currentPage }}
                 onClose={() => setAssistantOpen(false)}
               />
@@ -410,20 +411,72 @@ function BusinessWorkspace({
   onVenueChange: () => void;
 }) {
   useLayoutEffect(() => {
-    let top = 0;
+    const key = `tennis:scroll:${scope}:${page}`;
+    let saved = 0;
     try {
-      top = Number(sessionStorage.getItem(`tennis:scroll:${scope}:${page}`) ?? "0");
+      const value = Number(sessionStorage.getItem(key) ?? "0");
+      if (Number.isFinite(value) && value >= 0) saved = value;
     } catch {
-      /* optional */
+      /* position is optional */
     }
-    window.scrollTo({ top, behavior: "instant" });
-    return () => writeStored(`tennis:scroll:${scope}:${page}`, window.scrollY);
+    const main = document.getElementById("tennis-main");
+    let waiting = true;
+    let lastTop = saved;
+    let frame = 0;
+    const restore = () => {
+      if (!waiting) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!waiting || !main || [...main.querySelectorAll(".loading-block")].some((item) => !item.closest("dialog")))
+          return;
+        window.scrollTo({ top: saved, behavior: "instant" });
+        lastTop = window.scrollY;
+        waiting = false;
+      });
+    };
+    const capture = () => {
+      if (!waiting) lastTop = window.scrollY;
+    };
+    const stopRestoring = (event: Event) => {
+      if (
+        event instanceof KeyboardEvent &&
+        !["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)
+      )
+        return;
+      if (event.target instanceof Element && event.target.closest("dialog, input, textarea, select")) return;
+      waiting = false;
+      lastTop = window.scrollY;
+      cancelAnimationFrame(frame);
+    };
+    // The first render may contain only loaders. Restore after real page content is mounted.
+    const mutations = new MutationObserver(restore);
+    const dimensions = new ResizeObserver(restore);
+    if (main) {
+      mutations.observe(main, { childList: true, subtree: true });
+      dimensions.observe(main);
+    }
+    window.addEventListener("scroll", capture, { passive: true });
+    window.addEventListener("wheel", stopRestoring, { passive: true });
+    window.addEventListener("touchmove", stopRestoring, { passive: true });
+    window.addEventListener("keydown", stopRestoring);
+    restore();
+    return () => {
+      mutations.disconnect();
+      dimensions.disconnect();
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", capture);
+      window.removeEventListener("wheel", stopRestoring);
+      window.removeEventListener("touchmove", stopRestoring);
+      window.removeEventListener("keydown", stopRestoring);
+      writeStored(key, lastTop);
+    };
   }, [scope, page]);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [topupId, setTopupId] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   return (
     <>
-      <RecoveryNotice scope={scope} api={api} openOrder={setOrderId} />
+      <RecoveryNotice scope={scope} api={api} openOrder={setOrderId} openTopup={setTopupId} />
       {page === "booking" ? (
         <BookingPage
           key={`booking:${revision}`}
@@ -447,6 +500,18 @@ function BusinessWorkspace({
           venue={venue}
           scope={scope}
           openOrder={setOrderId}
+        />
+      )}
+      {topupId && (
+        <TopupRecordDialog
+          key={topupId}
+          api={api}
+          session={session}
+          venue={venue}
+          scope={scope}
+          topupId={topupId}
+          onClose={() => setTopupId(null)}
+          onChanged={() => setRevision((value) => value + 1)}
         />
       )}
       {orderId && (
