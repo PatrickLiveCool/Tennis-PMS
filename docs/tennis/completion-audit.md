@@ -99,6 +99,8 @@
 
 F13 新增 [微信 API v3 共用安全层](wechatpay-v3-security.md)：请求签名、响应验签、通知验签/解密已有实现；未发送 HTTP、未接入资金事实映射、未启用真实 provider。它推进实际支付适配的共用部分，不改变下面真实产品及商户联调尚未完成的判定。F13 验证结果以实施状态为准，F11/F12 记录仍分别保留原范围。
 
+F14 进一步实现共用 HTTP 请求层：全响应 deadline、流式限制、原始字节与签名核对、断连/超时 UNKNOWN 已有代码。验证只使用本地回环服务和合成密钥，尚未接入微信目标、真实商户或资金事实映射；不改变真实产品及渠道验收缺失的判定。结果见实施状态与 F14 日志。
+
 F12 只读配置核对显示：AI `enabled=false`，模型、Base URL、Runtime端点及密钥均未配置；商户记录只有MOCK共2个版本。见 [外部配置状态](/private/tmp/tennis-f12-external-state.json)。此证据未输出凭据。F12浏览器、DB与构建证据已汇总保存于 [总项目验证日志](</Users/feather/Documents/Codex project/Tennis/outputs/Tennis-PMS-F12-verification.log>)。
 
 1. **真实支付adapter仍需开发及验证。** 当前 `CheckoutAction` 仅有 `LOCAL_SIMULATION`，本地启动器只实例化MOCK；WECHAT配置不是可用的微信付款。需要确定租户商户及支付产品，接入真实发起、付款人/交易事实、签名回调、主动查单、原交易退款和渠道异常核对，证明款进入正确租户账户。
