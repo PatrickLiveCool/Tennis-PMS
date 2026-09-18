@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TennisApi } from "./api";
+import { CashExceptionDialog } from "./CashExceptionDialog";
 import {
   Badge,
   dateTime,
@@ -48,6 +49,7 @@ const entryNames: Record<string, string> = {
   ORDER_RECEIPT: "订单外部实收",
   WALLET_CONSUMPTION: "储值消费",
   REFUND: "已完成退款",
+  EXCEPTION_REFUND: "异常实收原路退款",
 };
 const exceptionDescriptions: Record<string, { title: string; detail: string }> = {
   LATE_PAYMENT: { title: "未用于成交的实收", detail: "该笔付款未用于完成预订或改期，需核对退款。" },
@@ -73,6 +75,8 @@ export function FinancePanel(props: FinanceProps) {
 }
 function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
   const [date, setDate] = useState(() => dateValue(new Date(), venue.timezone));
+  const [exceptionId, setExceptionId] = useState<string | null>(null);
+  const scope = `${session.subjectId}:${session.kind}:${session.tenantId}:${session.customerId ?? "staff"}:${venue.id}`;
   const finance = useLoad(
     () => api<FinanceData>(`/venues/${venue.id}/finance?date=${encodeURIComponent(date)}`),
     [api, venue.id, date],
@@ -173,7 +177,15 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
                         <td className="tennis-numeric">{money(entry.walletCents)}</td>
                         <td className="tennis-numeric">{money(entry.giftCents)}</td>
                         <td>
-                          {orderEntryKinds.has(entry.kind) ? (
+                          {entry.kind === "EXCEPTION_REFUND" ? (
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              onClick={() => setExceptionId(entry.referenceId)}
+                            >
+                              查看退款核对
+                            </button>
+                          ) : orderEntryKinds.has(entry.kind) ? (
                             <button
                               type="button"
                               className="button button-secondary button-small"
@@ -246,7 +258,7 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
           </Panel>
           <Panel title={`实收待核对 · ${data.exceptions.length} 项`}>
             <p className="tennis-muted">
-              当前场馆全部未结实收异常，不受日期筛选影响。此列表仅提供核对线索，列出异常不代表已经退款。
+              当前场馆全部未结实收异常，不受日期筛选影响。核对后可按原额申请原路退款，退款完成后才算已处理。
             </p>
             {data.exceptions.length === 0 ? (
               <EmptyState title="暂无实收异常" detail="迟到付款、重复到账等需要人工核对的款项会在这里列出。" />
@@ -274,6 +286,13 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
                           <td className="tennis-numeric">{amount == null ? "待核实" : money(amount)}</td>
                           <td>{description?.detail ?? "请按原付款记录核对款项及处理结果。"}</td>
                           <td>
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              onClick={() => setExceptionId(exception.id)}
+                            >
+                              核对与退款
+                            </button>
                             {exception.orderId ? (
                               <button
                                 type="button"
@@ -295,6 +314,23 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
             )}
           </Panel>
         </>
+      )}
+      {exceptionId && (
+        <CashExceptionDialog
+          api={api}
+          session={session}
+          venue={venue}
+          scope={scope}
+          exceptionId={exceptionId}
+          onClose={() => setExceptionId(null)}
+          onChanged={async () => {
+            await finance.refresh();
+          }}
+          openOrder={(id) => {
+            setExceptionId(null);
+            openOrder(id);
+          }}
+        />
       )}
     </>
   );

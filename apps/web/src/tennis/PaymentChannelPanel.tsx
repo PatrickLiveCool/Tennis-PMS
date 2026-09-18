@@ -15,7 +15,7 @@ export interface PaymentChannelSnapshot {
 }
 interface PaymentChannelPanelProps {
   api: TennisApi;
-  kind: "payment" | "topup" | "refund";
+  kind: "payment" | "topup" | "refund" | "exception-refund";
   sourceId: string;
   scope: string;
   businessStatus: string;
@@ -34,7 +34,12 @@ const stateLabels: Record<PaymentChannelSnapshot["state"], string> = {
   SUCCEEDED: "渠道已确认成功",
   FAILED: "渠道已确认失败",
 };
-const paths = { payment: "payments", topup: "topups", refund: "refunds" } as const;
+const paths = {
+  payment: "payments",
+  topup: "topups",
+  refund: "refunds",
+  "exception-refund": "exception-refunds",
+} as const;
 
 /** Remount on identity/source changes so a late result cannot update another transaction. */
 export function PaymentChannelPanel(props: PaymentChannelPanelProps) {
@@ -124,9 +129,10 @@ function ChannelDetails({
   }
   if (current?.state === "NOT_REQUIRED" && !channel.error && !error) return null;
   const startsSubmission = current?.state === "READY" && !error && !channel.error;
-  const submitLabel = kind === "refund" ? "提交原退款单" : kind === "topup" ? "提交原充值单" : "提交原付款单";
+  const isRefund = kind === "refund" || kind === "exception-refund";
+  const submitLabel = isRefund ? "提交原退款单" : kind === "topup" ? "提交原充值单" : "提交原付款单";
   const canRetry =
-    kind === "refund" &&
+    isRefund &&
     canOperate &&
     !!onRetryRefund &&
     businessStatus === "FAILED" &&

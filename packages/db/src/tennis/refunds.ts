@@ -1,3 +1,4 @@
+import { claimCashRefundTransaction } from "./channel-refunds.ts";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { allocateCents, assertCents } from "../../../domain/src/tennis-pricing.ts";
@@ -503,6 +504,16 @@ export async function settleVerifiedRefund(db: pg.Pool, event: VerifiedRefundEve
       return refund;
     }
     if (event.status === "SUCCEEDED") {
+      await claimCashRefundTransaction(tx, {
+        provider: event.provider,
+        merchantId: event.merchantId,
+        providerRefundId: event.providerRefundId,
+        tenantId,
+        sourceKind: "ORDER",
+        sourceId: refund.id,
+        amountCents: event.amountCents,
+        transactionId: event.transactionId,
+      });
       await tx.query(
         `INSERT INTO tennis.external_refund_receipts (provider,merchant_id,provider_refund_id,tenant_id,refund_id,amount_cents)
         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,

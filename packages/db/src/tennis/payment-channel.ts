@@ -3,7 +3,12 @@ import type pg from "pg";
 import { TenantAccessError } from "./access.ts";
 import { requireBookingVenue } from "./booking.ts";
 import { isCustomerActor, requireCustomer, withBookingTransaction, type BookingActor } from "./customers.ts";
-import { ensureLegacyPaymentChannel, enqueueRefundChannel, PaymentChannelError } from "./channel-intents.ts";
+import {
+  ensureLegacyPaymentChannel,
+  enqueueRefundChannel,
+  enqueueExceptionRefundChannel,
+  PaymentChannelError,
+} from "./channel-intents.ts";
 import {
   TrustedPaymentProvider,
   isVerifiedPaymentEvent,
@@ -25,9 +30,13 @@ import {
 import { getOrderPayment, settleVerifiedPayment } from "./payments.ts";
 import { getTopupPayment, settleVerifiedTopup } from "./topups.ts";
 import { getRefund, settleVerifiedRefund } from "./refunds.ts";
+import { getExceptionRefund, settleVerifiedExceptionRefund } from "./exception-refunds.ts";
 import { LocalMockPaymentGateway } from "./mock-payments.ts";
 
-export type ChannelSource = "ORDER" | "TOPUP" | "REFUND";
+export type ChannelSource = "ORDER" | "TOPUP" | "REFUND" | "EXCEPTION_REFUND";
+function isRefundSource(kind: ChannelSource): boolean {
+  return kind === "REFUND" || kind === "EXCEPTION_REFUND";
+}
 export type ChannelState = "READY" | "IN_FLIGHT" | "UNKNOWN" | "PENDING" | "SUCCEEDED" | "FAILED";
 interface Operation {
   id: string;
@@ -74,17 +83,19 @@ async function authorize(db: pg.Pool, actor: BookingActor, kind: ChannelSource, 
       ? await getOrderPayment(db, actor, id)
       : kind === "TOPUP"
         ? await getTopupPayment(db, actor, id)
-        : await getRefund(db, actor, id);
+        : kind === "EXCEPTION_REFUND"
+          ? await getExceptionRefund(db, actor, id)
+          : await getRefund(db, actor, id);
   await withBookingTransaction(db, actor, async (tx) => {
     await requireCustomer(tx, actor, source.customerId);
     const permission = write
-      ? kind === "REFUND"
+      ? isRefundSource(kind)
         ? "refund"
         : kind === "TOPUP" && !isCustomerActor(actor)
           ? "manage_members"
           : "book"
       : "read";
-    if (write && kind === "REFUND" && isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+    if (write && isRefundSource(kind) && isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
     await requireBookingVenue(tx, actor, source.venueId, permission);
   });
   return source;
@@ -111,20 +122,57 @@ export async function getPaymentChannel(
     else throw error;
   }
   if (!op) {
-    const required = "principalCents" in source ? source.principalCents : source.externalCents;
-    const provider="provider" in source ? source.provider : (await getOrderPayment(db,actor,source.paymentId)).provider;
-    const verifiedSuccess=source.status==="SUCCEEDED" && ("providerTransactionId" in source?Boolean(source.providerTransactionId):Boolean(source.providerRefundId));
-    let verifiedFailure=false;
-    if(source.status==="FAILED") {
-      const table=kind==="ORDER"?"payment_events":kind==="TOPUP"?"topup_events":"refund_events";
-      const column=kind==="REFUND"?"refund_id":kind==="TOPUP"?"topup_id":"payment_id";
-      verifiedFailure=Boolean((await db.query(`SELECT 1 FROM tennis.${table} WHERE tenant_id=$1 AND ${column}=$2 AND payload->>'status'='FAILED' LIMIT 1`,[actor.tenantId,id])).rowCount);
+    const required =
+      "principalCents" in source
+        ? source.principalCents
+        : "externalCents" in source
+          ? source.externalCents
+          : source.amountCents;
+    const provider =
+      "provider" in source ? source.provider : (await getOrderPayment(db, actor, source.paymentId)).provider;
+    const verifiedSuccess =
+      source.status === "SUCCEEDED" &&
+      ("providerTransactionId" in source ? Boolean(source.providerTransactionId) : Boolean(source.providerRefundId));
+    let verifiedFailure = false;
+    if (source.status === "FAILED") {
+      const table =
+        kind === "ORDER"
+          ? "payment_events"
+          : kind === "TOPUP"
+            ? "topup_events"
+            : kind === "EXCEPTION_REFUND"
+              ? "exception_refund_events"
+              : "refund_events";
+      const column = isRefundSource(kind) ? "refund_id" : kind === "TOPUP" ? "topup_id" : "payment_id";
+      verifiedFailure = Boolean(
+        (
+          await db.query(
+            `SELECT 1 FROM tennis.${table} WHERE tenant_id=$1 AND ${column}=$2 AND payload->>'status'='FAILED' LIMIT 1`,
+            [actor.tenantId, id],
+          )
+        ).rowCount,
+      );
     }
-    const state=required===0?"NOT_REQUIRED":verifiedSuccess?"SUCCEEDED":verifiedFailure?"FAILED":"UNKNOWN";
+    const state =
+      required === 0 ? "NOT_REQUIRED" : verifiedSuccess ? "SUCCEEDED" : verifiedFailure ? "FAILED" : "UNKNOWN";
     return {
-      sourceId:id,operationId:null,provider,simulation:provider==="MOCK",state,checkout:null,lastCheckedAt:null,
-      message:state==="SUCCEEDED"?"历史收款或退款已有验签入账记录。":state==="FAILED"?"历史渠道已有验签失败记录。":required?"历史记录尚未建立渠道操作，可按原支付流水恢复核对。":stateMessages.NOT_REQUIRED!,
-      canReconcile:allowed&&required>0&&!verifiedSuccess&&!verifiedFailure&&provider==="MOCK"&&port.simulation,
+      sourceId: id,
+      operationId: null,
+      provider,
+      simulation: provider === "MOCK",
+      state,
+      checkout: null,
+      lastCheckedAt: null,
+      message:
+        state === "SUCCEEDED"
+          ? "历史收款或退款已有验签入账记录。"
+          : state === "FAILED"
+            ? "历史渠道已有验签失败记录。"
+            : required
+              ? "历史记录尚未建立渠道操作，可按原支付流水恢复核对。"
+              : stateMessages.NOT_REQUIRED!,
+      canReconcile:
+        allowed && required > 0 && !verifiedSuccess && !verifiedFailure && provider === "MOCK" && port.simulation,
     };
   }
   const state = op.state === "IN_FLIGHT" && op.lease_until && op.lease_until <= new Date() ? "UNKNOWN" : op.state;
@@ -142,7 +190,7 @@ export async function getPaymentChannel(
 }
 function validateEvent(op: Operation, event: VerifiedPaymentEvent | VerifiedRefundEvent): void {
   const input = op.request;
-  const refund = op.source_kind === "REFUND";
+  const refund = isRefundSource(op.source_kind);
   if (
     (refund ? !isVerifiedRefundEvent(event) : !isVerifiedPaymentEvent(event)) ||
     event.provider !== op.provider ||
@@ -200,12 +248,15 @@ async function applyStoredObservation(db: pg.Pool, observationId: string): Promi
     if (observation.event_kind === "REFUND") {
       const newer = (
         await db.query(
-          `SELECT 1 FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind='REFUND' AND source_id=$2 AND generation>$3`,
-          [op.tenant_id, op.source_id, op.generation],
+          `SELECT 1 FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind=$4 AND source_id=$2 AND generation>$3`,
+          [op.tenant_id, op.source_id, op.generation, op.source_kind],
         )
       ).rowCount;
-      if (observation.payload.status !== "FAILED" || !newer)
-        await settleVerifiedRefund(db, reader.refund(observation.payload as RefundEventData));
+      if (observation.payload.status !== "FAILED" || !newer) {
+        const event = reader.refund(observation.payload as RefundEventData);
+        if (op.source_kind === "EXCEPTION_REFUND") await settleVerifiedExceptionRefund(db, event);
+        else await settleVerifiedRefund(db, event);
+      }
     } else if (op.source_kind === "TOPUP")
       await settleVerifiedTopup(db, reader.payment(observation.payload as PaymentEventData));
     else await settleVerifiedPayment(db, reader.payment(observation.payload as PaymentEventData));
@@ -233,7 +284,7 @@ async function recordObservation(
   event: VerifiedPaymentEvent | VerifiedRefundEvent,
 ): Promise<void> {
   validateEvent(op, event);
-  const kind = op.source_kind === "REFUND" ? "REFUND" : "PAYMENT";
+  const kind = isRefundSource(op.source_kind) ? "REFUND" : "PAYMENT";
   const hash =
     kind === "REFUND"
       ? refundEventSemanticHash(event as VerifiedRefundEvent)
@@ -263,12 +314,12 @@ async function recordObservation(
   await applyStoredObservation(db, saved.id);
 }
 async function isPayable(db: pg.Pool, op: Operation): Promise<boolean> {
-  if (op.source_kind === "REFUND")
+  if (isRefundSource(op.source_kind))
     return Boolean(
       (
         await db.query(
-          `SELECT 1 FROM tennis.refunds r WHERE tenant_id=$1 AND id=$2 AND status IN ('REQUESTED','PROCESSING') AND NOT EXISTS (SELECT 1 FROM tennis.channel_operations newer WHERE newer.tenant_id=r.tenant_id AND newer.source_kind='REFUND' AND newer.source_id=r.id AND newer.generation>$3)`,
-          [op.tenant_id, op.source_id, op.generation],
+          `SELECT 1 FROM tennis.${op.source_kind === "EXCEPTION_REFUND" ? "exception_refunds" : "refunds"} r WHERE tenant_id=$1 AND id=$2 AND status IN ('REQUESTED','PROCESSING') AND NOT EXISTS (SELECT 1 FROM tennis.channel_operations newer WHERE newer.tenant_id=r.tenant_id AND newer.source_kind=$4 AND newer.source_id=r.id AND newer.generation>$3)`,
+          [op.tenant_id, op.source_id, op.generation, op.source_kind],
         )
       ).rowCount,
     );
@@ -330,20 +381,17 @@ export async function reconcileChannelOperation(
     const input = op.request;
     // Every uncertain/repeated attempt queries the exact persisted merchant reference first.
     if (priorState === "READY" && (await isPayable(db, op)))
-      result =
-        op.source_kind === "REFUND"
-          ? await port.createRefund(input as RefundPortInput)
-          : await port.createPayment(input as PaymentPortInput);
+      result = isRefundSource(op.source_kind)
+        ? await port.createRefund(input as RefundPortInput)
+        : await port.createPayment(input as PaymentPortInput);
     else
-      result =
-        op.source_kind === "REFUND"
-          ? await port.queryRefund(input as RefundPortInput)
-          : await port.queryPayment(input as PaymentPortInput);
+      result = isRefundSource(op.source_kind)
+        ? await port.queryRefund(input as RefundPortInput)
+        : await port.queryPayment(input as PaymentPortInput);
     if (result.status === "NOT_FOUND" && (await isPayable(db, op)))
-      result =
-        op.source_kind === "REFUND"
-          ? await port.createRefund(input as RefundPortInput)
-          : await port.createPayment(input as PaymentPortInput);
+      result = isRefundSource(op.source_kind)
+        ? await port.createRefund(input as RefundPortInput)
+        : await port.createPayment(input as PaymentPortInput);
     if (result.status === "SUCCEEDED" || result.status === "DEFINITIVELY_FAILED")
       await recordObservation(db, op, result.event);
     else {
@@ -388,10 +436,16 @@ export async function reconcilePaymentChannel(
   port: PaymentProviderPort,
 ): Promise<ChannelView> {
   await authorize(db, actor, kind, id, true);
-  const previous=await getPaymentChannel(db,actor,kind,id,port);
-  if(previous.state==="SUCCEEDED"||previous.state==="NOT_REQUIRED"||(previous.operationId===null&&previous.state==="FAILED"))return previous;
+  const previous = await getPaymentChannel(db, actor, kind, id, port);
+  if (
+    previous.state === "SUCCEEDED" ||
+    previous.state === "NOT_REQUIRED" ||
+    (previous.operationId === null && previous.state === "FAILED")
+  )
+    return previous;
   await withBookingTransaction(db, actor, async (tx) => {
-    if (kind === "REFUND") await enqueueRefundChannel(tx, actor.tenantId, id);
+    if (kind === "EXCEPTION_REFUND") await enqueueExceptionRefundChannel(tx, actor.tenantId, id);
+    else if (kind === "REFUND") await enqueueRefundChannel(tx, actor.tenantId, id);
     else await ensureLegacyPaymentChannel(tx, actor.tenantId, kind, id);
   });
   const op = (
@@ -414,7 +468,8 @@ export async function simulatePaymentChannel(
 ): Promise<void> {
   await authorize(db, actor, kind, id, true);
   await withBookingTransaction(db, actor, async (tx) => {
-    if (kind === "REFUND") await enqueueRefundChannel(tx, actor.tenantId, id);
+    if (kind === "EXCEPTION_REFUND") await enqueueExceptionRefundChannel(tx, actor.tenantId, id);
+    else if (kind === "REFUND") await enqueueRefundChannel(tx, actor.tenantId, id);
     else await ensureLegacyPaymentChannel(tx, actor.tenantId, kind, id);
   });
   const op = (
@@ -424,10 +479,9 @@ export async function simulatePaymentChannel(
     )
   ).rows[0];
   if (!op || op.provider !== "MOCK") throw new PaymentChannelError("CHANNEL_NOT_READY");
-  const result =
-    kind === "REFUND"
-      ? await gateway.simulateRefund(op.request as RefundPortInput, status)
-      : await gateway.simulatePayment(op.request as PaymentPortInput, status);
+  const result = isRefundSource(kind)
+    ? await gateway.simulateRefund(op.request as RefundPortInput, status)
+    : await gateway.simulatePayment(op.request as PaymentPortInput, status);
   if (result.status !== "SUCCEEDED" && result.status !== "DEFINITIVELY_FAILED")
     throw new PaymentChannelError("CHANNEL_RESULT_UNKNOWN");
   await recordObservation(db, op, result.event);
@@ -446,7 +500,7 @@ export async function acceptPaymentNotification(
     notification.operationId !== op.id ||
     notification.bindingId !== op.request.binding.id ||
     notification.bindingVersion !== op.request.binding.version ||
-    notification.kind !== (op.source_kind === "REFUND" ? "REFUND" : "PAYMENT")
+    notification.kind !== (isRefundSource(op.source_kind) ? "REFUND" : "PAYMENT")
   )
     throw new PaymentChannelError("INVALID_CHANNEL_EVENT");
   await recordObservation(db, op, notification.event);

@@ -94,6 +94,12 @@ import {
   saveMerchantBinding,
   disableMerchantBinding,
 } from "../../../../packages/db/src/tennis/merchant-bindings.ts";
+import {
+  getCashException,
+  requestExceptionRefund,
+  getExceptionRefund,
+  retryExceptionRefund,
+} from "../../../../packages/db/src/tennis/exception-refunds.ts";
 import { LocalMockPaymentGateway } from "../../../../packages/db/src/tennis/mock-payments.ts";
 import { registerAssistantRoutes } from "./assistant-routes.ts";
 import { registerGatewayRoutes } from "./gateway-routes.ts";
@@ -140,6 +146,14 @@ const obj = <T extends Record<string, TSchema>>(properties: T) =>
 const params = (request: FastifyRequest) => request.params as Record<string, string>;
 const query = (request: FastifyRequest) => request.query as Record<string, string | undefined>;
 const messages: Record<string, string> = {
+  INVALID_EXCEPTION_REFUND: "请核对原实收金额并填写退款原因。",
+  INVALID_REFUND_EVENT: "退款结果与原交易不一致，请核对原渠道流水。",
+  REFUND_EVENT_REUSED: "此渠道退款回执已用于其他记录，请核对原结果。",
+  REFUND_NOT_RETRYABLE: "只有渠道明确失败的退款可以重试，请先查询原结果。",
+  EXCEPTION_NOT_REFUNDABLE: "此款项不属于可原路退回的未使用实收。",
+  CHANNEL_RESULT_UNKNOWN: "渠道结果尚未确认，请查询原操作，不要另建退款。",
+  CHANNEL_NOT_READY: "原渠道记录尚需核对，请保留当前操作。",
+
   GATEWAY_ACCESS_REVOKED: "渠道凭据或身份绑定已失效，请联系平台或租户管理员核对。",
   GATEWAY_IDENTITY_UNBOUND: "此渠道身份尚未由管理员核对绑定。",
   GATEWAY_MESSAGE_CONFLICT: "原渠道消息或绑定已存在，请核对原记录，不要另建交易。",
@@ -717,6 +731,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
     ["payments", "ORDER"],
     ["topups", "TOPUP"],
     ["refunds", "REFUND"],
+    ["exception-refunds", "EXCEPTION_REFUND"],
   ] as const) {
     get(`/${resource}/:id/channel`, (request) =>
       getPaymentChannel(db, actor(request), kind, params(request).id!, gateway),
@@ -725,6 +740,21 @@ export async function buildTennisServer(options: TennisServerOptions) {
       reconcilePaymentChannel(db, actor(request), kind, params(request).id!, gateway),
     );
   }
+  get("/cash-exceptions/:id", (request) => getCashException(db, actor(request), params(request).id!));
+  write("POST", "/cash-exceptions/:id/refund", obj({ amountCents: cents, reason, commandKey }), (request, input) =>
+    requestExceptionRefund(db, staff(request), { ...input, exceptionId: params(request).id! }),
+  );
+  get("/exception-refunds/:id", (request) => getExceptionRefund(db, actor(request), params(request).id!));
+  write("POST", "/exception-refunds/:id/retry", obj({ commandKey }), (request, input) =>
+    retryExceptionRefund(db, staff(request), params(request).id!, input.commandKey),
+  );
+  write("POST", "/exception-refunds/:id/simulate", simulateBody, async (request, input) => {
+    simulation();
+    if (!(gateway instanceof LocalMockPaymentGateway)) throw new HttpError("SIMULATION_DISABLED", 403);
+    const principal = staff(request);
+    await simulatePaymentChannel(db, principal, "EXCEPTION_REFUND", params(request).id!, gateway, input.status);
+    return getExceptionRefund(db, principal, params(request).id!);
+  });
   get("/platform/tenants/:id/payment-merchants", (request) =>
     listMerchantBindings(db, session(request).subjectId, params(request).id!),
   );

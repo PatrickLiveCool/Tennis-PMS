@@ -23,7 +23,16 @@ export interface BusinessEvent {
   /** Initiating subject of the source resource; not the payment callback's executor. */
   subjectId: string;
   resource: {
-    type: "order" | "order_line" | "amendment" | "payment" | "topup" | "wallet_batch" | "refund" | "conversation";
+    type:
+      | "order"
+      | "order_line"
+      | "amendment"
+      | "payment"
+      | "topup"
+      | "wallet_batch"
+      | "refund"
+      | "exception_refund"
+      | "conversation";
     id: string;
     /** Increasing event version for this resource, not an inferred entity revision. */
     version: number;
@@ -99,7 +108,7 @@ export async function pollBusinessEvents(
       actor.subjectId,
     ];
     const visible = `tenant_id=$1 AND venue_id=$2 AND ($3::text IS NULL OR customer_id=$3)
-      AND ($4::boolean OR event_type<>'topup.result')
+      AND ($4::boolean OR (event_type<>'topup.result' AND resource_type<>'exception_refund'))
       AND ($5::boolean OR event_type<>'conversation.handoff')
       AND (event_type<>'conversation.handoff' OR $3::text IS NULL OR subject_id=$6)`;
     let after = "0";

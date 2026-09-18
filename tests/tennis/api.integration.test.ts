@@ -672,4 +672,74 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
       ).statusCode,
     ).toBe(409);
   });
+  it("lets authorized staff refund verified unused cash and closes the exception only after channel success", async () => {
+    const order = await booking();
+    const payment = await okay(customer, "POST", `/orders/${order.id}/payments`, { walletCents: 0, commandKey: key() });
+    await okay(customer, "POST", `/orders/${order.id}/cancel`, {
+      expectedRevision: order.revision,
+      reason: "合成取消后迟到付款",
+      commandKey: key(),
+    });
+    expect((await okay(customer, "POST", `/payments/${payment.id}/simulate`, { status: "SUCCEEDED" })).status).toBe(
+      "REFUND_REQUIRED",
+    );
+    const exceptionId = (
+      await db.query<{ id: string }>(
+        "SELECT id FROM tennis.financial_exceptions WHERE tenant_id=$1 AND payment_id=$2",
+        [first.actor.tenantId, payment.id],
+      )
+    ).rows[0]!.id;
+    expect((await request(customer, "GET", `/cash-exceptions/${exceptionId}`)).statusCode).toBe(403);
+    expect((await request(foreign, "GET", `/cash-exceptions/${exceptionId}`)).statusCode).toBe(404);
+    const detail = await okay(staff, "GET", `/cash-exceptions/${exceptionId}`);
+    expect(detail).toMatchObject({ status: "OPEN", amountCents: 12000, refund: null });
+    expect(
+      (
+        await request(staff, "POST", `/cash-exceptions/${exceptionId}/refund`, {
+          amountCents: 11999,
+          reason: "合成金额错误",
+          commandKey: key(),
+        })
+      ).statusCode,
+    ).toBe(409);
+    const input = { amountCents: detail.amountCents, reason: "已核对合成迟到实收，原额原路退回", commandKey: key() };
+    const refund = await okay(staff, "POST", `/cash-exceptions/${exceptionId}/refund`, input);
+    expect((await okay(staff, "POST", `/cash-exceptions/${exceptionId}/refund`, input)).id).toBe(refund.id);
+    expect((await okay(customer, "GET", `/exception-refunds/${refund.id}`)).id).toBe(refund.id);
+    expect((await request(customer, "POST", `/exception-refunds/${refund.id}/channel/reconcile`, {})).statusCode).toBe(
+      403,
+    );
+    expect((await okay(staff, "POST", `/exception-refunds/${refund.id}/channel/reconcile`, {})).state).toBe("PENDING");
+    expect((await okay(staff, "POST", `/exception-refunds/${refund.id}/simulate`, { status: "FAILED" })).status).toBe(
+      "FAILED",
+    );
+    expect((await okay(staff, "GET", `/cash-exceptions/${exceptionId}`)).status).toBe("OPEN");
+    await okay(staff, "POST", `/exception-refunds/${refund.id}/retry`, { commandKey: key() });
+    expect(
+      (await okay(staff, "POST", `/exception-refunds/${refund.id}/simulate`, { status: "SUCCEEDED" })).status,
+    ).toBe("SUCCEEDED");
+    expect(await okay(staff, "GET", `/cash-exceptions/${exceptionId}`)).toMatchObject({
+      status: "RESOLVED",
+      refund: { id: refund.id, status: "SUCCEEDED" },
+    });
+    expect((await okay(customer, "GET", `/orders/${order.id}`)).status).toBe("CANCELLED");
+    const date = (
+      await db.query<{ date: string }>(
+        "SELECT to_char(clock_timestamp() AT TIME ZONE timezone,'YYYY-MM-DD') AS date FROM tennis.venues WHERE id=$1",
+        [first.venueId],
+      )
+    ).rows[0]!.date;
+    const ledger = await okay(staff, "GET", `/venues/${first.venueId}/finance?date=${date}`);
+    expect(ledger.exceptions).toEqual([]);
+    expect(ledger.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "EXCEPTION_REFUND",
+          cashCents: -12000,
+          walletCents: 0,
+          referenceId: exceptionId,
+        }),
+      ]),
+    );
+  });
 });

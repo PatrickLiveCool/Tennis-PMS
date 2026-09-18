@@ -60,7 +60,7 @@ Compose 默认复用官方 PostgreSQL 16 的 DaoCloud 镜像；可通过 TENNIS_
 
 ## 后续切片
 
-集中答复已在 [开发决策清单](decisions-and-acceptance.md) 固化。智能体和 Runtime 位于 PMS 外部，接口见 [外部助手契约](external-agent.md)。F8 补充 [Gateway 接入](gateway.md)、[事件轮询](business-events.md) 和 [替代场馆](agent-discovery.md)；网球迁移现为001–017。本地 API 每 15 秒处理预约/改期占位到期；课程和维护占场仅员工可办。商户号、微信具体入口、外部 Runtime 与部署条件未具备，真实接入和人工验收仍须分别完成。
+集中答复已在 [开发决策清单](decisions-and-acceptance.md) 固化。智能体和 Runtime 位于 PMS 外部，接口见 [外部助手契约](external-agent.md)。F8 补充 [Gateway 接入](gateway.md)、[事件轮询](business-events.md) 和 [替代场馆](agent-discovery.md)；网球迁移现为001–020。本地 API 每 15 秒处理预约/改期占位到期；课程和维护占场仅员工可办。商户号、微信具体入口、外部 Runtime 与部署条件未具备，真实接入和人工验收仍须分别完成。
 
 ## 本机云盘读取限制
 

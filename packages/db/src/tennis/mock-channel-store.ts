@@ -27,7 +27,7 @@ export function postgresMockChannelStore(db: pg.Pool): MockChannelStore {
       if (!op) throw new PaymentChannelError("CHANNEL_NOT_READY");
       if (
         requestHash(op.request) !== requestHash(record.input) ||
-        record.kind !== (op.source_kind === "REFUND" ? "REFUND" : "PAYMENT") ||
+        record.kind !== (["REFUND", "EXCEPTION_REFUND"].includes(op.source_kind) ? "REFUND" : "PAYMENT") ||
         record.merchantId !== record.input.binding.merchantId ||
         record.merchantReference !==
           ("refundId" in record.input ? record.input.merchantRefundNo : record.input.merchantOrderNo)

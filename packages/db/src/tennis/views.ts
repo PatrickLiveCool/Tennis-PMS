@@ -340,6 +340,7 @@ export async function financeLedger(db: pg.Pool, actor: BookingActor, venueId: s
       UNION ALL SELECT x.id,'EXTRA_TOPUP_RECEIPT',(x.details->>'amountCents')::float8,0::float8,0::float8,x.created_at,p.id FROM tennis.topup_exceptions x JOIN tennis.topup_payments p ON p.tenant_id=x.tenant_id AND p.id=x.topup_id WHERE p.tenant_id=$1 AND p.venue_id=$2
       UNION ALL SELECT p.id,'WALLET_CONSUMPTION',0::float8,p.wallet_cents::float8,0::float8,p.settled_at,p.order_id FROM tennis.payment_attempts p WHERE p.tenant_id=$1 AND p.venue_id=$2 AND p.status='SUCCEEDED' AND p.wallet_cents>0
       UNION ALL SELECT r.id,'REFUND',-r.external_cents::float8,-r.wallet_cents::float8,0::float8,r.completed_at,r.order_id FROM tennis.refunds r WHERE r.tenant_id=$1 AND r.venue_id=$2 AND r.status='SUCCEEDED'
+      UNION ALL SELECT r.id,'EXCEPTION_REFUND',-r.amount_cents::float8,0::float8,0::float8,r.completed_at,r.exception_id FROM tennis.exception_refunds r WHERE r.tenant_id=$1 AND r.venue_id=$2 AND r.status='SUCCEEDED'
       ) ledger WHERE "createdAt">=$3 AND "createdAt"<$4 ORDER BY "createdAt" DESC,id`,
         [actor.tenantId, venueId, range.startAt, range.endAt],
       )

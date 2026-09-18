@@ -205,3 +205,78 @@ export async function ensureLegacyPaymentChannel(
     expiresAt: source.expires_at.toISOString(),
   });
 }
+
+/** Cash-only compensation keeps the exact capture that did not fund an order or wallet. */
+export async function enqueueExceptionRefundChannel(
+  tx: pg.PoolClient,
+  tenantId: string,
+  refundId: string,
+): Promise<void> {
+  const source = (
+    await tx.query<{
+      source_kind: "ORDER" | "TOPUP";
+      source_id: string;
+      provider: "MOCK" | "WECHAT";
+      merchant_id: string;
+      transaction_id: string;
+      amount_cents: string;
+    }>(
+      `SELECT source_kind,source_id,provider,merchant_id,transaction_id,amount_cents FROM tennis.exception_refunds WHERE tenant_id=$1 AND id=$2`,
+      [tenantId, refundId],
+    )
+  ).rows[0];
+  if (!source) throw new PaymentChannelError("CHANNEL_NOT_READY");
+  const original = (
+    await tx.query<{ request: PaymentPortInput }>(
+      `SELECT request FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind=$2 AND source_id=$3 ORDER BY generation DESC LIMIT 1`,
+      [tenantId, source.source_kind, source.source_id],
+    )
+  ).rows[0]?.request;
+  const binding = original?.binding ?? (await originalBinding(tx, tenantId, source.provider, source.merchant_id));
+  if (binding.provider !== source.provider || binding.merchantId !== source.merchant_id)
+    throw new PaymentChannelError("CHANNEL_REQUEST_CONFLICT");
+  const id = randomUUID();
+  const request: RefundPortInput = {
+    binding,
+    operationId: id,
+    merchantOrderNo: original?.merchantOrderNo ?? source.source_id.replaceAll("-", ""),
+    sourceId: source.source_id,
+    transactionId: source.transaction_id,
+    merchantRefundNo: refundId.replaceAll("-", ""),
+    refundId,
+    amountCents: Number(source.amount_cents),
+    currency: "CNY",
+  };
+  await tx.query(
+    `INSERT INTO tennis.channel_operations(id,tenant_id,source_kind,source_id,binding_id,provider,request,request_hash) VALUES($1,$2,'EXCEPTION_REFUND',$3,$4,$5,$6::jsonb,$7) ON CONFLICT(tenant_id,source_kind,source_id,generation) DO NOTHING`,
+    [id, tenantId, refundId, binding.id, binding.provider, JSON.stringify(request), requestHash(request)],
+  );
+}
+export async function retryExceptionRefundChannel(
+  tx: pg.PoolClient,
+  tenantId: string,
+  refundId: string,
+): Promise<void> {
+  const op = (
+    await tx.query<{ state: string; generation: number; request: RefundPortInput }>(
+      `SELECT state,generation,request FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind='EXCEPTION_REFUND' AND source_id=$2 ORDER BY generation DESC LIMIT 1 FOR UPDATE`,
+      [tenantId, refundId],
+    )
+  ).rows[0];
+  if (!op || op.state !== "FAILED") throw new PaymentChannelError("CHANNEL_RESULT_UNKNOWN");
+  const id = randomUUID();
+  const request: RefundPortInput = { ...op.request, operationId: id, merchantRefundNo: id.replaceAll("-", "") };
+  await tx.query(
+    `INSERT INTO tennis.channel_operations(id,tenant_id,source_kind,source_id,generation,binding_id,provider,request,request_hash) VALUES($1,$2,'EXCEPTION_REFUND',$3,$4,$5,$6,$7::jsonb,$8)`,
+    [
+      id,
+      tenantId,
+      refundId,
+      op.generation + 1,
+      request.binding.id,
+      request.binding.provider,
+      JSON.stringify(request),
+      requestHash(request),
+    ],
+  );
+}
