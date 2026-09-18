@@ -1,3 +1,4 @@
+import { getBookingPolicy, saveBookingPolicy } from "../../../../packages/db/src/tennis/booking-policy.ts";
 import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyRequest } from "fastify";
@@ -425,6 +426,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
     venueIds: Type.Array(id, { uniqueItems: true, maxItems: 100 }),
     active: Type.Boolean(),
   };
+  get("/booking-policy", (request) => getBookingPolicy(db, staff(request)));
+  write("PATCH", "/booking-policy", obj({
+    quoteMinutes: Type.Integer({ minimum: 1, maximum: 1440 }),
+    paymentHoldMinutes: Type.Integer({ minimum: 1, maximum: 1440 }),
+    expectedRevision: revision,
+  }), (request, input) => saveBookingPolicy(db, staff(request), input));
   get("/staff", (request) => listTenantStaff(db, staff(request)));
   write(
     "POST",

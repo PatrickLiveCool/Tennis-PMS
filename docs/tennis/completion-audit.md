@@ -23,7 +23,7 @@
 | 3 余额＋微信补差、禁止透支、原来源退款 | `payments.ts`、`payment-lifecycle.ts`、`channel-refunds.ts`；`payments.integration.test.ts`、`payment-channel.integration.test.ts` 验证预留、重复/伪回调、到期竞争、渠道恢复和多来源退款；浏览器验证余额100＋MOCK60及部分退款 | 本地资金规则已实现且验证；真实微信补差、原交易退款仍缺 adapter 与商户联调 |
 | 4 线上充值、真实线下收款登记、查询与明细 | `topups.ts`、`wallet.ts`、`topup-directory.ts`；`payments.integration.test.ts`、`wallet-history.integration.test.ts`、`topup-directory.integration.test.ts`。浏览器从持久目录找回23元原单、模拟成功后本金只增加23元 | 本地已实现且验证；线下登记使用合成收款事实演示，未处理真实资金。线上真实充值渠道未接入；退卡提现/转赠/过期后置 |
 | 5 同场馆多明细、全成全败、员工部分退改 | `booking.ts`、`amendments.ts`、`refunds.ts`；`booking.integration.test.ts`、`amendments.integration.test.ts` 覆盖同段多片、不同时间、单片冲突整组回滚、原单保护、部分取消/改期。浏览器实际完成双片、部分取消和连续补退差价 | 本地已实现且验证；真实资金退改仍依赖支付 adapter |
-| 6 报价5分钟、普通待付款10分钟、15分钟调度、常用1小时、租户最短时长 | `booking.ts`、`catalog.ts`、`inventory.ts`、领域 `court-interval.ts`；`interval.test.ts`、`booking.integration.test.ts`、`catalog.integration.test.ts` 覆盖时间边界、过期及营业复查 | 本地已实现且验证。5/10分钟是当前实现固定默认值，不宣称有租户后台 TTL 设置；场馆最短可售时长可配置 |
+| 6 报价5分钟、普通待付款10分钟、15分钟调度、常用1小时、租户最短时长 | `booking.ts`、`catalog.ts`、`inventory.ts`、领域 `court-interval.ts`；`interval.test.ts`、`booking.integration.test.ts`、`catalog.integration.test.ts` 覆盖时间边界、过期及营业复查 | 本地已实现且验证。F16已提供租户管理员预订期限设置，默认5/10分钟，新报价保存占位时长快照；已有期限不追溯，场馆最短可售时长独立配置 |
 | 7 人工决定退改金额与理由、AI不自行决定费用 | `amendments.ts`、`refunds.ts`、`exception-refunds.ts`、`agent-guard.ts`；对应集成测试覆盖权限、金额上限、原资金来源、迟到实收异常。浏览器核准部分退款与差价退款；F10异常120元失败→重试→成功关闭 | 本地已实现且验证；雨天/迟到/爽约使用员工判断及理由，不存在自动费用政策；真实退款待接入 |
 | 8 授权未付款保留、明确截止与原因、不假记收款 | `booking.ts`、`amendments.ts`；`booking.integration.test.ts`、`amendments.integration.test.ts` 覆盖授权、截止、理由及未付调整。既有浏览器记录验证未付双片240→取消120→改场80，原截止/原因保留 | 本地已实现且验证；普通订单的待收款状态不等于到账 |
 | 9 课程仅占场、基础流水核对 | `inventory.ts`、`views.ts`；`inventory.integration.test.ts`、`views.integration.test.ts`、`wallet-history.integration.test.ts`；后台 `OccupancyPanel.tsx`、`FinancePanel.tsx` 提供统一占用及核对 | 本地已实现且验证；无教练冲突、循环排课、优惠券、完整财务/教务。充值预收、赠送和消费不混加为营收 |
@@ -117,3 +117,10 @@ F12 只读配置核对显示：AI `enabled=false`，模型、Base URL、Runtime�
 普通/异常退款新请求已携带原渠道交易总额，按可信实收精确核对；旧请求/hash不变，授权失败重试仅在新代次补缺失值，矛盾值拒绝。集中决策3/5/7的本地退款证据增加了连续部分混合退款、改期多笔付款原额，以及本金/赠送区分下的充值异常退款。
 
 本轮由主会话运行 typecheck、71文件/1,360项单元、22文件/282项PG集成、网球build及PR格式8项，全部通过。日志：总项目 `outputs/Tennis-PMS-F15-verification.log`；无新迁移、UI变动或浏览器复验。支付仍为MOCK，真实商户/营销优惠金额映射/Runtime/生产与客户签收的缺口未消除，不将Goal标为完成。
+
+
+## F16 更新：租户预订期限
+
+集中决策6此前遗漏了“时长由租户配置”的实现。现已补齐后台/API/持久配置、报价快照、改期补款期限及历史保护，详见 [期限契约](booking-policy.md)。主会话最终typecheck、71文件/1,360项单元、23文件/291项PG、build及PR格式8项通过。首轮改期测试使用两个不同机器时钟造成141毫秒差异，改为数据库时钟后定点及最终全量通过；原失败日志保留，不冒充首轮全通过。
+
+开发库023迁移前后16条旧记录的期限摘要一致、重复迁移通过。浏览器验证3/7配置保存/刷新，恢复默认后原报价仍产生7分钟待付订单；测试单已正常取消、无付款记录。真实设备与客户人工签收仍未完成，Goal保持active。

@@ -16,6 +16,7 @@ import {
   useLoad,
 } from "./components";
 import { PricingPanel } from "./PricingPanel";
+import { BookingPolicyPanel } from "./BookingPolicyPanel";
 import { StaffPanel } from "./StaffPanel";
 import { TenantGatewayPanel } from "./GatewayPanel";
 
@@ -76,6 +77,9 @@ export function SettingsPage({
         </button>
         {admin && (
           <>
+            <button className={tab === "policy" ? "active" : ""} onClick={() => setTab("policy")}>
+              预订期限
+            </button>
             <button className={tab === "topups" ? "active" : ""} onClick={() => setTab("topups")}>
               充值方案
             </button>
@@ -134,6 +138,8 @@ export function SettingsPage({
             )}
           </Panel>
         </div>
+      ) : tab === "policy" && admin ? (
+        <BookingPolicyPanel key={`${session.subjectId}:${session.tenantId}:${session.contextVersion}`} api={api} />
       ) : tab === "gateway" && admin ? (
         <TenantGatewayPanel
           api={api}

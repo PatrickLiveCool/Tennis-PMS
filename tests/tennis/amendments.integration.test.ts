@@ -1,3 +1,4 @@
+import { saveBookingPolicy } from "../../packages/db/src/tennis/booking-policy.ts";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -1174,4 +1175,35 @@ describe("unpaid order line adjustments", () => {
     await expect(confirm(b)).rejects.toMatchObject({ code: "STALE_ORDER" });
     expect(await active()).toHaveLength(2);
   });
+});
+
+
+it("snapshots configured amendment quote and supplemental hold deadlines", async () => {
+  const order = await book();
+  await saveBookingPolicy(db, first.actor, { quoteMinutes: 4, paymentHoldMinutes: 6, expectedRevision: 1 });
+  const dbNow = async () => (await db.query<{ time: Date }>("SELECT clock_timestamp() AS time")).rows[0]!.time.getTime();
+  const before = await dbNow();
+  const proposal = await preview(order);
+  expect(Date.parse(proposal.expiresAt) - before).toBeGreaterThanOrEqual(240000);
+  expect(Date.parse(proposal.expiresAt) - await dbNow()).toBeLessThanOrEqual(240000);
+  expect(proposal.paymentHoldMinutes).toBe(6);
+  await saveBookingPolicy(db, first.actor, { quoteMinutes: 2, paymentHoldMinutes: 3, expectedRevision: 2 });
+  const confirmationTime = await dbNow();
+  const held = await confirm(proposal);
+  expect(held.status).toBe("AWAITING_PAYMENT");
+  expect(Date.parse(held.holdUntil!) - confirmationTime).toBeGreaterThanOrEqual(360000);
+  expect(Date.parse(held.holdUntil!) - await dbNow()).toBeLessThanOrEqual(360000);
+  expect((await getOrderAmendment(db, first.actor, held.id)).holdUntil).toBe(held.holdUntil);
+});
+
+
+it("does not extend an unpaid order when the tenant configures longer amendment deadlines", async () => {
+  await saveBookingPolicy(db, first.actor, { quoteMinutes: 2, paymentHoldMinutes: 3, expectedRevision: 1 });
+  const order = await held([0], false);
+  await saveBookingPolicy(db, first.actor, { quoteMinutes: 30, paymentHoldMinutes: 40, expectedRevision: 2 });
+  const proposal = await preview(order);
+  expect(proposal.expiresAt).toBe(order.holdUntil);
+  const result = await confirm(proposal);
+  expect(result.status).toBe("APPLIED");
+  expect((await getOrder(db, customer, order.id)).holdUntil).toBe(order.holdUntil);
 });

@@ -790,3 +790,22 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
     );
   });
 });
+
+
+it("authorizes tenant deadline settings and carries the configured hold into customer quotes", async () => {
+  expect(await okay(staff, "GET", "/booking-policy")).toEqual({ quoteMinutes: 5, paymentHoldMinutes: 10, revision: 1 });
+  expect((await request(customer, "GET", "/booking-policy")).statusCode).toBe(403);
+  expect((await request(customer, "PATCH", "/booking-policy", { quoteMinutes: 3, paymentHoldMinutes: 7, expectedRevision: 1 })).statusCode).toBe(403);
+  for (const payload of [
+    { quoteMinutes: 0, paymentHoldMinutes: 7, expectedRevision: 1 },
+    { quoteMinutes: 3, paymentHoldMinutes: 1.5, expectedRevision: 1 },
+    { quoteMinutes: 3, paymentHoldMinutes: 7, expectedRevision: 1, tenantId: second.actor.tenantId },
+  ]) expect((await request(staff, "PATCH", "/booking-policy", payload)).statusCode).toBe(400);
+  expect(await okay(staff, "PATCH", "/booking-policy", { quoteMinutes: 3, paymentHoldMinutes: 7, expectedRevision: 1 }))
+    .toEqual({ quoteMinutes: 3, paymentHoldMinutes: 7, revision: 2 });
+  expect(await okay(foreign, "GET", "/booking-policy")).toEqual({ quoteMinutes: 5, paymentHoldMinutes: 10, revision: 1 });
+  const quote = await okay(customer, "POST", "/quotes", selection());
+  expect(quote.paymentHoldMinutes).toBe(7);
+  const order = await okay(customer, "POST", `/quotes/${quote.id}/confirm`, { commandKey: key() });
+  expect(Date.parse(order.holdUntil) - Date.parse(order.createdAt)).toBeCloseTo(420000, -1);
+});

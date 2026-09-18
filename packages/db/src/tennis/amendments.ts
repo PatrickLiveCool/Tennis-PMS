@@ -1,3 +1,4 @@
+import { bookingPolicyInTransaction } from "./booking-policy.ts";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { allocateCents, assertCents, type CourtPrice } from "../../../domain/src/tennis-pricing.ts";
@@ -41,6 +42,7 @@ export interface AmendmentLine {
   approvedRefundCents: number | null;
 }
 export interface AmendmentRecord {
+  paymentHoldMinutes: number;
   id: string;
   orderId: string;
   venueId: string;
@@ -71,7 +73,7 @@ export async function amendmentInTransaction(
   const row = (
     await tx.query<AmendmentRow>(
       `SELECT id,order_id AS "orderId",venue_id AS "venueId",customer_id AS "customerId",created_by AS "createdBy",base_revision AS "baseRevision",unpaid,reason,status,
-    expires_at AS "expiresAt",hold_until AS "holdUntil",supplemental_cents::float8 AS "supplementalCents",suggested_refund_cents::float8 AS "suggestedRefundCents",approved_refund_cents::float8 AS "approvedRefundCents",confirmation_request AS "confirmationRequest"
+    payment_hold_minutes AS "paymentHoldMinutes",expires_at AS "expiresAt",hold_until AS "holdUntil",supplemental_cents::float8 AS "supplementalCents",suggested_refund_cents::float8 AS "suggestedRefundCents",approved_refund_cents::float8 AS "approvedRefundCents",confirmation_request AS "confirmationRequest"
     FROM tennis.order_amendments WHERE tenant_id=$1 AND id=$2 FOR UPDATE`,
       [tenantId, id],
     )
@@ -350,9 +352,10 @@ export async function previewOrderAmendment(
     assertCents(refund);
     await checkTargets(tx, actor.tenantId, order.id, lines);
     const id = randomUUID();
+    const policy = await bookingPolicyInTransaction(tx, actor.tenantId);
     await tx.query(
-      `INSERT INTO tennis.order_amendments(id,tenant_id,venue_id,order_id,customer_id,created_by,base_revision,status,reason,expires_at,supplemental_cents,suggested_refund_cents,unpaid)
-      VALUES($1,$2,$3,$4,$5,$6,$7,'QUOTED',$8,least(clock_timestamp()+interval '5 minutes',coalesce($12::timestamptz,'infinity')),$9,$10,$11)`,
+      `INSERT INTO tennis.order_amendments(id,tenant_id,venue_id,order_id,customer_id,created_by,base_revision,status,reason,expires_at,supplemental_cents,suggested_refund_cents,unpaid,payment_hold_minutes)
+      VALUES($1,$2,$3,$4,$5,$6,$7,'QUOTED',$8,least(clock_timestamp()+$13*interval '1 minute',coalesce($12::timestamptz,'infinity')),$9,$10,$11,$14)`,
       [
         id,
         actor.tenantId,
@@ -366,6 +369,8 @@ export async function previewOrderAmendment(
         refund,
         unpaid,
         unpaid ? order.holdUntil : null,
+        policy.quoteMinutes,
+        policy.paymentHoldMinutes,
       ],
     );
     for (const line of lines)
@@ -597,7 +602,7 @@ export async function confirmOrderAmendment(
         if (amendment.supplementalCents > 0) {
           await holdNewCoverage(tx, actor.tenantId, amendment);
           const deadline = Math.min(
-            (await now(tx)) + 600000,
+            (await now(tx)) + amendment.paymentHoldMinutes * 60_000,
             ...amendment.lines.flatMap((l) => [Date.parse(l.old.startAt), Date.parse(l.new.startAt)]),
           );
           if (deadline <= (await now(tx)) || Date.parse(amendment.expiresAt) <= (await now(tx)))

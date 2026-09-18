@@ -1,3 +1,4 @@
+import { bookingPolicyInTransaction } from "./booking-policy.ts";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { assertDelegation } from "./agent-guard.ts";
@@ -29,6 +30,7 @@ export class TennisBookingError extends Error {
   }
 }
 export interface QuoteRecord {
+  paymentHoldMinutes: number;
   id: string;
   venueId: string;
   customerId: string;
@@ -70,7 +72,7 @@ type LineRow = Omit<OrderLine, "startAt" | "endAt" | "cancelledAt"> & {
   cancelledAt: Date | null;
 };
 const quoteColumns = `id,venue_id AS "venueId",customer_id AS "customerId",created_by AS "createdBy",
-  price_snapshot AS price,expires_at AS "expiresAt",created_at AS "createdAt"`;
+  payment_hold_minutes AS "paymentHoldMinutes",price_snapshot AS price,expires_at AS "expiresAt",created_at AS "createdAt"`;
 const orderColumns = `id,venue_id AS "venueId",customer_id AS "customerId",quote_id AS "quoteId",created_by AS "createdBy",status,
   payment_status AS "paymentStatus",total_cents::float8 AS "totalCents",currency,hold_kind AS "holdKind",hold_until AS "holdUntil",
   hold_reason AS "holdReason",revision,price_snapshot AS price,created_at AS "createdAt"`;
@@ -238,14 +240,15 @@ export async function createQuote(
     await requireBookingVenue(tx, actor, input.venueId, "book");
     await requireCustomer(tx, actor, input.customerId);
     await expireVenueHolds(tx, actor.tenantId, input.venueId);
+    const policy = await bookingPolicyInTransaction(tx, actor.tenantId);
     const price = await priceSelectionInTransaction(tx, actor, input.venueId, input.lines);
     await available(tx, actor, price.lines);
     const id = randomUUID();
     const row = (
       await tx.query<QuoteRow>(
-        `INSERT INTO tennis.quotes (id,tenant_id,venue_id,customer_id,created_by,price_snapshot,expires_at)
-      VALUES ($1,$2,$3,$4,$5,$6::jsonb,clock_timestamp()+interval '5 minutes') RETURNING ${quoteColumns}`,
-        [id, actor.tenantId, input.venueId, input.customerId, actor.subjectId, JSON.stringify(price)],
+        `INSERT INTO tennis.quotes (id,tenant_id,venue_id,customer_id,created_by,price_snapshot,expires_at,payment_hold_minutes)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,clock_timestamp()+$7*interval '1 minute',$8) RETURNING ${quoteColumns}`,
+        [id, actor.tenantId, input.venueId, input.customerId, actor.subjectId, JSON.stringify(price), policy.quoteMinutes, policy.paymentHoldMinutes],
       )
     ).rows[0]!;
     await recordTenantAudit(tx, actor, "quote.create", id, {
@@ -305,7 +308,7 @@ export async function confirmQuote(
           await available(tx, actor, quote.price.lines);
           const now = await databaseTime(tx);
           if (quote.expiresAt.getTime() <= now) throw new TennisBookingError("QUOTE_EXPIRED");
-          const until = request.staffHold ? Date.parse(request.staffHold.until) : now + 10 * 60_000;
+          const until = request.staffHold ? Date.parse(request.staffHold.until) : now + quote.paymentHoldMinutes * 60_000;
           if (until <= now) throw new TennisBookingError("INVALID_HOLD");
           const id = randomUUID();
           const free = quote.price.totalCents === 0;

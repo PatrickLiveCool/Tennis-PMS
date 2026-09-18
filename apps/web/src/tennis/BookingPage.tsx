@@ -514,7 +514,7 @@ export function BookingPage({
                 <p className={`tennis-note ${quoteExpired ? "is-warning" : ""}`}>
                   {quoteExpired
                     ? "报价已过期，请重新获取。"
-                    : `报价保留至 ${clock(draft.quote.expiresAt, venue.timezone)}；确认后锁场待付款 10 分钟。`}
+                    : `报价保留至 ${clock(draft.quote.expiresAt, venue.timezone)}；确认后锁场待付款 ${draft.quote.paymentHoldMinutes ?? 10} 分钟。`}
                 </p>
                 {permits(session, "hold_unpaid") && (
                   <details className="tennis-advanced">

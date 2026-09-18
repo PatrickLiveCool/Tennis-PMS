@@ -1,3 +1,4 @@
+import { saveBookingPolicy } from "../../packages/db/src/tennis/booking-policy.ts";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -458,5 +459,41 @@ describe("quotes and atomic multi-line orders", () => {
       [first.actor.tenantId],
     );
     await expect(searchCustomers(db, first.actor)).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+  });
+});
+
+
+describe("configured quote and hold deadlines", () => {
+  it("snapshots each quote's hold promise and never extends an existing order on configuration changes or replay", async () => {
+    const legacy = await quote([0]);
+    await saveBookingPolicy(db, first.actor, { quoteMinutes: 3, paymentHoldMinutes: 7, expectedRevision: 1 });
+    const next = await quote([1]);
+    expect(Date.parse(next.expiresAt) - Date.parse(next.createdAt)).toBeCloseTo(180000, -1);
+    expect(next.paymentHoldMinutes).toBe(7);
+    await saveBookingPolicy(db, first.actor, { quoteMinutes: 8, paymentHoldMinutes: 12, expectedRevision: 2 });
+    const key1 = key();
+    const oldOrder = await confirmQuote(db, first.actor, { quoteId: legacy.id, commandKey: key() });
+    const nextOrder = await confirmQuote(db, first.actor, { quoteId: next.id, commandKey: key1 });
+    expect(Date.parse(oldOrder.holdUntil!) - Date.parse(oldOrder.createdAt)).toBeCloseTo(600000, -1);
+    expect(Date.parse(nextOrder.holdUntil!) - Date.parse(nextOrder.createdAt)).toBeCloseTo(420000, -1);
+    const saved = (await db.query("SELECT expires_at FROM tennis.quotes WHERE id=$1", [next.id])).rows[0]!;
+    expect(saved.expires_at.toISOString()).toBe(next.expiresAt);
+    expect((await confirmQuote(db, first.actor, { quoteId: next.id, commandKey: key1 })).holdUntil).toBe(nextOrder.holdUntil);
+    expect((await getOrder(db, first.actor, oldOrder.id)).holdUntil).toBe(oldOrder.holdUntil);
+    const latest = await quote([2]);
+    expect(latest.paymentHoldMinutes).toBe(12);
+    expect(Date.parse(latest.expiresAt) - Date.parse(latest.createdAt)).toBeCloseTo(480000, -1);
+  });
+  it("preserves an explicit authorized staff hold and expires configured ordinary holds normally", async () => {
+    await saveBookingPolicy(db, first.actor, { quoteMinutes: 2, paymentHoldMinutes: 3, expectedRevision: 1 });
+    const until = new Date(Date.now() + 60 * 60_000).toISOString();
+    const reserved = await confirmQuote(db, first.actor, { quoteId: (await quote([0])).id, commandKey: key(), staffHold: { until, reason: "授权保留测试" } });
+    expect(reserved.holdUntil).toBe(until);
+    const ordinary = await confirm([1]);
+    expect(Date.parse(ordinary.holdUntil!) - Date.parse(ordinary.createdAt)).toBeCloseTo(180000, -1);
+    await db.query("UPDATE tennis.orders SET hold_until=clock_timestamp()-interval '1 second' WHERE id=$1", [ordinary.id]);
+    await expireDueOrders(db);
+    expect((await getOrder(db, first.actor, ordinary.id)).status).toBe("EXPIRED");
+    expect((await getOrder(db, first.actor, reserved.id)).status).toBe("HELD");
   });
 });
