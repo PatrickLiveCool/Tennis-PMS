@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { allocateCents, assertCents, type CourtPrice } from "../../../domain/src/tennis-pricing.ts";
 import { recordTenantAudit, TenantAccessError, type TenantActor } from "./access.ts";
-import { locateOrder, orderInTransaction, requireBookingVenue, type OrderLine } from "./booking.ts";
+import { locateOrder, orderInTransaction, requireBookingVenue, type OrderLine, type OrderRecord } from "./booking.ts";
 import { priceSelectionInTransaction } from "./catalog.ts";
 import { isCustomerActor, requireCustomer, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { CourtInventoryError } from "./inventory.ts";
@@ -18,6 +18,7 @@ export class TennisAmendmentError extends Error {
     readonly code:
       | "INVALID_AMENDMENT"
       | "ORDER_NOT_AMENDABLE"
+      | "UNPAID_ORDER_PAYMENT_UNRESOLVED"
       | "STALE_ORDER"
       | "AMENDMENT_EXPIRED"
       | "ORDER_AMENDMENT_PENDING"
@@ -45,6 +46,7 @@ export interface AmendmentRecord {
   customerId: string;
   createdBy: string;
   baseRevision: number;
+  unpaid: boolean;
   reason: string;
   status: "QUOTED" | "AWAITING_PAYMENT" | "APPLIED" | "CANCELLED" | "EXPIRED";
   expiresAt: string;
@@ -67,7 +69,7 @@ export async function amendmentInTransaction(
 ): Promise<AmendmentRecord & { confirmationRequest: unknown }> {
   const row = (
     await tx.query<AmendmentRow>(
-      `SELECT id,order_id AS "orderId",venue_id AS "venueId",customer_id AS "customerId",created_by AS "createdBy",base_revision AS "baseRevision",reason,status,
+      `SELECT id,order_id AS "orderId",venue_id AS "venueId",customer_id AS "customerId",created_by AS "createdBy",base_revision AS "baseRevision",unpaid,reason,status,
     expires_at AS "expiresAt",hold_until AS "holdUntil",supplemental_cents::float8 AS "supplementalCents",suggested_refund_cents::float8 AS "suggestedRefundCents",approved_refund_cents::float8 AS "approvedRefundCents",confirmation_request AS "confirmationRequest"
     FROM tennis.order_amendments WHERE tenant_id=$1 AND id=$2 FOR UPDATE`,
       [tenantId, id],
@@ -129,6 +131,24 @@ function employee(actor: BookingActor) {
 async function now(tx: pg.PoolClient): Promise<number> {
   return (await tx.query<{ time: Date }>("SELECT clock_timestamp() AS time")).rows[0]!.time.getTime();
 }
+/** Caller holds tenant/venue/order locks. Payment facts are never changed to permit an edit. */
+async function assertUnpaidEditable(tx: pg.PoolClient, tenantId: string, order: OrderRecord): Promise<void> {
+  if (
+    order.status !== "HELD" ||
+    order.paymentStatus !== "UNPAID" ||
+    !order.holdUntil ||
+    Date.parse(order.holdUntil) <= (await now(tx))
+  )
+    throw new TennisAmendmentError("ORDER_NOT_AMENDABLE");
+  const payment = await tx.query(
+    `SELECT id FROM tennis.payment_attempts p WHERE p.tenant_id=$1 AND p.order_id=$2 AND
+      (p.status NOT IN ('FAILED','EXPIRED','CANCELLED') OR p.provider_transaction_id IS NOT NULL
+       OR EXISTS(SELECT 1 FROM tennis.external_payment_receipts r WHERE r.tenant_id=p.tenant_id AND r.payment_id=p.id)
+       OR EXISTS(SELECT 1 FROM tennis.financial_exceptions x WHERE x.tenant_id=p.tenant_id AND x.payment_id=p.id)) LIMIT 1`,
+    [tenantId, order.id],
+  );
+  if (payment.rowCount) throw new TennisAmendmentError("UNPAID_ORDER_PAYMENT_UNRESOLVED");
+}
 function overlaps(
   a: { courtId: string; startAt: string; endAt: string },
   b: { courtId: string; startAt: string; endAt: string },
@@ -171,13 +191,96 @@ async function checkTargets(
     if (conflict.rowCount) throw new CourtInventoryError("INVENTORY_CONFLICT");
   }
 }
+/** Reprice only the current active projection; cancelled row snapshots stay available for history. */
+async function refreshUnpaidProjection(tx: pg.PoolClient, tenantId: string, orderId: string): Promise<void> {
+  await tx.query(
+    `WITH value AS (
+      SELECT count(*) AS count,coalesce(sum(amount_cents),0) AS total,
+        coalesce(jsonb_agg(price_snapshot ORDER BY position),'[]'::jsonb) AS lines
+      FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2 AND cancelled_at IS NULL
+    ) UPDATE tennis.orders o SET
+      total_cents=CASE WHEN v.count=0 THEN o.total_cents ELSE v.total END,
+      price_snapshot=CASE WHEN v.count=0 THEN o.price_snapshot ELSE jsonb_set(jsonb_set(o.price_snapshot,'{lines}',v.lines),'{totalCents}',to_jsonb(v.total)) END,
+      status=CASE WHEN v.count=0 THEN 'CANCELLED' WHEN v.total=0 THEN 'CONFIRMED' ELSE 'HELD' END,
+      payment_status=CASE WHEN v.count>0 AND v.total=0 THEN 'NOT_REQUIRED' ELSE 'UNPAID' END,
+      hold_until=CASE WHEN v.count=0 OR v.total=0 THEN NULL ELSE o.hold_until END,
+      revision=o.revision+1,updated_at=clock_timestamp()
+    FROM value v WHERE o.tenant_id=$1 AND o.id=$2`,
+    [tenantId, orderId],
+  );
+}
+/** No payment/refund is created: employees remove selected unpaid lines under the original hold. */
+export async function cancelUnpaidOrderLines(
+  db: pg.Pool,
+  actor: TenantActor,
+  input: {
+    orderId: string;
+    expectedRevision: number;
+    lineIds: readonly string[];
+    reason: string;
+    commandKey: string;
+  },
+): Promise<OrderRecord> {
+  employee(actor);
+  if (
+    !input.reason.trim() ||
+    input.reason.length > 2000 ||
+    !input.lineIds.length ||
+    input.lineIds.length > 100 ||
+    new Set(input.lineIds).size !== input.lineIds.length
+  )
+    throw new TennisAmendmentError("INVALID_AMENDMENT");
+  return withBookingTransaction(db, actor, async (tx) => {
+    const venueId = await locateOrder(tx, actor, input.orderId);
+    await requireBookingVenue(tx, actor, venueId, "book");
+    const { commandKey, ...request } = input;
+    const result = await idempotentCommand(
+      tx,
+      actor,
+      venueId,
+      commandKey,
+      "order.cancel_unpaid_lines",
+      { ...request, lineIds: [...request.lineIds].sort() },
+      async () => {
+        const order = await orderInTransaction(tx, actor, input.orderId);
+        if (order.revision !== input.expectedRevision) throw new TennisAmendmentError("STALE_ORDER");
+        await assertUnpaidEditable(tx, actor.tenantId, order);
+        await assertNoPendingAmendment(tx, actor.tenantId, order.id);
+        if (input.lineIds.some((id) => !order.lines.some((line) => line.id === id && !line.cancelledAt)))
+          throw new TennisAmendmentError("INVALID_AMENDMENT");
+        await tx.query(
+          "UPDATE tennis.order_lines SET cancelled_at=clock_timestamp(),cancelled_before_payment=true,initial_funding_cents=0 WHERE tenant_id=$1 AND order_id=$2 AND id=ANY($3::text[])",
+          [actor.tenantId, order.id, input.lineIds],
+        );
+        await tx.query(
+          "UPDATE tennis.occupancies SET released_at=clock_timestamp(),revision=revision+1 WHERE tenant_id=$1 AND order_line_id=ANY($2::text[]) AND released_at IS NULL",
+          [actor.tenantId, input.lineIds],
+        );
+        if (Date.parse(order.holdUntil!) <= (await now(tx))) throw new TennisAmendmentError("ORDER_NOT_AMENDABLE");
+        await refreshUnpaidProjection(tx, actor.tenantId, order.id);
+        await recordTenantAudit(tx, actor, "order.cancel_unpaid_lines", order.id, {
+          reason: input.reason.trim(),
+          lineIds: input.lineIds,
+          previousTotalCents: order.totalCents,
+        });
+        return { orderId: order.id };
+      },
+    );
+    return orderInTransaction(tx, actor, result.orderId);
+  });
+}
 export async function previewOrderAmendment(
   db: pg.Pool,
   actor: TenantActor,
   input: {
     orderId: string;
     expectedRevision: number;
-    changes: readonly { lineId: string; courtId: string; startAt: string; endAt: string }[];
+    changes: readonly {
+      lineId: string;
+      courtId: string;
+      startAt: string;
+      endAt: string;
+    }[];
     reason: string;
   },
 ): Promise<AmendmentRecord> {
@@ -196,12 +299,14 @@ export async function previewOrderAmendment(
     await expireVenueAmendments(tx, actor.tenantId, venueId);
     const order = await orderInTransaction(tx, actor, input.orderId);
     if (order.revision !== input.expectedRevision) throw new TennisAmendmentError("STALE_ORDER");
-    if (order.status !== "CONFIRMED" || order.paymentStatus === "UNPAID")
+    const unpaid = order.status === "HELD" && order.paymentStatus === "UNPAID";
+    if (unpaid) await assertUnpaidEditable(tx, actor.tenantId, order);
+    else if (order.status !== "CONFIRMED" || order.paymentStatus === "UNPAID")
       throw new TennisAmendmentError("ORDER_NOT_AMENDABLE");
     await assertNoPendingAmendment(tx, actor.tenantId, order.id);
     await requireCustomer(tx, actor, order.customerId);
     const price = await priceSelectionInTransaction(tx, actor, venueId, input.changes);
-    const available = await refundableLines(tx, actor.tenantId, order.id);
+    const available = unpaid ? new Map<string, number>() : await refundableLines(tx, actor.tenantId, order.id);
     const lines: AmendmentLine[] = [];
     for (const [i, change] of input.changes.entries()) {
       const old = order.lines.find((l) => l.id === change.lineId && !l.cancelledAt);
@@ -225,7 +330,7 @@ export async function previewOrderAmendment(
     }
     // Stable order controls all rounding, independent of the request array order.
     lines.sort((a, b) => a.lineId.localeCompare(b.lineId));
-    const increases = lines.map((l) => Math.max(0, l.new.totalCents - l.old.amountCents));
+    const increases = lines.map((l) => (unpaid ? 0 : Math.max(0, l.new.totalCents - l.old.amountCents)));
     const credits = lines.map((l) =>
       Math.min(Math.max(0, l.old.amountCents - l.new.totalCents), available.get(l.lineId) ?? 0),
     );
@@ -245,8 +350,8 @@ export async function previewOrderAmendment(
     await checkTargets(tx, actor.tenantId, order.id, lines);
     const id = randomUUID();
     await tx.query(
-      `INSERT INTO tennis.order_amendments(id,tenant_id,venue_id,order_id,customer_id,created_by,base_revision,status,reason,expires_at,supplemental_cents,suggested_refund_cents)
-      VALUES($1,$2,$3,$4,$5,$6,$7,'QUOTED',$8,clock_timestamp()+interval '5 minutes',$9,$10)`,
+      `INSERT INTO tennis.order_amendments(id,tenant_id,venue_id,order_id,customer_id,created_by,base_revision,status,reason,expires_at,supplemental_cents,suggested_refund_cents,unpaid)
+      VALUES($1,$2,$3,$4,$5,$6,$7,'QUOTED',$8,least(clock_timestamp()+interval '5 minutes',coalesce($12::timestamptz,'infinity')),$9,$10,$11)`,
       [
         id,
         actor.tenantId,
@@ -258,6 +363,8 @@ export async function previewOrderAmendment(
         input.reason.trim(),
         supplemental,
         refund,
+        unpaid,
+        unpaid ? order.holdUntil : null,
       ],
     );
     for (const line of lines)
@@ -316,7 +423,8 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
   const actor = { tenantId, subjectId: amendment.createdBy };
   const order = await orderInTransaction(tx, actor, amendment.orderId);
   if (order.revision !== amendment.baseRevision) throw new TennisAmendmentError("STALE_ORDER");
-  if (order.status !== "CONFIRMED") throw new TennisAmendmentError("ORDER_NOT_AMENDABLE");
+  if (amendment.unpaid) await assertUnpaidEditable(tx, tenantId, order);
+  else if (order.status !== "CONFIRMED") throw new TennisAmendmentError("ORDER_NOT_AMENDABLE");
   if (amendment.supplementalCents > 0) {
     const captured = (
       await tx.query<{ amount: string }>(
@@ -353,7 +461,7 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
   );
   for (const line of amendment.lines) {
     await tx.query(
-      "UPDATE tennis.order_lines SET court_id=$1,start_at=$2,end_at=$3,amount_cents=$4,price_snapshot=$5::jsonb WHERE tenant_id=$6 AND id=$7",
+      "UPDATE tennis.order_lines SET court_id=$1,start_at=$2,end_at=$3,amount_cents=$4,price_snapshot=$5::jsonb,initial_funding_cents=CASE WHEN $8 THEN $4 ELSE initial_funding_cents END WHERE tenant_id=$6 AND id=$7",
       [
         line.new.courtId,
         line.new.startAt,
@@ -362,6 +470,7 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
         JSON.stringify(line.new),
         tenantId,
         line.lineId,
+        amendment.unpaid,
       ],
     );
     await tx.query(
@@ -373,6 +482,7 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
   const deadline = Date.parse(amendment.status === "QUOTED" ? amendment.expiresAt : amendment.holdUntil!);
   if (
     deadline <= commitTime ||
+    (amendment.unpaid && Date.parse(order.holdUntil!) <= commitTime) ||
     amendment.lines.some((l) => Date.parse(l.old.startAt) <= commitTime || Date.parse(l.new.startAt) <= commitTime)
   )
     throw new TennisAmendmentError("AMENDMENT_EXPIRED");
@@ -381,15 +491,21 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
     [tenantId, id],
   );
   // The current projection may change; original quote and immutable amendment snapshots preserve history.
-  await tx.query(
-    `UPDATE tennis.orders SET payment_status=CASE WHEN payment_status='NOT_REQUIRED' AND (SELECT sum(amount_cents) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2)>0 THEN 'PAID' ELSE payment_status END, total_cents=(SELECT sum(amount_cents) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2),
-    price_snapshot=jsonb_set(jsonb_set(price_snapshot,'{lines}',(SELECT jsonb_agg(price_snapshot ORDER BY position) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2)),
-    '{totalCents}',to_jsonb((SELECT sum(amount_cents) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2))),revision=revision+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2`,
-    [tenantId, order.id],
-  );
+  if (amendment.unpaid) await refreshUnpaidProjection(tx, tenantId, order.id);
+  else
+    await tx.query(
+      `UPDATE tennis.orders SET payment_status=CASE WHEN payment_status='NOT_REQUIRED' AND (SELECT sum(amount_cents) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2 AND NOT cancelled_before_payment)>0 THEN 'PAID' ELSE payment_status END, total_cents=(SELECT sum(amount_cents) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2 AND NOT cancelled_before_payment),
+    price_snapshot=jsonb_set(jsonb_set(price_snapshot,'{lines}',(SELECT jsonb_agg(price_snapshot ORDER BY position) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2 AND NOT cancelled_before_payment)),
+    '{totalCents}',to_jsonb((SELECT sum(amount_cents) FROM tennis.order_lines WHERE tenant_id=$1 AND order_id=$2 AND NOT cancelled_before_payment))),revision=revision+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2`,
+      [tenantId, order.id],
+    );
   const refundLines = amendment.lines
     .filter((l) => (l.approvedRefundCents ?? 0) > 0)
-    .map((l) => ({ lineId: l.lineId, refundCents: l.approvedRefundCents!, cancel: false }));
+    .map((l) => ({
+      lineId: l.lineId,
+      refundCents: l.approvedRefundCents!,
+      cancel: false,
+    }));
   if (refundLines.length)
     await createRefundGroupInTransaction(tx, actor, {
       orderId: order.id,
@@ -397,7 +513,7 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
       amendmentId: id,
       lines: refundLines,
     });
-  await refreshOrderPaymentStatus(tx, tenantId, order.id);
+  if (!amendment.unpaid) await refreshOrderPaymentStatus(tx, tenantId, order.id);
   await recordTenantAudit(tx, actor, "amendment.apply", id, {
     orderId: order.id,
     supplementalCents: amendment.supplementalCents,
@@ -421,7 +537,10 @@ export async function confirmOrderAmendment(
   return withBookingTransaction(db, actor, async (tx) => {
     const located = await locateAmendment(tx, actor, input.amendmentId, "book");
     await expireVenueAmendments(tx, actor.tenantId, located.venueId);
-    const request = { amendmentId: input.amendmentId, approvedRefundLines: approved };
+    const request = {
+      amendmentId: input.amendmentId,
+      approvedRefundLines: approved,
+    };
     const result = await idempotentCommand(
       tx,
       actor,
@@ -441,6 +560,7 @@ export async function confirmOrderAmendment(
         if (amendment.status !== "QUOTED" || Date.parse(amendment.expiresAt) <= (await now(tx)))
           throw new TennisAmendmentError("AMENDMENT_EXPIRED");
         if (order.revision !== amendment.baseRevision) throw new TennisAmendmentError("STALE_ORDER");
+        if (amendment.unpaid) await assertUnpaidEditable(tx, actor.tenantId, order);
         await assertNoPendingAmendment(tx, actor.tenantId, order.id);
         if (amendment.suggestedRefundCents > 0) {
           await requireBookingVenue(tx, actor, located.venueId, "refund");
@@ -596,7 +716,9 @@ export async function cancelOrderAmendment(
       const amendment = await amendmentInTransaction(tx, actor.tenantId, input.amendmentId);
       if (amendment.status === "APPLIED") throw new TennisAmendmentError("AMENDMENT_NOT_CANCELLABLE");
       await releaseAmendmentInTransaction(tx, actor.tenantId, amendment.id, "CANCELLED");
-      await recordTenantAudit(tx, actor, "amendment.cancel", amendment.id, { reason: input.reason.trim() });
+      await recordTenantAudit(tx, actor, "amendment.cancel", amendment.id, {
+        reason: input.reason.trim(),
+      });
       return { amendmentId: amendment.id };
     });
     return amendmentInTransaction(tx, actor.tenantId, input.amendmentId);
@@ -606,7 +728,12 @@ export async function beginAmendmentPayment(
   db: pg.Pool,
   actor: BookingActor,
   gateway: LocalMockPaymentGateway,
-  input: { amendmentId: string; walletCents: number; commandKey: string; staffReason?: string },
+  input: {
+    amendmentId: string;
+    walletCents: number;
+    commandKey: string;
+    staffReason?: string;
+  },
 ): Promise<PaymentRecord> {
   assertCents(input.walletCents);
   return withBookingTransaction(db, actor, async (tx) => {

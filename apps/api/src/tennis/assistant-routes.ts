@@ -20,12 +20,12 @@ import {
   confirmQuote,
   createQuote,
   getCommandReceipt,
-  listOrders,
 } from "../../../../packages/db/src/tennis/booking.ts";
 import {
   accessibleCourts,
   bookingCustomers,
   orderDetail,
+  orderList,
   venueSchedule,
 } from "../../../../packages/db/src/tennis/views.ts";
 import { getWallet } from "../../../../packages/db/src/tennis/wallet.ts";
@@ -153,9 +153,14 @@ export function registerAssistantRoutes(
   );
   agentGet("/courts", (request) => accessibleCourts(db, agent(request), venue(request)));
   agentGet("/schedule", (request) => venueSchedule(db, agent(request), venue(request), query(request).date ?? ""));
-  agentGet("/orders", (request) => listOrders(db, agent(request), venue(request)));
+  agentGet("/orders", (request) => orderList(db, agent(request), venue(request), request.query));
   agentGet("/orders/:id", (request) => orderDetail(db, agent(request), param(request)));
-  agentGet("/customers/:id/wallet", (request) => getWallet(db, agent(request), param(request)));
+  agentGet("/customers/:id/wallet", (request) =>
+    getWallet(db, agent(request), param(request), {
+      pageSize: query(request).pageSize === undefined ? undefined : Number(query(request).pageSize),
+      cursor: query(request).cursor,
+    }),
+  );
   agentGet("/receipts/:id", (request) => getCommandReceipt(db, agent(request), param(request)));
   agentPost(
     "/quotes",

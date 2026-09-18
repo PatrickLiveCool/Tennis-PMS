@@ -1,7 +1,13 @@
 import type pg from "pg";
 import { assertCents } from "../../../domain/src/tennis-pricing.ts";
 import { TennisWalletError } from "../../../domain/src/tennis-wallet.ts";
-import { recordTenantAudit, requireTenantPermission, requireVenuePermission, type TenantActor } from "./access.ts";
+import {
+  recordTenantAudit,
+  requireTenantPermission,
+  requireVenuePermission,
+  TenantAccessError,
+  type TenantActor,
+} from "./access.ts";
 import { isCustomerActor, requireCustomer, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { idempotentCommand } from "./receipts.ts";
 import { creditWalletBatch, lockWallet, walletBalanceInTransaction, type WalletBalance } from "./wallet-store.ts";
@@ -83,8 +89,10 @@ export async function getWallet(
   db: pg.Pool,
   actor: BookingActor,
   customerId: string,
+  page: { pageSize?: number | undefined; cursor?: string | undefined } = {},
 ): Promise<{
   balance: WalletBalance;
+  nextCursor: string | null;
   entries: {
     id: string;
     kind: string;
@@ -94,9 +102,24 @@ export async function getWallet(
     createdAt: string;
   }[];
 }> {
+  const pageSize = page.pageSize ?? 50;
+  if (
+    !Number.isInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > 200 ||
+    (page.cursor !== undefined && (typeof page.cursor !== "string" || !page.cursor || page.cursor.length > 200))
+  )
+    throw Object.assign(new Error("INVALID_REQUEST"), { code: "INVALID_REQUEST", statusCode: 400 });
   return withBookingTransaction(db, actor, async (tx) => {
     if (!isCustomerActor(actor)) await requireTenantPermission(tx, actor, "manage_members");
     await requireCustomer(tx, actor, customerId);
+    if (page.cursor !== undefined) {
+      const pivot = await tx.query(
+        "SELECT id FROM tennis.wallet_entries WHERE tenant_id=$1 AND customer_id=$2 AND id=$3",
+        [actor.tenantId, customerId, page.cursor],
+      );
+      if (pivot.rowCount !== 1) throw new TenantAccessError("RESOURCE_NOT_FOUND");
+    }
     const rows = (
       await tx.query<{
         id: string;
@@ -106,15 +129,21 @@ export async function getWallet(
         sourceId: string;
         createdAt: Date;
       }>(
-        `SELECT id,kind,
+        `SELECT e.id,e.kind,
       principal_cents::float8 AS "principalCents",gift_cents::float8 AS "giftCents",source_id AS "sourceId",created_at AS "createdAt"
-      FROM tennis.wallet_entries WHERE tenant_id=$1 AND customer_id=$2 ORDER BY created_at DESC,id LIMIT 200`,
-        [actor.tenantId, customerId],
+      FROM tennis.wallet_entries e WHERE e.tenant_id=$1 AND e.customer_id=$2
+        AND ($3::text IS NULL OR (e.created_at,e.id) < (
+          SELECT p.created_at,p.id FROM tennis.wallet_entries p
+          WHERE p.tenant_id=$1 AND p.customer_id=$2 AND p.id=$3
+        ))
+      ORDER BY e.created_at DESC,e.id DESC LIMIT $4`,
+        [actor.tenantId, customerId, page.cursor ?? null, pageSize + 1],
       )
     ).rows;
     return {
       balance: await walletBalanceInTransaction(tx, actor.tenantId, customerId),
-      entries: rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+      entries: rows.slice(0, pageSize).map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+      nextCursor: rows.length > pageSize ? rows[pageSize - 1]!.id : null,
     };
   });
 }

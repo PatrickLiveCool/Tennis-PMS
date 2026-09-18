@@ -13,6 +13,7 @@ import type {
   Wallet,
 } from "./types";
 import { AssistantPanel } from "./AssistantPanel";
+import { OrderPagination, useOrderDirectory } from "./OrderDirectory";
 import { AmendmentPanel } from "./AmendmentPanel";
 import { permits } from "./types";
 import {
@@ -44,18 +45,17 @@ export function OrdersPage({
   scope: string;
   openOrder: (id: string) => void;
 }) {
-  const orders = useLoad(() => api<OrderDetail[]>(`/venues/${venue.id}/orders`), [api, venue.id]);
   const [filters, setFilters] = useDraft(`tennis:orders:${scope}`, { query: "", status: "ALL" });
-  const filtered = orders.data
-    ?.filter(
-      (order) =>
-        (filters.status === "ALL" || order.status === filters.status) &&
-        `${order.id} ${order.customerName ?? ""}`.toLowerCase().includes(filters.query.toLowerCase()),
-    )
-    .map((order) => ({
-      ...order,
-      activeLines: order.lines.filter((line) => !line.cancelledAt).sort((a, b) => a.startAt.localeCompare(b.startAt)),
-    }));
+  const [query, setQuery] = useState(filters.query);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(filters.query), 250);
+    return () => window.clearTimeout(timer);
+  }, [filters.query]);
+  const searching = query.trim() !== filters.query.trim();
+  const orders = useOrderDirectory(api, venue.id, `orders:${scope}`, {
+    q: query.trim(),
+    status: filters.status === "ALL" ? undefined : filters.status,
+  });
   return (
     <>
       <PageHeading title="预订订单" description="查看组合预订、付款与退款进度。">
@@ -69,6 +69,7 @@ export function OrdersPage({
             <input
               aria-label="搜索订单或客户"
               placeholder="订单号 / 客户姓名"
+              maxLength={200}
               value={filters.query}
               onChange={(e) => setFilters({ ...filters, query: e.target.value })}
             />
@@ -83,11 +84,12 @@ export function OrdersPage({
             <option value="CONFIRMED">已预订</option>
             <option value="CANCELLED">已取消</option>
             <option value="EXPIRED">已到期</option>
+            <option value="COMPLETED">已完成</option>
           </select>
         </div>
-        {!orders.data && orders.busy ? (
+        {searching || (!orders.data && orders.busy) ? (
           <LoadingBlock />
-        ) : !filtered?.length ? (
+        ) : !orders.data ? null : !orders.data.orders.length ? (
           <EmptyState title="暂无符合条件的订单" detail="从场地排期选择球场和时间，即可建立第一笔预订。" />
         ) : (
           <div className="tennis-table-scroll">
@@ -104,19 +106,19 @@ export function OrdersPage({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((order) => (
+                {orders.data.orders.map((order) => (
                   <tr key={order.id}>
                     <td>
                       <strong>{order.customerName ?? "客户预订"}</strong>
                       <small>{order.id.slice(0, 8)}</small>
                     </td>
                     <td>
-                      {order.activeLines.length
-                        ? dateTime(order.activeLines[0]?.startAt, venue.timezone)
+                      {order.matchingLines.length
+                        ? dateTime(order.matchingLines[0]?.startAt, venue.timezone)
                         : "无有效时段"}
-                      {order.activeLines.length > 1 && <small>含其他 {order.activeLines.length - 1} 条时段</small>}
+                      {order.matchingLines.length > 1 && <small>含其他 {order.matchingLines.length - 1} 条时段</small>}
                     </td>
-                    <td>{order.activeLines.length} 条</td>
+                    <td>{order.matchingLines.length} 条</td>
                     <td className="tennis-numeric">{money(order.totalCents)}</td>
                     <td>
                       <Badge value={order.status} />
@@ -136,6 +138,7 @@ export function OrdersPage({
             </table>
           </div>
         )}
+        {!searching && <OrderPagination directory={orders} />}
       </Panel>
     </>
   );

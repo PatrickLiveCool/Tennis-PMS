@@ -22,6 +22,7 @@ import {
 import {
   beginAmendmentPayment,
   cancelOrderAmendment,
+  cancelUnpaidOrderLines,
   confirmOrderAmendment,
   expireDueAmendments,
   getOrderAmendment,
@@ -55,9 +56,16 @@ async function book(indices = [0], walletCents?: number) {
   const quote = await createQuote(db, customer, {
     venueId: first.venueId,
     customerId: customer.customerId,
-    lines: indices.map((i) => ({ courtId: courts[i]!, startAt: time("18:00"), endAt: time("19:00") })),
+    lines: indices.map((i) => ({
+      courtId: courts[i]!,
+      startAt: time("18:00"),
+      endAt: time("19:00"),
+    })),
   });
-  const order = await confirmQuote(db, customer, { quoteId: quote.id, commandKey: key() });
+  const order = await confirmQuote(db, customer, {
+    quoteId: quote.id,
+    commandKey: key(),
+  });
   if (order.totalCents) {
     const payment = await beginOrderPayment(db, customer, gateway, {
       orderId: order.id,
@@ -108,7 +116,14 @@ async function preview(order: OrderRecord, index = 2, start = "19:00", end = "20
     orderId: order.id,
     expectedRevision: order.revision,
     reason: "客户确认改期",
-    changes: [{ lineId: order.lines[0]!.id, courtId: courts[index]!, startAt: time(start), endAt: time(end) }],
+    changes: [
+      {
+        lineId: order.lines[0]!.id,
+        courtId: courts[index]!,
+        startAt: time(start),
+        endAt: time(end),
+      },
+    ],
   });
 }
 async function confirm(amendment: AmendmentRecord) {
@@ -130,7 +145,13 @@ async function pay(amendment: AmendmentRecord, walletCents = amendment.supplemen
 }
 async function active() {
   return (
-    await db.query<{ id: string; court_id: string; start_at: Date; end_at: Date; amendment_id: string | null }>(
+    await db.query<{
+      id: string;
+      court_id: string;
+      start_at: Date;
+      end_at: Date;
+      amendment_id: string | null;
+    }>(
       "SELECT id,court_id,start_at,end_at,amendment_id FROM tennis.occupancies WHERE tenant_id=$1 AND released_at IS NULL ORDER BY start_at",
       [first.actor.tenantId],
     )
@@ -152,12 +173,20 @@ beforeEach(async () => {
   await updateVenue(db, first.actor, {
     ...venue,
     expectedRevision: venue.catalogRevision,
-    openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })),
+    openingHours: Array.from({ length: 7 }, (_, weekday) => ({
+      weekday,
+      startMinute: 480,
+      endMinute: 1320,
+    })),
     minimumBookingMinutes: 15,
   });
   courts = [];
   for (const [i, price] of [10000, 8000, 12000, 10000].entries()) {
-    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: `合成球场${i}`, indoor: true });
+    const court = await createCourt(db, first.actor, {
+      venueId: first.venueId,
+      name: `合成球场${i}`,
+      indoor: true,
+    });
     await setCourtPrice(db, first.actor, {
       venueId: first.venueId,
       courtId: court.id,
@@ -166,7 +195,9 @@ beforeEach(async () => {
     });
     courts.push(court.id);
   }
-  const profile = await createCustomer(db, first.actor, { nickname: "改期客户" }),
+  const profile = await createCustomer(db, first.actor, {
+      nickname: "改期客户",
+    }),
     subjectId = key();
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'synthetic amendment customer')", [subjectId]);
   await db.query("UPDATE tennis.customers SET subject_id=$1 WHERE tenant_id=$2 AND id=$3", [
@@ -174,7 +205,12 @@ beforeEach(async () => {
     first.actor.tenantId,
     profile.id,
   ]);
-  customer = { kind: "customer", tenantId: first.actor.tenantId, subjectId, customerId: profile.id };
+  customer = {
+    kind: "customer",
+    tenantId: first.actor.tenantId,
+    subjectId,
+    customerId: profile.id,
+  };
   await recordOfflineTopup(db, first.actor, {
     venueId: first.venueId,
     customerId: profile.id,
@@ -227,7 +263,11 @@ describe("paid order amendments", () => {
       expectedRevision: changed.revision,
       reason: "取消使用",
       commandKey: key(),
-      lines: changed.lines.map((l) => ({ lineId: l.id, refundCents: l.amountCents, cancel: true })),
+      lines: changed.lines.map((l) => ({
+        lineId: l.id,
+        refundCents: l.amountCents,
+        cancel: true,
+      })),
     });
     expect(refund.amountCents).toBe(18000);
     expect(refund.status).toBe("SUCCEEDED");
@@ -274,7 +314,11 @@ describe("paid order amendments", () => {
         lines: [{ courtId: courts[0]!, startAt: time("19:00"), endAt: time("20:00") }],
       }),
     ).rejects.toMatchObject({ code: "INVENTORY_CONFLICT" });
-    await cancelOrderAmendment(db, first.actor, { amendmentId: proposal.id, reason: "保留原时段", commandKey: key() });
+    await cancelOrderAmendment(db, first.actor, {
+      amendmentId: proposal.id,
+      reason: "保留原时段",
+      commandKey: key(),
+    });
     expect(await active()).toHaveLength(1);
   });
   it("rolls back a whole group when a target court is occupied after preview", async () => {
@@ -298,7 +342,9 @@ describe("paid order amendments", () => {
       startAt: time("19:00"),
       endAt: time("20:00"),
     });
-    await expect(confirm(proposal)).rejects.toMatchObject({ code: "INVENTORY_CONFLICT" });
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "INVENTORY_CONFLICT",
+    });
     expect((await getOrder(db, customer, order.id)).lines).toEqual(order.lines);
     expect((await active()).filter((o) => o.amendment_id)).toHaveLength(0);
   });
@@ -343,7 +389,10 @@ describe("paid order amendments", () => {
     const order = await book([0], 0);
     const proposal = await preview(order, 1);
     await expect(
-      confirmOrderAmendment(db, first.actor, { amendmentId: proposal.id, commandKey: key() }),
+      confirmOrderAmendment(db, first.actor, {
+        amendmentId: proposal.id,
+        commandKey: key(),
+      }),
     ).rejects.toMatchObject({ code: "INVALID_AMENDMENT" });
     const applied = await confirm(proposal);
     expect(applied.status).toBe("APPLIED");
@@ -468,7 +517,14 @@ describe("paid order amendments", () => {
       confirmOrderAmendment(db, first.actor, input),
     ]);
     expect(results[0]).toEqual(results[1]);
-    expect((await confirmOrderAmendment(db, first.actor, { ...input, commandKey: key() })).id).toBe(proposal.id);
+    expect(
+      (
+        await confirmOrderAmendment(db, first.actor, {
+          ...input,
+          commandKey: key(),
+        })
+      ).id,
+    ).toBe(proposal.id);
     expect((await getCommandReceipt(db, first.actor, input.commandKey))?.result.amendmentId).toBe(proposal.id);
     expect(await active()).toHaveLength(1);
     await expect(
@@ -482,13 +538,18 @@ describe("paid order amendments", () => {
     const order = await book();
     const proposal = await preview(order);
     await expect(
-      confirmOrderAmendment(db, customer, { amendmentId: proposal.id, commandKey: key() }),
+      confirmOrderAmendment(db, customer, {
+        amendmentId: proposal.id,
+        commandKey: key(),
+      }),
     ).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
     await expect(getOrderAmendment(db, other.actor, proposal.id)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
     await db.query("UPDATE tennis.order_amendments SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1", [
       proposal.id,
     ]);
-    await expect(confirm(proposal)).rejects.toMatchObject({ code: "AMENDMENT_EXPIRED" });
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "AMENDMENT_EXPIRED",
+    });
     expect((await getOrder(db, customer, order.id)).lines).toEqual(order.lines);
   });
   it("serializes competing amendments and blocks refunds until the pending change is resolved", async () => {
@@ -516,8 +577,15 @@ describe("paid order amendments", () => {
         { courtId: courts[0]!, startAt: time("18:00"), endAt: time("19:00") },
       ],
     });
-    const original = await confirmQuote(db, customer, { quoteId: quote.id, commandKey: key() });
-    await beginOrderPayment(db, customer, gateway, { orderId: original.id, walletCents: 20000, commandKey: key() });
+    const original = await confirmQuote(db, customer, {
+      quoteId: quote.id,
+      commandKey: key(),
+    });
+    await beginOrderPayment(db, customer, gateway, {
+      orderId: original.id,
+      walletCents: 20000,
+      commandKey: key(),
+    });
     const order = await getOrder(db, customer, original.id);
     await confirm(await preview(order, 0, "15:00", "16:00"));
     const changed = await getOrder(db, customer, order.id);
@@ -527,7 +595,13 @@ describe("paid order amendments", () => {
         await createQuote(db, customer, {
           venueId: first.venueId,
           customerId: customer.customerId,
-          lines: [{ courtId: courts[0]!, startAt: time("16:00"), endAt: time("18:00") }],
+          lines: [
+            {
+              courtId: courts[0]!,
+              startAt: time("16:00"),
+              endAt: time("18:00"),
+            },
+          ],
         })
       ).price.totalCents,
     ).toBe(20000);
@@ -542,8 +616,18 @@ describe("paid order amendments", () => {
       expectedRevision: order.revision,
       reason: "多片共同改期",
       changes: [
-        { lineId: order.lines[0]!.id, courtId: courts[2]!, startAt: time("19:00"), endAt: time(end) },
-        { lineId: order.lines[1]!.id, courtId: courts[1]!, startAt: time("19:00"), endAt: time("20:00") },
+        {
+          lineId: order.lines[0]!.id,
+          courtId: courts[2]!,
+          startAt: time("19:00"),
+          endAt: time(end),
+        },
+        {
+          lineId: order.lines[1]!.id,
+          courtId: courts[1]!,
+          startAt: time("19:00"),
+          endAt: time("20:00"),
+        },
       ],
     });
     expect(proposal.supplementalCents).toBe(supplement);
@@ -556,7 +640,11 @@ describe("paid order amendments", () => {
       expectedRevision: current.revision,
       reason: "逐明细全退",
       commandKey: key(),
-      lines: current.lines.map((l) => ({ lineId: l.id, refundCents: l.amountCents, cancel: true })),
+      lines: current.lines.map((l) => ({
+        lineId: l.id,
+        refundCents: l.amountCents,
+        cancel: true,
+      })),
     });
     expect(group.status).toBe("SUCCEEDED");
     expect((await getWallet(db, customer, customer.customerId)).balance.totalCents).toBe(1200000);
@@ -589,7 +677,11 @@ describe("paid order amendments", () => {
       courts[2],
     ]);
     await confirm(proposal);
-    const input = { amendmentId: proposal.id, walletCents: 2000, commandKey: key() };
+    const input = {
+      amendmentId: proposal.id,
+      walletCents: 2000,
+      commandKey: key(),
+    };
     const results = await Promise.all([
       beginAmendmentPayment(db, customer, gateway, input),
       beginAmendmentPayment(db, customer, gateway, input),
@@ -727,5 +819,359 @@ describe("paid order amendments", () => {
     await expect(cancelFreeOrderLines(db, first.actor, input)).rejects.toMatchObject({ code: "ORDER_REQUIRES_REFUND" });
     await expect(cancelFreeOrderLines(db, other.actor, input)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
     expect(await active()).toHaveLength(1);
+  });
+});
+
+async function held(indices = [0, 1], staff = true) {
+  const actor = staff ? first.actor : customer;
+  const quote = await createQuote(db, actor, {
+    venueId: first.venueId,
+    customerId: customer.customerId,
+    lines: indices.map((index) => ({
+      courtId: courts[index]!,
+      startAt: time("18:00"),
+      endAt: time("19:00"),
+    })),
+  });
+  return confirmQuote(db, actor, {
+    quoteId: quote.id,
+    commandKey: key(),
+    ...(staff ? { staffHold: { until: time("17:00"), reason: "已约定稍后付款" } } : {}),
+  });
+}
+const cancelLines = (order: OrderRecord, lineIds = [order.lines[0]!.id], commandKey = key()) =>
+  cancelUnpaidOrderLines(db, first.actor, {
+    orderId: order.id,
+    expectedRevision: order.revision,
+    lineIds,
+    commandKey,
+    reason: "客户要求减少时段",
+  });
+describe("unpaid order line adjustments", () => {
+  it("changes only selected held lines and preserves the original deadline, reason and unpaid balance", async () => {
+    const order = await held();
+    const proposal = await preview(order);
+    expect(proposal).toMatchObject({
+      unpaid: true,
+      supplementalCents: 0,
+      suggestedRefundCents: 0,
+    });
+    expect(Date.parse(proposal.expiresAt)).toBeLessThanOrEqual(Date.parse(order.holdUntil!));
+    await confirm(proposal);
+    const changed = await getOrder(db, customer, order.id);
+    expect(changed).toMatchObject({
+      status: "HELD",
+      paymentStatus: "UNPAID",
+      totalCents: 20000,
+      holdUntil: order.holdUntil,
+      holdReason: order.holdReason,
+      holdKind: "STAFF",
+    });
+    expect(changed.lines[1]).toEqual(order.lines[1]);
+    expect(changed.lines[0]).toMatchObject({
+      courtId: courts[2],
+      amountCents: 12000,
+    });
+    expect(await active()).toHaveLength(2);
+    expect(
+      (await db.query("SELECT id FROM tennis.payment_attempts WHERE tenant_id=$1", [first.actor.tenantId])).rowCount,
+    ).toBe(0);
+    await beginOrderPayment(db, customer, gateway, {
+      orderId: order.id,
+      walletCents: changed.totalCents,
+      commandKey: key(),
+    });
+    const paid = await getOrder(db, customer, order.id);
+    const refund = await requestOrderRefundGroup(db, first.actor, {
+      orderId: paid.id,
+      expectedRevision: paid.revision,
+      commandKey: key(),
+      reason: "按新已付金额全退",
+      lines: paid.lines.map((line) => ({
+        lineId: line.id,
+        refundCents: line.amountCents,
+        cancel: true,
+      })),
+    });
+    expect(refund).toMatchObject({ status: "SUCCEEDED", amountCents: 20000 });
+  });
+  it("retains the ordinary ten-minute hold and stops confirmation after that original deadline", async () => {
+    const order = await held([0], false);
+    await db.query("UPDATE tennis.orders SET hold_until=clock_timestamp()+interval '30 seconds' WHERE id=$1", [
+      order.id,
+    ]);
+    const before = await getOrder(db, customer, order.id);
+    const proposal = await preview(before);
+    expect(proposal.expiresAt).toBe(before.holdUntil);
+    await db.query("UPDATE tennis.orders SET hold_until=clock_timestamp()-interval '1 second' WHERE id=$1", [order.id]);
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "ORDER_NOT_AMENDABLE",
+    });
+    expect(await active()).toHaveLength(1);
+    expect(
+      (await db.query("SELECT court_id FROM tennis.order_lines WHERE order_id=$1", [order.id])).rows[0]!.court_id,
+    ).toBe(courts[0]);
+  });
+  it("rolls back a conflicting target without freeing either held line", async () => {
+    const order = await held();
+    const proposal = await preview(order);
+    await occupyCourt(db, first.actor, {
+      id: key(),
+      courtId: courts[2]!,
+      kind: "COURSE",
+      sourceId: "competing-course",
+      startAt: time("19:00"),
+      endAt: time("20:00"),
+    });
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "INVENTORY_CONFLICT",
+    });
+    expect(await getOrder(db, customer, order.id)).toEqual(order);
+    expect(await active()).toHaveLength(3);
+  });
+  it("rejects both operations while a payment is pending and preserves its wallet reservation", async () => {
+    const order = await held();
+    const proposal = await preview(order);
+    const payment = await beginOrderPayment(db, customer, gateway, {
+      orderId: order.id,
+      walletCents: 5000,
+      commandKey: key(),
+    });
+    const before = await getWallet(db, customer, customer.customerId);
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "UNPAID_ORDER_PAYMENT_UNRESOLVED",
+    });
+    await expect(cancelLines(order)).rejects.toMatchObject({
+      code: "UNPAID_ORDER_PAYMENT_UNRESOLVED",
+    });
+    expect((await getOrderPayment(db, customer, payment.id)).status).toBe("PENDING");
+    expect((await getWallet(db, customer, customer.customerId)).balance).toEqual(before.balance);
+    expect(await getOrder(db, customer, order.id)).toEqual(order);
+    await settleVerifiedPayment(db, event(payment));
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "STALE_ORDER",
+    });
+  });
+  it("serializes a payment callback against a held amendment without losing the original booking", async () => {
+    const order = await held();
+    const proposal = await preview(order);
+    const payment = await beginOrderPayment(db, customer, gateway, {
+      orderId: order.id,
+      walletCents: 5000,
+      commandKey: key(),
+    });
+    const outcomes = await Promise.allSettled([confirm(proposal), settleVerifiedPayment(db, event(payment))]);
+    expect(outcomes[0]!.status).toBe("rejected");
+    if (outcomes[0]!.status === "rejected")
+      expect(["UNPAID_ORDER_PAYMENT_UNRESOLVED", "STALE_ORDER"]).toContain(outcomes[0]!.reason.code);
+    expect(outcomes[1]!.status).toBe("fulfilled");
+    const paid = await getOrder(db, customer, order.id);
+    expect(paid).toMatchObject({
+      status: "CONFIRMED",
+      paymentStatus: "PAID",
+      totalCents: order.totalCents,
+    });
+    expect(paid.lines).toEqual(order.lines);
+    expect(await active()).toHaveLength(2);
+    expect((await getWallet(db, customer, customer.customerId)).balance.reservedCents).toBe(0);
+  });
+  it("blocks a held record with an unresolved external receipt without altering the receipt", async () => {
+    const order = await held();
+    const payment = await beginOrderPayment(db, customer, gateway, {
+      orderId: order.id,
+      walletCents: 0,
+      commandKey: key(),
+    });
+    // Simulate the guarded inconsistent/external-unknown state; production code never edits a receipt to make an order adjustable.
+    await db.query(
+      "UPDATE tennis.payment_attempts SET status='REFUND_REQUIRED',provider_transaction_id=$2 WHERE id=$1",
+      [payment.id, key()],
+    );
+    await expect(cancelLines(order)).rejects.toMatchObject({
+      code: "UNPAID_ORDER_PAYMENT_UNRESOLVED",
+    });
+    await expect(preview(order)).rejects.toMatchObject({
+      code: "UNPAID_ORDER_PAYMENT_UNRESOLVED",
+    });
+    expect((await getOrderPayment(db, customer, payment.id)).status).toBe("REFUND_REQUIRED");
+    expect(await getOrder(db, customer, order.id)).toEqual(order);
+  });
+  it("partially cancels without repricing remaining lines, then pays/amends/refunds only the remaining funding", async () => {
+    const order = await held();
+    const requestKey = key();
+    const changed = await cancelLines(order, [order.lines[0]!.id], requestKey);
+    expect(changed).toMatchObject({
+      totalCents: 8000,
+      status: "HELD",
+      paymentStatus: "UNPAID",
+      holdUntil: order.holdUntil,
+      holdReason: order.holdReason,
+    });
+    expect(changed.lines[0]).toMatchObject({ amountCents: 10000 });
+    expect(changed.lines[0]!.cancelledAt).not.toBeNull();
+    expect(changed.lines[1]).toEqual(order.lines[1]);
+    expect(await cancelLines(order, [order.lines[0]!.id], requestKey)).toEqual(changed);
+    await expect(cancelLines(order, [order.lines[1]!.id], requestKey)).rejects.toMatchObject({
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
+    expect(await active()).toHaveLength(1);
+    await beginOrderPayment(db, customer, gateway, {
+      orderId: order.id,
+      walletCents: 8000,
+      commandKey: key(),
+    });
+    const paid = await getOrder(db, customer, order.id);
+    const proposal = await previewOrderAmendment(db, first.actor, {
+      orderId: order.id,
+      expectedRevision: paid.revision,
+      reason: "剩余时段顺延",
+      changes: [
+        {
+          lineId: paid.lines[1]!.id,
+          courtId: courts[1]!,
+          startAt: time("19:00"),
+          endAt: time("20:00"),
+        },
+      ],
+    });
+    await confirm(proposal);
+    const moved = await getOrder(db, customer, order.id);
+    expect(moved.totalCents).toBe(8000);
+    await expect(
+      requestOrderRefundGroup(db, first.actor, {
+        orderId: moved.id,
+        expectedRevision: moved.revision,
+        commandKey: key(),
+        reason: "已取消行不能退未收款",
+        lines: [{ lineId: moved.lines[0]!.id, refundCents: 1, cancel: false }],
+      }),
+    ).rejects.toMatchObject({ code: "REFUND_EXCEEDS_PAYMENT" });
+    expect(
+      (
+        await requestOrderRefundGroup(db, first.actor, {
+          orderId: moved.id,
+          expectedRevision: moved.revision,
+          commandKey: key(),
+          reason: "退剩余已收款",
+          lines: [{ lineId: moved.lines[1]!.id, refundCents: 8000, cancel: true }],
+        })
+      ).amountCents,
+    ).toBe(8000);
+  });
+  it("cancels the last line while preserving the established cancellation price history", async () => {
+    const order = await held([0]);
+    const after = await cancelLines(order);
+    expect(after).toMatchObject({
+      status: "CANCELLED",
+      paymentStatus: "UNPAID",
+      totalCents: order.totalCents,
+      holdUntil: null,
+      holdReason: order.holdReason,
+    });
+    expect(await active()).toHaveLength(0);
+    expect(after.lines[0]!.amountCents).toBe(order.lines[0]!.amountCents);
+  });
+  it("confirms remaining zero-price lines without creating payment records", async () => {
+    const zero = await createCourt(db, first.actor, {
+      venueId: first.venueId,
+      name: "免费测试场",
+      indoor: true,
+    });
+    await setCourtPrice(db, first.actor, {
+      venueId: first.venueId,
+      courtId: zero.id,
+      expectedRevision: zero.revision,
+      hourlyPriceCents: 0,
+    });
+    courts.push(zero.id);
+    const order = await held([0, 4]);
+    const after = await cancelLines(order);
+    expect(after).toMatchObject({
+      status: "CONFIRMED",
+      paymentStatus: "NOT_REQUIRED",
+      totalCents: 0,
+      holdUntil: null,
+    });
+    expect(await active()).toMatchObject([{ court_id: zero.id, amendment_id: null }]);
+    expect((await db.query("SELECT id FROM tennis.payment_attempts WHERE order_id=$1", [order.id])).rowCount).toBe(0);
+  });
+  it("converts an unpaid order moved to a free court into a confirmed free booking", async () => {
+    const zero = await createCourt(db, first.actor, {
+      venueId: first.venueId,
+      name: "免费改期场",
+      indoor: true,
+    });
+    await setCourtPrice(db, first.actor, {
+      venueId: first.venueId,
+      courtId: zero.id,
+      expectedRevision: zero.revision,
+      hourlyPriceCents: 0,
+    });
+    courts.push(zero.id);
+    const order = await held([0]);
+    await confirm(await preview(order, 4));
+    expect(await getOrder(db, customer, order.id)).toMatchObject({
+      status: "CONFIRMED",
+      paymentStatus: "NOT_REQUIRED",
+      totalCents: 0,
+      holdUntil: null,
+    });
+    expect(await active()).toMatchObject([{ court_id: zero.id, amendment_id: null }]);
+  });
+  it("denies customers, other tenants and employees without booking scope; preserves stale revisions", async () => {
+    const order = await held();
+    const input = {
+      orderId: order.id,
+      expectedRevision: order.revision,
+      lineIds: [order.lines[0]!.id],
+      reason: "部分取消",
+      commandKey: key(),
+    };
+    await expect(cancelUnpaidOrderLines(db, customer, input)).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    await expect(cancelUnpaidOrderLines(db, other.actor, input)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
+    const proposal = await preview(order);
+    await db.query(
+      "UPDATE tennis.tenant_memberships SET role='VIEWER',permissions=ARRAY['read']::text[] WHERE tenant_id=$1",
+      [first.actor.tenantId],
+    );
+    await expect(cancelUnpaidOrderLines(db, first.actor, input)).rejects.toMatchObject({
+      code: "TENANT_ACCESS_DENIED",
+    });
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "TENANT_ACCESS_DENIED",
+    });
+    await db.query("UPDATE tennis.tenant_memberships SET role='ADMIN' WHERE tenant_id=$1", [first.actor.tenantId]);
+    await cancelLines(order);
+    await expect(confirm(proposal)).rejects.toMatchObject({
+      code: "STALE_ORDER",
+    });
+  });
+  it("replays confirmation once and rejects stale competing edits", async () => {
+    const order = await held();
+    const a = await preview(order);
+    const b = await preview(order, 3);
+    const commandKey = key();
+    const original = await confirmOrderAmendment(db, first.actor, {
+      amendmentId: a.id,
+      commandKey,
+    });
+    expect(
+      (
+        await confirmOrderAmendment(db, first.actor, {
+          amendmentId: a.id,
+          commandKey,
+        })
+      ).status,
+    ).toBe("APPLIED");
+    expect(
+      (
+        await confirmOrderAmendment(db, first.actor, {
+          amendmentId: a.id,
+          commandKey: key(),
+        })
+      ).id,
+    ).toBe(original.id);
+    await expect(confirm(b)).rejects.toMatchObject({ code: "STALE_ORDER" });
+    expect(await active()).toHaveLength(2);
   });
 });

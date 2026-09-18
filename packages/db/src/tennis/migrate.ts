@@ -19,9 +19,14 @@ export async function migrateTennis(client: pg.PoolClient): Promise<void> {
       "011_order_amendments.sql",
       "012_agent_dispatches.sql",
       "013_agent_message_feedback.sql",
+      "014_unpaid_order_amendments.sql",
     ].map(async (name) => {
       const sql = await readFile(new URL(`./migrations/${name}`, import.meta.url), "utf8");
-      return { name, sql, checksum: createHash("sha256").update(sql).digest("hex") };
+      return {
+        name,
+        sql,
+        checksum: createHash("sha256").update(sql).digest("hex"),
+      };
     }),
   );
   await client.query("BEGIN");

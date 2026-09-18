@@ -12,10 +12,11 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { createApi, TennisApiError, type TennisApi } from "./api";
-import type { Session, VenueRecord, OrderDetail } from "./types";
+import type { Session, VenueRecord } from "./types";
 import { permits } from "./types";
 import { BookingPage } from "./BookingPage";
 import { OrdersPage, OrderDialog } from "./OrdersPage";
+import { OrderPagination, useOrderDirectory } from "./OrderDirectory";
 import { FinancePanel } from "./FinancePanel";
 import { PlatformPage } from "./PlatformPage";
 import { SettingsPage, NewVenue } from "./SettingsPage";
@@ -439,7 +440,14 @@ function BusinessWorkspace({
       ) : page === "settings" ? (
         <SettingsPage api={api} session={session} venue={venue} onVenueChange={onVenueChange} />
       ) : (
-        <TodayPage key={`today:${revision}`} api={api} session={session} venue={venue} openOrder={setOrderId} />
+        <TodayPage
+          key={`today:${revision}`}
+          api={api}
+          session={session}
+          venue={venue}
+          scope={scope}
+          openOrder={setOrderId}
+        />
       )}
       {orderId && (
         <OrderDialog
@@ -460,42 +468,47 @@ function TodayPage({
   api,
   session,
   venue,
+  scope,
   openOrder,
 }: {
   api: TennisApi;
   session: Session;
   venue: VenueRecord;
+  scope: string;
   openOrder: (id: string) => void;
 }) {
-  const orders = useLoad(() => api<OrderDetail[]>(`/venues/${venue.id}/orders`), [api, venue.id]);
-  const today = dateValue(new Date(), venue.timezone);
-  const list =
-    orders.data?.filter(
-      (order) =>
-        order.lines.some((line) => dateValue(new Date(line.startAt), venue.timezone) === today) &&
-        ["HELD", "CONFIRMED"].includes(order.status),
-    ) ?? [];
+  const [today, setToday] = useState(() => dateValue(new Date(), venue.timezone));
+  useEffect(() => {
+    const update = () => setToday(dateValue(new Date(), venue.timezone));
+    update();
+    const timer = window.setInterval(update, 60_000);
+    return () => window.clearInterval(timer);
+  }, [venue.timezone]);
+  const orders = useOrderDirectory(api, venue.id, `today:${scope}`, { date: today, status: "ACTIVE" });
   return (
     <>
       <PageHeading title="今日工作台" description={`${venue.name} · ${today}`}>
         <RefreshButton onClick={() => void orders.refresh()} busy={orders.busy} />
       </PageHeading>
-      <ErrorNotice error={orders.error} />
+      <ErrorNotice error={orders.error} retry={() => void orders.refresh()} />
       <Panel title="今日预约与待付款">
-        {!orders.data ? (
+        {!orders.data && orders.busy ? (
           <LoadingBlock />
-        ) : !list.length ? (
+        ) : !orders.data ? null : !orders.data.orders.length ? (
           <EmptyState title="今天暂无有效预约" detail="新预约确认后会显示在这里。" />
         ) : (
-          list.map((order) => (
+          orders.data.orders.map((order) => (
             <div className="tennis-ledger-row" key={order.id}>
               <div>
                 <strong>
-                  {order.customerName ?? "客户预订"} · {money(order.totalCents)}
+                  {order.customerName || "客户预订"} · 整单应付 {money(order.totalCents)}
                 </strong>
-                <span>
-                  {dateTime(order.lines[0]?.startAt, venue.timezone)} · {order.lines.length} 条明细
-                </span>
+                <span>今日 {order.matchingLines.length} 条有效明细</span>
+                {order.matchingLines.map((line) => (
+                  <span key={line.id}>
+                    {line.courtName} · {dateTime(line.startAt, venue.timezone)} — {dateTime(line.endAt, venue.timezone)}
+                  </span>
+                ))}
               </div>
               <Badge value={order.status} />
               <button className="button button-secondary" onClick={() => openOrder(order.id)}>
@@ -504,6 +517,7 @@ function TodayPage({
             </div>
           ))
         )}
+        <OrderPagination directory={orders} />
       </Panel>
       <FinancePanel api={api} session={session} venue={venue} openOrder={openOrder} />
     </>

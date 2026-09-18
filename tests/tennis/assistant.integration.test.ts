@@ -401,6 +401,51 @@ describe("external assistant adapter and human handoff", () => {
       await app.close();
     }
   });
+  it("exposes recoverable order pagination through the delegated Agent surface", async () => {
+    const firstQuote = await createQuote(db, customer, selection());
+    const firstOrder = await confirmQuote(db, customer, { quoteId: firstQuote.id, commandKey: randomUUID() });
+    const secondQuote = await createQuote(db, customer, {
+      ...selection(),
+      lines: [{ courtId, startAt: "2099-09-18T20:00:00+08:00", endAt: "2099-09-18T21:00:00+08:00" }],
+    });
+    const secondOrder = await confirmQuote(db, customer, { quoteId: secondQuote.id, commandKey: randomUUID() });
+    const conv = await createConversation(db, customer, first.venueId);
+    const delegation = await issueDelegation(db, customer, conv.id);
+    const app = await buildTennisServer({
+      db,
+      gateway,
+      allowSimulation: true,
+      aiEncryptionKey: key,
+      runExpiryWorker: false,
+    });
+    try {
+      const headers = { authorization: `Bearer ${delegation.token}` };
+      const firstPage = await app.inject({
+        url: "/api/tennis/agent/orders?pageSize=1&status=ACTIVE&date=2099-09-18",
+        headers,
+      });
+      expect(firstPage.statusCode, firstPage.body).toBe(200);
+      expect(firstPage.json()).toMatchObject({ orders: [{ id: secondOrder.id }], nextCursor: secondOrder.id });
+      const secondPage = await app.inject({
+        url: `/api/tennis/agent/orders?pageSize=1&status=ACTIVE&date=2099-09-18&cursor=${secondOrder.id}`,
+        headers,
+      });
+      expect(secondPage.statusCode, secondPage.body).toBe(200);
+      expect(secondPage.json()).toMatchObject({ orders: [{ id: firstOrder.id }], nextCursor: null });
+      const search = await app.inject({ url: `/api/tennis/agent/orders?q=${firstOrder.id}`, headers });
+      expect(search.json()).toMatchObject({ orders: [{ id: firstOrder.id }], nextCursor: null });
+      expect((await app.inject({ url: "/api/tennis/agent/orders?pageSize=1&pageSize=2", headers })).statusCode).toBe(
+        400,
+      );
+      expect(
+        (await app.inject({ url: `/api/tennis/agent/orders?venueId=${second.venueId}`, headers })).statusCode,
+      ).toBe(400);
+      await handoffConversation(db, first.actor, conv.id, { mode: "HUMAN", reason: "接管分页查询" });
+      expect((await app.inject({ url: "/api/tennis/agent/orders", headers })).statusCode).toBe(409);
+    } finally {
+      await app.close();
+    }
+  });
   it("protects external tool routes without cookies and omits staff-only money commands", async () => {
     const conv = await createConversation(db, customer, first.venueId),
       delegation = await issueDelegation(db, customer, conv.id);

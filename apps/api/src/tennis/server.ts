@@ -45,7 +45,6 @@ import {
   createQuote,
   expireDueOrders,
   getCommandReceipt,
-  listOrders,
   requireBookingVenue,
 } from "../../../../packages/db/src/tennis/booking.ts";
 import {
@@ -86,6 +85,7 @@ import { registerAssistantRoutes } from "./assistant-routes.ts";
 import type { AgentTransport } from "../../../../packages/db/src/tennis/external-agent.ts";
 import {
   previewOrderAmendment,
+  cancelUnpaidOrderLines,
   confirmOrderAmendment,
   beginAmendmentPayment,
   cancelOrderAmendment,
@@ -149,6 +149,9 @@ const messages: Record<string, string> = {
   STALE_ORDER: "订单已被更新，请刷新后再确认。",
   STALE_CONFIGURATION: "配置已被其他工作人员更新，请刷新后修改。",
   INSUFFICIENT_BALANCE: "可用余额不足，请减少余额支付金额或先充值。",
+  ORDER_NOT_AMENDABLE: "订单当前不能调整，请核对付款状态和原付款截止时间。",
+  AMENDMENT_EXPIRED: "本次调整方案或原预约保留时间已过期，请刷新订单后重新核对。",
+  UNPAID_ORDER_PAYMENT_UNRESOLVED: "此单有待处理付款或实收，请先核对原付款结果；未改变预约和余额预留。",
   PAYMENT_ALREADY_PENDING: "本单已有待处理付款，请查看原付款结果。",
   ORDER_NOT_PAYABLE: "订单当前不能付款，请查看订单状态。",
   REFUND_EXCEEDS_PAYMENT: "退款金额超过本明细或原支付来源的可退金额。",
@@ -162,6 +165,8 @@ const messages: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: "该操作编号已用于其他内容，请先核实原操作结果。",
   PHONE_ALREADY_EXISTS: "该手机号已有客户档案，请搜索后选择。",
   INVALID_DATE: "请选择有效日期。",
+  INVALID_ORDER_QUERY: "订单查询条件无效，请检查关键词、状态、日期或每页条数。",
+  INVALID_ORDER_CURSOR: "订单翻页位置已失效，请返回第一页重试。",
   INVALID_HOLD: "保留预约需要未来的付款截止时间和原因。",
   PAST_INTERVAL: "不能预订已经开始的时段。",
   USERNAME_ALREADY_EXISTS: "此登录账号已被使用。",
@@ -236,18 +241,16 @@ export async function buildTennisServer(options: TennisServerOptions) {
                 ? 500
                 : 409));
     if (status >= 500) request.log.error({ err: error }, "Tennis request failed");
-    return reply
-      .code(status)
-      .send({
-        error: {
-          code,
-          message:
-            messages[code] ??
-            (status >= 500
-              ? "系统暂时无法处理，请保留当前输入并查询原操作结果。"
-              : "当前操作未完成，请检查输入或刷新记录后重试。"),
-        },
-      });
+    return reply.code(status).send({
+      error: {
+        code,
+        message:
+          messages[code] ??
+          (status >= 500
+            ? "系统暂时无法处理，请保留当前输入并查询原操作结果。"
+            : "当前操作未完成，请检查输入或刷新记录后重试。"),
+      },
+    });
   });
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
@@ -473,7 +476,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
     obj({ nickname: name, phone: Type.Optional(Type.Union([Type.String({ maxLength: 30 }), Type.Null()])) }),
     (request, input) => createCustomer(db, staff(request), input),
   );
-  get("/customers/:id/wallet", (request) => getWallet(db, actor(request), params(request).id!));
+  get("/customers/:id/wallet", (request) =>
+    getWallet(db, actor(request), params(request).id!, {
+      pageSize: query(request).pageSize === undefined ? undefined : Number(query(request).pageSize),
+      cursor: query(request).cursor,
+    }),
+  );
   const line = obj({ courtId: id, startAt: timestamp, endAt: timestamp });
   write(
     "POST",
@@ -487,7 +495,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
     obj({ commandKey, staffHold: Type.Optional(obj({ until: timestamp, reason })) }),
     (request, input) => confirmQuote(db, actor(request), { ...input, quoteId: params(request).id! }),
   );
-  get("/venues/:id/orders", (request) => orderList(db, actor(request), params(request).id!));
+  get("/venues/:id/orders", (request) => orderList(db, actor(request), params(request).id!, request.query));
   get("/orders/:id", (request) => orderDetail(db, actor(request), params(request).id!));
   write("POST", "/orders/:id/cancel", obj({ commandKey, expectedRevision: revision, reason }), (request, input) =>
     cancelUnpaidOrder(db, actor(request), { ...input, orderId: params(request).id! }),
@@ -552,6 +560,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
     (request, input) => requestOrderRefundGroup(db, staff(request), { ...input, orderId: params(request).id! }),
   );
   get("/refund-groups/:id", (request) => getRefundGroup(db, actor(request), params(request).id!));
+  write(
+    "POST",
+    "/orders/:id/cancel-unpaid-lines",
+    obj({ expectedRevision: revision, reason, commandKey, lineIds: Type.Array(id, { minItems: 1, maxItems: 100 }) }),
+    (request, input) => cancelUnpaidOrderLines(db, staff(request), { ...input, orderId: params(request).id! }),
+  );
   get("/orders/:id/amendments", (request) => listOrderAmendments(db, actor(request), params(request).id!));
   get("/amendments/:id", (request) => getOrderAmendment(db, actor(request), params(request).id!));
   write(

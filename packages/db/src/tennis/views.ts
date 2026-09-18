@@ -1,6 +1,13 @@
 import type pg from "pg";
 import { TenantAccessError } from "./access.ts";
-import { expireVenueHolds, locateOrder, orderInTransaction, requireBookingVenue } from "./booking.ts";
+import {
+  expireVenueHolds,
+  locateOrder,
+  orderInTransaction,
+  requireBookingVenue,
+  type OrderRecord,
+  type OrderLine,
+} from "./booking.ts";
 import { listVenues, venueInTransaction, type CourtRecord, type VenueRecord } from "./catalog.ts";
 import { isCustomerActor, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { refundableLines } from "./refunds.ts";
@@ -158,20 +165,141 @@ export async function orderDetail(db: pg.Pool, actor: BookingActor, id: string) 
     };
   });
 }
-export async function orderList(db: pg.Pool, actor: BookingActor, venueId: string) {
+export interface OrderListQuery {
+  q?: string | undefined;
+  status?: OrderRecord["status"] | "ACTIVE" | undefined;
+  date?: string | undefined;
+  pageSize?: number | undefined;
+  cursor?: string | undefined;
+}
+export interface OrderListItem extends OrderRecord {
+  customerName: string;
+  /** Uncancelled lines, restricted to the venue-local day when a date was requested. */
+  matchingLines: (OrderLine & { courtName: string })[];
+}
+export interface OrderListPage {
+  orders: OrderListItem[];
+  nextCursor: string | null;
+}
+export class OrderListQueryError extends Error {
+  readonly statusCode = 400;
+  constructor(readonly code: "INVALID_ORDER_QUERY" | "INVALID_ORDER_CURSOR" = "INVALID_ORDER_QUERY") {
+    super(code);
+    this.name = "OrderListQueryError";
+  }
+}
+/** HTTP query values remain untrusted, including duplicate parameters parsed as arrays. */
+export function parseOrderListQuery(input: unknown = {}): OrderListQuery {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new OrderListQueryError();
+  const value = input as Record<string, unknown>;
+  if (Object.keys(value).some((key) => !["q", "status", "date", "pageSize", "cursor"].includes(key)))
+    throw new OrderListQueryError();
+  for (const field of ["q", "status", "date", "cursor"])
+    if (value[field] !== undefined && typeof value[field] !== "string") throw new OrderListQueryError();
+  const q = value.q as string | undefined;
+  const status = value.status as OrderListQuery["status"];
+  const date = value.date as string | undefined;
+  const cursor = value.cursor as string | undefined;
+  if (q !== undefined && q.length > 200) throw new OrderListQueryError();
+  if (status !== undefined && !["ACTIVE", "HELD", "CONFIRMED", "EXPIRED", "CANCELLED", "COMPLETED"].includes(status))
+    throw new OrderListQueryError();
+  if (date !== undefined) {
+    const instant = Date.parse(`${date}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !Number.isFinite(instant) ||
+      new Date(instant).toISOString().slice(0, 10) !== date
+    )
+      throw new OrderListQueryError();
+  }
+  if (cursor !== undefined && (!cursor.trim() || cursor.length > 200)) throw new OrderListQueryError();
+  if (
+    value.pageSize !== undefined &&
+    typeof value.pageSize !== "number" &&
+    !(typeof value.pageSize === "string" && /^[1-9]\d*$/.test(value.pageSize))
+  )
+    throw new OrderListQueryError();
+  const pageSize = value.pageSize === undefined ? 25 : Number(value.pageSize);
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new OrderListQueryError();
+  return { q: q?.trim(), status, date, cursor, pageSize };
+}
+export async function orderList(
+  db: pg.Pool,
+  actor: BookingActor,
+  venueId: string,
+  input: unknown = {},
+): Promise<OrderListPage> {
+  const query = parseOrderListQuery(input);
   return withBookingTransaction(db, actor, async (tx) => {
     await requireBookingVenue(tx, actor, venueId, "read");
     await expireVenueHolds(tx, actor.tenantId, venueId);
+    const customerId = isCustomerActor(actor) ? actor.customerId : null;
+    let range: { startAt: string; endAt: string } | undefined;
+    if (query.date) {
+      const venue = await venueInTransaction(tx, actor, venueId);
+      try {
+        range = venueDayRange(query.date, venue.timezone);
+      } catch (error) {
+        if ((error as Error).message === "INVALID_DATE") throw new OrderListQueryError();
+        throw error;
+      }
+    }
+    if (query.cursor) {
+      const pivot = await tx.query(
+        `SELECT id FROM tennis.orders WHERE tenant_id=$1 AND venue_id=$2
+         AND ($3::text IS NULL OR customer_id=$3) AND id=$4`,
+        [actor.tenantId, venueId, customerId, query.cursor],
+      );
+      if (!pivot.rowCount) throw new OrderListQueryError("INVALID_ORDER_CURSOR");
+    }
+    const pageSize = query.pageSize!;
+    const statuses = query.status === "ACTIVE" ? ["HELD", "CONFIRMED"] : query.status ? [query.status] : null;
     const rows = (
       await tx.query<{ id: string; customerName: string }>(
-        `SELECT o.id,c.nickname AS "customerName" FROM tennis.orders o JOIN tennis.customers c ON c.tenant_id=o.tenant_id AND c.id=o.customer_id WHERE o.tenant_id=$1 AND o.venue_id=$2 AND ($3::text IS NULL OR o.customer_id=$3) ORDER BY o.created_at DESC,o.id LIMIT 100`,
-        [actor.tenantId, venueId, isCustomerActor(actor) ? actor.customerId : null],
+        `SELECT o.id,c.nickname AS "customerName"
+         FROM tennis.orders o JOIN tennis.customers c ON c.tenant_id=o.tenant_id AND c.id=o.customer_id
+         WHERE o.tenant_id=$1 AND o.venue_id=$2 AND ($3::text IS NULL OR o.customer_id=$3)
+         AND ($4::text[] IS NULL OR o.status=ANY($4))
+         AND ($5='' OR strpos(lower(o.id),lower($5))>0 OR strpos(lower(c.nickname),lower($5))>0)
+         AND ($6::timestamptz IS NULL OR EXISTS (
+           SELECT 1 FROM tennis.order_lines l WHERE l.tenant_id=o.tenant_id AND l.order_id=o.id
+           AND l.cancelled_at IS NULL AND l.start_at<$7::timestamptz AND l.end_at>$6::timestamptz))
+         AND ($8::text IS NULL OR (o.created_at,o.id)<(
+           SELECT p.created_at,p.id FROM tennis.orders p WHERE p.tenant_id=$1 AND p.venue_id=$2
+           AND ($3::text IS NULL OR p.customer_id=$3) AND p.id=$8))
+         ORDER BY o.created_at DESC,o.id DESC LIMIT $9`,
+        [
+          actor.tenantId,
+          venueId,
+          customerId,
+          statuses,
+          query.q ?? "",
+          range?.startAt ?? null,
+          range?.endAt ?? null,
+          query.cursor ?? null,
+          pageSize + 1,
+        ],
       )
     ).rows;
-    const result = [];
-    for (const row of rows)
-      result.push({ ...(await orderInTransaction(tx, actor, row.id)), customerName: row.customerName });
-    return result;
+    const courts = rows.length
+      ? (
+          await tx.query<{ id: string; name: string }>(
+            "SELECT id,name FROM tennis.courts WHERE tenant_id=$1 AND venue_id=$2",
+            [actor.tenantId, venueId],
+          )
+        ).rows
+      : [];
+    const courtNames = new Map(courts.map((court) => [court.id, court.name]));
+    const orders: OrderListItem[] = [];
+    for (const row of rows.slice(0, pageSize)) {
+      const order = await orderInTransaction(tx, actor, row.id);
+      const matchingLines = order.lines
+        .filter((line) => !line.cancelledAt && (!range || (line.startAt < range.endAt && line.endAt > range.startAt)))
+        .sort((a, b) => a.startAt.localeCompare(b.startAt) || a.id.localeCompare(b.id))
+        .map((line) => ({ ...line, courtName: courtNames.get(line.courtId) ?? line.courtId }));
+      orders.push({ ...order, customerName: row.customerName, matchingLines });
+    }
+    return { orders, nextCursor: rows.length > pageSize ? orders.at(-1)!.id : null };
   });
 }
 /** Booking permission needs customer selection, but does not grant wallet access. */

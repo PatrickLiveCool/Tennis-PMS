@@ -36,7 +36,7 @@ PMS 向配置的 `externalAgentUrl` POST JSON（`protocol: tennis-agent/v1`）�
 | `POST /orders/:id/payments` | `{walletCents,commandKey,staffReason?}`，创建付款尝试 |
 | `GET /payments/:id` | 查询付款事实 |
 | `POST /orders/:id/cancel` | 未付款取消，带 `commandKey/expectedRevision/reason` |
-| `GET /customers/:id/wallet` | 余额和明细；客户仅能查自己 |
+| `GET /customers/:id/wallet` | 余额和完整明细；客户仅能查自己。`pageSize` 默认 50、范围 1–200，`cursor` 用上一页 `nextCursor`，末页为 null |
 | `GET /topup-offers` | 充值档位 |
 | `POST /customers/:id/topup-quotes` | `{principalCents? 或 offerId?}`，赠送不可自报 |
 | `POST /topup-quotes/:id/confirm`、`GET /topups/:id` | 确认充值、查询到账 |

@@ -150,6 +150,94 @@ afterAll(async () => {
 });
 
 describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
+  it("searches the full order directory and validates paginated HTTP queries", async () => {
+    const old = await booking();
+    const seeds = Array.from({ length: 105 }, () => ({ id: key(), quote_id: key() }));
+    // Historical rows are isolated to this test tenant and derived from its valid quote.
+    await db.query(
+      `WITH seed AS (SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(id text,quote_id text)),
+      new_quotes AS (
+        INSERT INTO tennis.quotes(id,tenant_id,venue_id,customer_id,created_by,price_snapshot,expires_at)
+        SELECT s.quote_id,q.tenant_id,q.venue_id,q.customer_id,q.created_by,q.price_snapshot,q.expires_at
+        FROM seed s CROSS JOIN tennis.quotes q WHERE q.tenant_id=$1 AND q.id=$2 RETURNING id
+      )
+      INSERT INTO tennis.orders(id,tenant_id,venue_id,customer_id,quote_id,created_by,status,payment_status,
+        total_cents,hold_kind,confirmation_request,price_snapshot)
+      SELECT s.id,o.tenant_id,o.venue_id,o.customer_id,q.id,o.created_by,'EXPIRED','UNPAID',
+        o.total_cents,'PAYMENT',o.confirmation_request,o.price_snapshot
+      FROM seed s JOIN new_quotes q ON q.id=s.quote_id CROSS JOIN tennis.orders o
+      WHERE o.tenant_id=$1 AND o.id=$4`,
+      [first.actor.tenantId, old.quoteId, JSON.stringify(seeds), old.id],
+    );
+    const path = `/venues/${first.venueId}/orders`;
+    const recent = await okay(staff, "GET", `${path}?pageSize=1`);
+    expect(recent.orders).toHaveLength(1);
+    expect(recent.orders[0].id).not.toBe(old.id);
+    expect(recent.nextCursor).toBe(recent.orders[0].id);
+    const next = await okay(staff, "GET", `${path}?pageSize=1&cursor=${recent.nextCursor}`);
+    expect(next.orders[0].id).not.toBe(recent.orders[0].id);
+    expect(await okay(staff, "GET", `${path}?q=${old.id}`)).toMatchObject({
+      orders: [{ id: old.id }],
+      nextCursor: null,
+    });
+    expect(await okay(customer, "GET", `${path}?status=ACTIVE&date=2099-09-18`)).toMatchObject({
+      orders: [{ id: old.id, matchingLines: [expect.objectContaining({ id: old.lines[0].id })] }],
+      nextCursor: null,
+    });
+    for (const query of [
+      "pageSize=0",
+      "pageSize=101",
+      "pageSize=2.5",
+      "pageSize=1&pageSize=2",
+      "q=a&q=b",
+      "date=2026-02-30",
+      "date=",
+      "date=2026-01-01&date=2026-01-02",
+      "status=UNKNOWN",
+      "status=HELD&status=CONFIRMED",
+      "cursor=",
+      "cursor=missing",
+      "cursor=a&cursor=b",
+      "tenantId=override",
+    ]) {
+      const invalid = await request(staff, "GET", `${path}?${query}`);
+      expect(invalid.statusCode, `${query}: ${invalid.body}`).toBe(400);
+      expect(invalid.json().error.code).toMatch(/^INVALID_ORDER_(QUERY|CURSOR)$/);
+    }
+    expect((await request(foreign, "GET", path)).statusCode).toBe(404);
+  });
+
+  it("exposes scoped wallet history pagination and rejects invalid page inputs", async () => {
+    for (let index = 0; index < 3; index++) {
+      await okay(staff, "POST", `/customers/${customerId}/topups/offline`, {
+        venueId: first.venueId,
+        principalCents: 100,
+        giftCents: 20,
+        receiptReference: key(),
+        reason: "合成翻页核对",
+        commandKey: key(),
+      });
+    }
+    const firstPage = await okay(customer, "GET", `/customers/${customerId}/wallet?pageSize=2`);
+    expect(firstPage.entries).toHaveLength(2);
+    expect(firstPage.nextCursor).toBe(firstPage.entries[1].id);
+    const secondPage = await okay(
+      customer,
+      "GET",
+      `/customers/${customerId}/wallet?pageSize=2&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+    );
+    expect(secondPage.entries).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(secondPage.balance).toEqual(firstPage.balance);
+    expect(new Set([...firstPage.entries, ...secondPage.entries].map((entry: { id: string }) => entry.id)).size).toBe(
+      3,
+    );
+    expect((await request(customer, "GET", `/customers/${customerId}/wallet?pageSize=201`)).statusCode).toBe(400);
+    expect((await request(customer, "GET", `/customers/${customerId}/wallet?cursor=`)).statusCode).toBe(400);
+    expect(
+      (await request(foreign, "GET", `/customers/${customerId}/wallet?cursor=${firstPage.nextCursor}`)).statusCode,
+    ).toBe(404);
+  });
   it("requires a server session and validates CSRF, workspace version and origin without leaking identity secrets", async () => {
     const anonymous = await app.inject({ method: "GET", url: "/api/tennis/venues" });
     expect(anonymous.statusCode).toBe(401);

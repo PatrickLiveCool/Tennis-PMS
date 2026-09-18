@@ -48,6 +48,7 @@ export function AmendmentPanel({
     [api, order.id, order.revision],
   );
   const [editing, setEditing] = useState(false);
+  const [cancellingUnpaid, setCancellingUnpaid] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const command = useCommand(scope);
@@ -55,7 +56,10 @@ export function AmendmentPanel({
   const pending = amendments.data?.find((item) => item.status === "AWAITING_PAYMENT");
   const canEdit = permits(session, "book");
   const canPay = session.kind === "customer" || canEdit;
-  const canAmend = canEdit && order.status === "CONFIRMED" && !pending;
+  const unpaid = order.status === "HELD" && order.paymentStatus === "UNPAID";
+  const paymentUnresolved =
+    order.payments?.some((item) => ["PENDING", "REFUND_REQUIRED"].includes(item.status)) ?? false;
+  const canAmend = canEdit && (order.status === "CONFIRMED" || unpaid) && !pending && !paymentUnresolved;
   async function changed() {
     await amendments.refresh();
     onChanged();
@@ -63,7 +67,10 @@ export function AmendmentPanel({
   async function cancel(item: AmendmentRecord) {
     const reason = "员工取消本次改期方案，保留原预约";
     const result = await command.execute(`amendment.cancel:${item.id}`, { reason }, (key) =>
-      api<AmendmentRecord>(`/amendments/${item.id}/cancel`, "POST", { commandKey: key, reason }),
+      api<AmendmentRecord>(`/amendments/${item.id}/cancel`, "POST", {
+        commandKey: key,
+        reason,
+      }),
     );
     if (result) {
       setPaying(false);
@@ -79,6 +86,7 @@ export function AmendmentPanel({
             className="button button-secondary button-small"
             onClick={() => {
               setEditing(!editing);
+              setCancellingUnpaid(false);
               setSelected(null);
             }}
           >
@@ -87,8 +95,39 @@ export function AmendmentPanel({
         )}
       </div>
       <ErrorNotice error={amendments.error ?? command.error} />
-      {order.status === "HELD" && (
-        <p className="tennis-muted">未付款预约如需调整球场或时段，请先取消原预约，再重新选择场地并预订。</p>
+      {unpaid && (
+        <>
+          <p className="tennis-muted">未付款调整保留原付款截止时间和保留原因，只更新所选时段及应付金额。</p>
+          {paymentUnresolved && (
+            <p className="tennis-note">原付款仍需核对，请先刷新并确认付款结果，再调整未付款时段。</p>
+          )}
+          {canEdit && (
+            <button
+              className="button button-secondary button-small"
+              disabled={paymentUnresolved}
+              onClick={() => {
+                setCancellingUnpaid(!cancellingUnpaid);
+                setEditing(false);
+              }}
+            >
+              取消部分未付款时段
+            </button>
+          )}
+        </>
+      )}
+      {cancellingUnpaid && unpaid && canEdit && (
+        <UnpaidCancelEditor
+          api={api}
+          scope={scope}
+          order={order}
+          venue={venue}
+          courts={courts}
+          onClose={() => setCancellingUnpaid(false)}
+          onChanged={async () => {
+            setCancellingUnpaid(false);
+            await changed();
+          }}
+        />
       )}
       {editing && canAmend && (
         <AmendmentEditor
@@ -113,10 +152,16 @@ export function AmendmentPanel({
           <div>
             <strong>{statusLabels[item.status]}</strong>
             <span>
-              {item.reason} · 补款 {money(item.supplementalCents)} · 核准退款 {money(item.approvedRefundCents)}
+              {item.reason} ·{" "}
+              {item.unpaid
+                ? "未付款预约调整"
+                : `补款 ${money(item.supplementalCents)} · 核准退款 ${money(item.approvedRefundCents)}`}
             </span>
             {item.holdUntil && (
-              <span>新时段保留至 {dateTime(item.holdUntil, venue.timezone)}；补款成功前原预约仍有效。</span>
+              <span>
+                新时段保留至 {dateTime(item.holdUntil, venue.timezone)}
+                ；补款成功前原预约仍有效。
+              </span>
             )}
           </div>
           <button
@@ -207,9 +252,17 @@ function AmendmentComparison({
                 {money(line.new.totalCents)}
               </td>
               <td>
-                补款 {money(Math.max(0, line.fundingCapDeltaCents))}
-                <small>建议可退 {money(line.suggestedRefundCents)}</small>
-                {line.approvedRefundCents !== null && <small>已核准退 {money(line.approvedRefundCents)}</small>}
+                {item.unpaid ? (
+                  <>
+                    待付费用更新<small>不产生补款或退款</small>
+                  </>
+                ) : (
+                  <>
+                    补款 {money(Math.max(0, line.fundingCapDeltaCents))}
+                    <small>建议可退 {money(line.suggestedRefundCents)}</small>
+                    {line.approvedRefundCents !== null && <small>已核准退 {money(line.approvedRefundCents)}</small>}
+                  </>
+                )}
               </td>
             </tr>
           ))}
@@ -320,7 +373,10 @@ function AmendmentEditor({
     try {
       const approvedRefundLines = draft.preview.lines
         .filter((line) => line.suggestedRefundCents > 0)
-        .map((line) => ({ lineId: line.lineId, refundCents: cents(draft.refunds[line.lineId] ?? "0") }));
+        .map((line) => ({
+          lineId: line.lineId,
+          refundCents: cents(draft.refunds[line.lineId] ?? "0"),
+        }));
       const payload = { approvedRefundLines };
       const result = await command.execute(`amendment.confirm:${draft.preview.id}`, payload, (key) =>
         api<AmendmentRecord>(`/amendments/${draft.preview!.id}/confirm`, "POST", { ...payload, commandKey: key }),
@@ -345,8 +401,15 @@ function AmendmentEditor({
         <div className="tennis-form">
           <AmendmentComparison item={draft.preview} venue={venue} courts={courts} />
           <div className="tennis-money-row tennis-total">
-            <span>本次需补款</span>
-            <strong>{money(draft.preview.supplementalCents)}</strong>
+            <span>{draft.preview.unpaid ? "调整后整单待付" : "本次需补款"}</span>
+            <strong>
+              {money(
+                draft.preview.unpaid
+                  ? order.totalCents +
+                      draft.preview.lines.reduce((sum, line) => sum + line.new.totalCents - line.old.amountCents, 0)
+                  : draft.preview.supplementalCents,
+              )}
+            </strong>
           </div>
           {draft.preview.lines
             .filter((line) => line.suggestedRefundCents > 0)
@@ -362,23 +425,31 @@ function AmendmentEditor({
                   onChange={(e) =>
                     setDraft((current) => ({
                       ...current,
-                      refunds: { ...current.refunds, [line.lineId]: e.target.value },
+                      refunds: {
+                        ...current.refunds,
+                        [line.lineId]: e.target.value,
+                      },
                     }))
                   }
                 />
-                <small>建议最多 {money(line.suggestedRefundCents)}，由授权员工核准；默认不自动退款。</small>
+                <small>
+                  建议最多 {money(line.suggestedRefundCents)}
+                  ，由授权员工核准；默认不自动退款。
+                </small>
               </label>
             ))}
           <p className="tennis-note">
             方案有效至 {dateTime(draft.preview.expiresAt, venue.timezone)}
-            。涉及补款时保留原预约并暂占新时段；全额补款成功后才完成改期。退款按原支付来源执行。
+            {draft.preview.unpaid
+              ? `。付款截止仍为 ${dateTime(order.holdUntil, venue.timezone)}；确认成功后更新预约，失败保留原场地，不延长付款期限。若调整后应付为零，按免费预约确认。`
+              : "。涉及补款时保留原预约并暂占新时段；全额补款成功后才完成改期。退款按原支付来源执行。"}
           </p>
           <div className="tennis-actions">
             <button className="button button-secondary" disabled={command.busy} onClick={() => update({})}>
               返回修改
             </button>
             <button className="button button-primary" disabled={command.busy} onClick={() => void confirm()}>
-              {command.busy ? "正在确认…" : "确认改期及补退差额"}
+              {command.busy ? "正在确认…" : draft.preview.unpaid ? "确认调整未付款预约" : "确认改期及补退差额"}
             </button>
           </div>
         </div>
@@ -388,7 +459,9 @@ function AmendmentEditor({
             const old = order.lines.find((line) => line.id === row.lineId);
             if (!old || old.cancelledAt) return null;
             const change = (patch: Partial<typeof row>) =>
-              update({ rows: draft.rows.map((item, index) => (index === i ? { ...item, ...patch } : item)) });
+              update({
+                rows: draft.rows.map((item, index) => (index === i ? { ...item, ...patch } : item)),
+              });
             return (
               <div className="tennis-refund-line" key={row.lineId}>
                 <label className="tennis-check">
@@ -463,6 +536,109 @@ function AmendmentEditor({
           </div>
         </div>
       )}
+    </Panel>
+  );
+}
+
+function UnpaidCancelEditor({
+  api,
+  scope,
+  order,
+  venue,
+  courts,
+  onClose,
+  onChanged,
+}: {
+  api: TennisApi;
+  scope: string;
+  order: OrderDetail;
+  venue: VenueRecord;
+  courts: CourtRecord[];
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useDraft(`tennis:cancel-unpaid:${scope}:${order.id}:${order.revision}`, {
+    lineIds: [] as string[],
+    reason: "",
+  });
+  const command = useCommand(scope);
+  const active = order.lines.filter((line) => !line.cancelledAt);
+  const selected = active.filter((line) => draft.lineIds.includes(line.id));
+  const remaining = active.filter((line) => !draft.lineIds.includes(line.id));
+  const total = remaining.reduce((sum, line) => sum + line.amountCents, 0);
+  async function confirm() {
+    const payload = {
+      expectedRevision: order.revision,
+      lineIds: selected.map((line) => line.id),
+      reason: draft.reason,
+    };
+    const result = await command.execute(`order.cancel-unpaid-lines:${order.id}`, payload, (key) =>
+      api<OrderRecord>(`/orders/${order.id}/cancel-unpaid-lines`, "POST", {
+        ...payload,
+        commandKey: key,
+      }),
+    );
+    if (result) {
+      setDraft({ lineIds: [], reason: "" });
+      await onChanged();
+    }
+  }
+  return (
+    <Panel title="按明细取消未付款时段">
+      <div className="tennis-form">
+        <ErrorNotice error={command.error} />
+        {active.map((line) => (
+          <label className="tennis-check" key={line.id}>
+            <input
+              type="checkbox"
+              disabled={command.busy}
+              checked={draft.lineIds.includes(line.id)}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  lineIds: event.target.checked
+                    ? [...draft.lineIds, line.id]
+                    : draft.lineIds.filter((id) => id !== line.id),
+                })
+              }
+            />
+            {courts.find((court) => court.id === line.courtId)?.name ?? "球场"} ·{" "}
+            {dateTime(line.startAt, venue.timezone)}–{clock(line.endAt, venue.timezone)} · {money(line.amountCents)}
+          </label>
+        ))}
+        <label>
+          取消原因
+          <textarea
+            disabled={command.busy}
+            value={draft.reason}
+            maxLength={2000}
+            onChange={(event) => setDraft({ ...draft, reason: event.target.value })}
+          />
+        </label>
+        <p className="tennis-note">
+          {remaining.length
+            ? `保留 ${remaining.length} 条时段，整单待付由 ${money(order.totalCents)} 调整为 ${money(total)}。`
+            : "所选为全部有效时段，确认后整单取消。"}
+          {remaining.length && total > 0
+            ? `付款截止仍为 ${dateTime(order.holdUntil, venue.timezone)}；保留原因不变。`
+            : remaining.length
+              ? "剩余免费时段按无需支付确认。"
+              : ""}
+          本次不产生收款或退款。
+        </p>
+        <div className="tennis-actions">
+          <button className="button button-secondary" disabled={command.busy} onClick={onClose}>
+            返回
+          </button>
+          <button
+            className="button button-danger"
+            disabled={command.busy || !selected.length || !draft.reason.trim()}
+            onClick={() => void confirm()}
+          >
+            {command.busy ? "正在确认…" : "确认取消所选未付款时段"}
+          </button>
+        </div>
+      </div>
     </Panel>
   );
 }

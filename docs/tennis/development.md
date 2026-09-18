@@ -70,3 +70,5 @@ Compose 默认复用官方 PostgreSQL 16 的 DaoCloud 镜像；可通过 TENNIS_
 2026-09-19 收尾：正式目录的依赖、继承源码及 Git pack 曾再次显示 iCloud dataless 占位。旧依赖保留到 `.local-workspace/node_modules-before-f6`，以同锁文件的已验证依赖副本恢复；638 个无工作区改动的跟踪文件从 Git index 恢复，已改文件保留。网球新增文件用内容核对后原子写回，避免保留旧云盘元数据。随后正式仓库构建成功，API 与稳定构建预览已在正式目录启动；临时实例已停止。若机器再次自动腾出云盘文件，先让项目保持本地可用；这属于文件读取问题，不是执行审批。
 
 本地备份目录不属于测试源码，Vitest 已显式排除 `.local-workspace` 和 `.worktrees`，避免扫描旧依赖/恢复副本。正式仓库最终检查已通过，见实施状态与日志。
+
+2026-09-19 F7：iCloud 再次将正式目录源码变成 dataless 占位。本轮使用已有 `/private/tmp/tennis-pms-goal-build` 验证副本完成修改和测试，按 F7 文件清单同步正式目录并核对 SHA256，未整库覆盖。Web/API 暂从该已核对副本运行，以保持本地演示可用；不修改系统云盘设置，也不把文件读取等待当成执行审批。当前会话为 Full Access / approval never，普通开发、验证与本地服务动作不重复申请权限。

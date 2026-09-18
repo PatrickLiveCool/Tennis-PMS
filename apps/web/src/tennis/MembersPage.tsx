@@ -36,15 +36,29 @@ export function MembersPage({
 }) {
   const [customer, setCustomer] = useDraft<CustomerRecord | null>(`tennis:member:${scope}`, null);
   const customerId = session.customerId ?? customer?.id;
-  const wallet = useLoad(
-    () => (customerId ? api<Wallet>(`/customers/${customerId}/wallet`) : Promise.resolve(null)),
-    [api, customerId],
+  const [historyCursors, setHistoryCursors] = useDraft<string[]>(
+    `tennis:wallet-pages:${scope}:${customerId ?? "none"}`,
+    [],
   );
+  const cursor = historyCursors.at(-1);
+  const wallet = useLoad(
+    () =>
+      customerId
+        ? api<Wallet>(
+            `/customers/${customerId}/wallet?pageSize=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+          )
+        : Promise.resolve(null),
+    [api, customerId, cursor],
+  );
+  const refreshWallet = () => {
+    if (historyCursors.length) setHistoryCursors([]);
+    else void wallet.refresh();
+  };
   const [topup, setTopup] = useState(false);
   return (
     <>
       <PageHeading title="客户与余额" description="同一租户各校区通用，本金与赠送分别记账。">
-        <RefreshButton onClick={() => void wallet.refresh()} busy={wallet.busy} />
+        <RefreshButton onClick={refreshWallet} busy={wallet.busy} />
       </PageHeading>
       <div className="tennis-members-layout">
         {session.kind !== "customer" && (
@@ -138,6 +152,26 @@ export function MembersPage({
                 <p className="tennis-muted">
                   金额展示该笔涉及的本金 / 赠送构成。预留与释放只改变可用额度，请结合事项和账户余额核对。
                 </p>
+                <div className="tennis-actions">
+                  <button
+                    className="button button-secondary"
+                    disabled={wallet.busy || historyCursors.length === 0}
+                    onClick={() => setHistoryCursors((previous) => previous.slice(0, -1))}
+                  >
+                    上一页
+                  </button>
+                  <span className="tennis-muted">第 {historyCursors.length + 1} 页 · 每页最多 50 条</span>
+                  <button
+                    className="button button-secondary"
+                    disabled={wallet.busy || !wallet.data.nextCursor}
+                    onClick={() => {
+                      const next = wallet.data?.nextCursor;
+                      if (next) setHistoryCursors((previous) => [...previous, next]);
+                    }}
+                  >
+                    更早明细
+                  </button>
+                </div>
               </Panel>
             </>
           ) : null}
@@ -152,9 +186,9 @@ export function MembersPage({
           customerId={customerId}
           onClose={() => {
             setTopup(false);
-            void wallet.refresh();
+            refreshWallet();
           }}
-          onChanged={() => void wallet.refresh()}
+          onChanged={refreshWallet}
         />
       )}
     </>

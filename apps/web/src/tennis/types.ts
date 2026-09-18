@@ -1,4 +1,5 @@
 export type { VenueRecord, CourtRecord, SavedDiscount } from "../../../../packages/db/src/tennis/catalog";
+export type { OrderListItem, OrderListPage } from "../../../../packages/db/src/tennis/views";
 export type { QuoteRecord, OrderLine, OrderRecord } from "../../../../packages/db/src/tennis/booking";
 export type { CustomerRecord } from "../../../../packages/db/src/tennis/customers";
 export type { PaymentRecord } from "../../../../packages/db/src/tennis/payments";
@@ -44,6 +45,7 @@ export interface Schedule {
 }
 export interface Wallet {
   balance: WalletBalance;
+  nextCursor: string | null;
   entries: {
     id: string;
     kind: string;
