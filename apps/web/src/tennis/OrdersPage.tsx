@@ -13,6 +13,7 @@ import type {
   Wallet,
 } from "./types";
 import { AssistantPanel } from "./AssistantPanel";
+import { PaymentChannelPanel } from "./PaymentChannelPanel";
 import { OrderPagination, useOrderDirectory } from "./OrderDirectory";
 import { AmendmentPanel } from "./AmendmentPanel";
 import { permits } from "./types";
@@ -445,6 +446,19 @@ export function OrderDialog({
                           </button>
                         </div>
                       )}
+                    {payment.externalCents > 0 && (
+                      <PaymentChannelPanel
+                        api={api}
+                        kind="payment"
+                        sourceId={payment.id}
+                        scope={`${scope}:${session.contextVersion}`}
+                        businessStatus={payment.status}
+                        timezone={venue.timezone}
+                        canOperate={canBook}
+                        businessBusy={command.busy}
+                        onChanged={changed}
+                      />
+                    )}
                   </div>
                 ))
               ) : (
@@ -466,15 +480,6 @@ export function OrderDialog({
                       </span>
                     </div>
                     <Badge value={refund.status} />
-                    {permits(session, "refund") && refund.status === "FAILED" && (
-                      <button
-                        className="button button-secondary button-small"
-                        disabled={command.busy}
-                        onClick={() => void retryRefund(refund)}
-                      >
-                        重试原退款
-                      </button>
-                    )}
                     {session.localSimulation &&
                       permits(session, "refund") &&
                       ["REQUESTED", "PROCESSING"].includes(refund.status) &&
@@ -496,6 +501,20 @@ export function OrderDialog({
                           </button>
                         </div>
                       )}
+                    {refund.externalCents > 0 && (
+                      <PaymentChannelPanel
+                        api={api}
+                        kind="refund"
+                        sourceId={refund.id}
+                        scope={`${scope}:${session.contextVersion}`}
+                        businessStatus={refund.status}
+                        timezone={venue.timezone}
+                        canOperate={permits(session, "refund")}
+                        businessBusy={command.busy}
+                        onChanged={changed}
+                        onRetryRefund={() => retryRefund(refund)}
+                      />
+                    )}
                   </div>
                 ))
               ) : (

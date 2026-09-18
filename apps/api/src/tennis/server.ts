@@ -80,6 +80,20 @@ import {
   saveTopupOffer,
   settleVerifiedTopup,
 } from "../../../../packages/db/src/tennis/topups.ts";
+import type { PaymentProviderPort } from "../../../../packages/db/src/tennis/payment-port.ts";
+import { postgresMockChannelStore } from "../../../../packages/db/src/tennis/mock-channel-store.ts";
+import {
+  getPaymentChannel,
+  reconcilePaymentChannel,
+  simulatePaymentChannel,
+  acceptPaymentNotification,
+  processDueChannelOperations,
+} from "../../../../packages/db/src/tennis/payment-channel.ts";
+import {
+  listMerchantBindings,
+  saveMerchantBinding,
+  disableMerchantBinding,
+} from "../../../../packages/db/src/tennis/merchant-bindings.ts";
 import { LocalMockPaymentGateway } from "../../../../packages/db/src/tennis/mock-payments.ts";
 import { registerAssistantRoutes } from "./assistant-routes.ts";
 import { registerGatewayRoutes } from "./gateway-routes.ts";
@@ -98,7 +112,7 @@ import { requestOrderRefundGroup, getRefundGroup } from "../../../../packages/db
 
 export interface TennisServerOptions {
   db: pg.Pool;
-  gateway: LocalMockPaymentGateway;
+  gateway: PaymentProviderPort;
   allowSimulation: boolean;
   origins?: string[];
   runExpiryWorker?: boolean;
@@ -184,7 +198,11 @@ const messages: Record<string, string> = {
   SIMULATION_DISABLED: "此环境未启用模拟支付。",
 };
 export async function buildTennisServer(options: TennisServerOptions) {
-  const { db, gateway } = options;
+  const { db } = options;
+  const gateway =
+    options.gateway instanceof LocalMockPaymentGateway
+      ? options.gateway.withStore(postgresMockChannelStore(db))
+      : options.gateway;
   const app = Fastify({
     logger: options.logger
       ? {
@@ -268,7 +286,8 @@ export async function buildTennisServer(options: TennisServerOptions) {
       pathname === "/health" ||
       pathname === "/api/tennis/auth/login" ||
       pathname?.startsWith("/api/tennis/agent/") ||
-      pathname?.startsWith("/api/tennis/gateway/")
+      pathname?.startsWith("/api/tennis/gateway/") ||
+      (request.method === "POST" && /^\/api\/tennis\/payment-notifications\/[a-zA-Z0-9-]+$/.test(pathname ?? ""))
     )
       return;
     const recoveryRoute = ["/api/tennis/session", "/api/tennis/session/context", "/api/tennis/auth/logout"].includes(
@@ -310,7 +329,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
   }
   app.get("/health", async () => {
     await db.query("SELECT 1");
-    return { ok: true, product: "Tennis PMS", paymentMode: "MOCK" };
+    return { ok: true, product: "Tennis PMS", paymentMode: gateway.provider };
   });
   app.post<{ Body: { username: string; password: string } }>(
     `${base}/auth/login`,
@@ -544,18 +563,9 @@ export async function buildTennisServer(options: TennisServerOptions) {
       (input.status === "FAILED" && payment.status !== "PENDING")
     )
       return payment;
-    const signed = gateway.signForLocalSimulator({
-      provider: "MOCK",
-      paymentId: payment.id,
-      merchantId: payment.merchantId,
-      eventId: randomUUID(),
-      transactionId: `mock-order:${payment.id}`,
-      status: input.status,
-      amountCents: payment.externalCents,
-      currency: "CNY",
-      issuedAt: Date.now(),
-    });
-    return settleVerifiedPayment(db, gateway.verify(signed.body, signed.signature));
+    if (!(gateway instanceof LocalMockPaymentGateway)) throw new HttpError("SIMULATION_DISABLED", 403);
+    await simulatePaymentChannel(db, principal, "ORDER", payment.id, gateway, input.status);
+    return getOrderPayment(db, principal, payment.id);
   });
   write(
     "POST",
@@ -624,21 +634,9 @@ export async function buildTennisServer(options: TennisServerOptions) {
       requireBookingVenue(tx, principal, refund.venueId, "refund"),
     );
     if (refund.status === "SUCCEEDED" || refund.externalCents === 0) return refund;
-    const payment = await getOrderPayment(db, principal, refund.paymentId);
-    const signed = gateway.signForLocalSimulator({
-      eventType: "REFUND",
-      provider: "MOCK",
-      merchantId: payment.merchantId,
-      refundId: refund.id,
-      eventId: randomUUID(),
-      transactionId: payment.providerTransactionId!,
-      providerRefundId: `mock-refund:${refund.id}`,
-      status: input.status,
-      amountCents: refund.externalCents,
-      currency: "CNY",
-      issuedAt: Date.now(),
-    });
-    return settleVerifiedRefund(db, gateway.verifyRefund(signed.body, signed.signature));
+    if (!(gateway instanceof LocalMockPaymentGateway)) throw new HttpError("SIMULATION_DISABLED", 403);
+    await simulatePaymentChannel(db, principal, "REFUND", refund.id, gateway, input.status);
+    return getRefund(db, principal, refund.id);
   });
   write(
     "POST",
@@ -674,18 +672,9 @@ export async function buildTennisServer(options: TennisServerOptions) {
     simulation();
     const payment = await getTopupPayment(db, actor(request), params(request).id!);
     if (payment.status === "SUCCEEDED") return payment;
-    const signed = gateway.signForLocalSimulator({
-      provider: "MOCK",
-      paymentId: payment.id,
-      merchantId: payment.merchantId,
-      eventId: randomUUID(),
-      transactionId: `mock-topup:${payment.id}`,
-      status: input.status,
-      amountCents: payment.principalCents,
-      currency: "CNY",
-      issuedAt: Date.now(),
-    });
-    return settleVerifiedTopup(db, gateway.verify(signed.body, signed.signature));
+    if (!(gateway instanceof LocalMockPaymentGateway)) throw new HttpError("SIMULATION_DISABLED", 403);
+    await simulatePaymentChannel(db, actor(request), "TOPUP", payment.id, gateway, input.status);
+    return getTopupPayment(db, actor(request), payment.id);
   });
   get("/receipts/:id", (request) => getCommandReceipt(db, actor(request), params(request).id!));
   write(
@@ -724,6 +713,59 @@ export async function buildTennisServer(options: TennisServerOptions) {
     await releaseCourtOccupancy(db, staff(request), params(request).id!, input.expectedRevision);
     return { ok: true };
   });
+  for (const [resource, kind] of [
+    ["payments", "ORDER"],
+    ["topups", "TOPUP"],
+    ["refunds", "REFUND"],
+  ] as const) {
+    get(`/${resource}/:id/channel`, (request) =>
+      getPaymentChannel(db, actor(request), kind, params(request).id!, gateway),
+    );
+    write("POST", `/${resource}/:id/channel/reconcile`, obj({}), (request) =>
+      reconcilePaymentChannel(db, actor(request), kind, params(request).id!, gateway),
+    );
+  }
+  get("/platform/tenants/:id/payment-merchants", (request) =>
+    listMerchantBindings(db, session(request).subjectId, params(request).id!),
+  );
+  write(
+    "POST",
+    "/platform/tenants/:id/payment-merchants",
+    obj({
+      provider: Type.Union([Type.Literal("MOCK"), Type.Literal("WECHAT")]),
+      merchantId: name,
+      appId: Type.Optional(name),
+      credentialRef: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+      expectedVersion: Type.Integer({ minimum: 0 }),
+    }),
+    (request, input) =>
+      saveMerchantBinding(db, session(request).subjectId, { ...input, tenantId: params(request).id! }),
+  );
+  write(
+    "POST",
+    "/platform/tenants/:id/payment-merchants/disable",
+    obj({ bindingId: id, expectedVersion: Type.Integer({ minimum: 1 }) }),
+    (request, input) =>
+      disableMerchantBinding(db, session(request).subjectId, { ...input, tenantId: params(request).id! }),
+  );
+  await app.register(async (notifications) => {
+    notifications.removeContentTypeParser("application/json");
+    notifications.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) =>
+      done(null, body),
+    );
+    notifications.post(
+      `${base}/payment-notifications/:id`,
+      { bodyLimit: 16384, config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      async (request) => {
+        if (typeof request.body !== "string") throw new HttpError("INVALID_PAYMENT_EVENT", 400);
+        const headers: Record<string, string | undefined> = {};
+        for (const [name, value] of Object.entries(request.headers))
+          if (typeof value === "string") headers[name] = value;
+        await acceptPaymentNotification(db, gateway, params(request).id!, request.body, headers);
+        return { ok: true };
+      },
+    );
+  });
   let worker: ReturnType<typeof setInterval> | undefined;
   if (options.aiEncryptionKey)
     registerAssistantRoutes(app, {
@@ -748,7 +790,8 @@ export async function buildTennisServer(options: TennisServerOptions) {
       ticking = true;
       void expireDueOrders(db)
         .then(() => expireDueAmendments(db))
-        .catch((error) => app.log.error({ err: error }, "Hold expiry failed"))
+        .then(() => processDueChannelOperations(db, gateway))
+        .catch((error) => app.log.error({ err: error }, "Tennis background reconciliation failed"))
         .finally(() => {
           ticking = false;
         });

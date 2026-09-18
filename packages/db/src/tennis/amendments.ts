@@ -6,7 +6,8 @@ import { locateOrder, orderInTransaction, requireBookingVenue, type OrderLine, t
 import { priceSelectionInTransaction } from "./catalog.ts";
 import { isCustomerActor, requireCustomer, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { CourtInventoryError } from "./inventory.ts";
-import type { LocalMockPaymentGateway } from "./mock-payments.ts";
+import type { PaymentProviderPort } from "./payment-port.ts";
+import { resolvePaymentMerchant, enqueuePaymentChannel } from "./channel-intents.ts";
 import { paymentInTransaction, type PaymentRecord } from "./payments.ts";
 import { idempotentCommand, requestHash } from "./receipts.ts";
 import { createRefundGroupInTransaction, refundableLines, refreshOrderPaymentStatus } from "./refunds.ts";
@@ -727,7 +728,7 @@ export async function cancelOrderAmendment(
 export async function beginAmendmentPayment(
   db: pg.Pool,
   actor: BookingActor,
-  gateway: LocalMockPaymentGateway,
+  gateway: PaymentProviderPort,
   input: {
     amendmentId: string;
     walletCents: number;
@@ -766,6 +767,7 @@ export async function beginAmendmentPayment(
         throw new TennisAmendmentError("ORDER_AMENDMENT_PENDING");
       const id = randomUUID(),
         external = amendment.supplementalCents - input.walletCents;
+      const binding = external > 0 ? await resolvePaymentMerchant(tx, actor.tenantId, gateway) : null;
       await tx.query(
         `INSERT INTO tennis.payment_attempts(id,tenant_id,venue_id,customer_id,order_id,amendment_id,provider,merchant_id,external_cents,wallet_cents,status,created_by)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING',$11)`,
@@ -776,8 +778,8 @@ export async function beginAmendmentPayment(
           amendment.customerId,
           orderId,
           amendment.id,
-          external ? gateway.provider : "WALLET",
-          external ? gateway.merchantForTenant(actor.tenantId) : `wallet:${actor.tenantId}`,
+          binding?.provider ?? "WALLET",
+          binding?.merchantId ?? `wallet:${actor.tenantId}`,
           external,
           input.walletCents,
           actor.subjectId,
@@ -785,6 +787,15 @@ export async function beginAmendmentPayment(
       );
       await reserveWallet(tx, actor.tenantId, amendment.customerId, id, input.walletCents);
       if (Date.parse(amendment.holdUntil!) <= (await now(tx))) throw new TennisAmendmentError("AMENDMENT_EXPIRED");
+      if (binding)
+        await enqueuePaymentChannel(tx, {
+          tenantId: actor.tenantId,
+          sourceKind: "ORDER",
+          sourceId: id,
+          binding,
+          amountCents: external,
+          expiresAt: amendment.holdUntil!,
+        });
       if (!external) {
         await settleWalletReservation(tx, actor.tenantId, amendment.customerId, id, true);
         await tx.query(

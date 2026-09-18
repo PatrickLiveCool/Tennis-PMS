@@ -38,7 +38,8 @@ import {
   getTopupPayment,
   listTopupOffers,
 } from "../../../../packages/db/src/tennis/topups.ts";
-import { LocalMockPaymentGateway } from "../../../../packages/db/src/tennis/mock-payments.ts";
+import type { PaymentProviderPort } from "../../../../packages/db/src/tennis/payment-port.ts";
+import { getPaymentChannel, reconcilePaymentChannel } from "../../../../packages/db/src/tennis/payment-channel.ts";
 import { AgentAccessError } from "../../../../packages/db/src/tennis/agent-guard.ts";
 import { discoverAgentVenues } from "../../../../packages/db/src/tennis/agent-discovery.ts";
 
@@ -47,7 +48,7 @@ export function registerAssistantRoutes(
   input: {
     db: pg.Pool;
     key: Buffer;
-    gateway: LocalMockPaymentGateway;
+    gateway: PaymentProviderPort;
     actor: (request: FastifyRequest) => BookingActor;
     subject: (request: FastifyRequest) => string;
     transport?: AgentTransport;
@@ -223,4 +224,15 @@ export function registerAssistantRoutes(
     beginTopupPayment(db, agent(request), gateway, { ...body, quoteId: param(request) }),
   );
   agentGet("/topups/:id", (request) => getTopupPayment(db, agent(request), param(request)));
+  for (const [resource, kind] of [
+    ["payments", "ORDER"],
+    ["topups", "TOPUP"],
+  ] as const) {
+    agentGet(`/${resource}/:id/channel`, (request) =>
+      getPaymentChannel(db, agent(request), kind, param(request), gateway),
+    );
+    agentPost(`/${resource}/:id/channel/reconcile`, obj({}), (request) =>
+      reconcilePaymentChannel(db, agent(request), kind, param(request), gateway),
+    );
+  }
 }

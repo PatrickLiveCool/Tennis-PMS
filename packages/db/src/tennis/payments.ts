@@ -11,7 +11,14 @@ import {
   requireBookingVenue,
 } from "./booking.ts";
 import { isCustomerActor, requireCustomer, withBookingTransaction, type BookingActor } from "./customers.ts";
-import { isVerifiedPaymentEvent, type LocalMockPaymentGateway, type VerifiedPaymentEvent } from "./mock-payments.ts";
+import {
+  isVerifiedPaymentEvent,
+  paymentEventSemanticHash,
+  type PaymentProviderPort,
+  type VerifiedPaymentEvent,
+  type VerifiedPaymentSuccessEvent,
+} from "./payment-port.ts";
+import { resolvePaymentMerchant, enqueuePaymentChannel } from "./channel-intents.ts";
 import { idempotentCommand, requestHash } from "./receipts.ts";
 import { lockTenantTransactions } from "./transaction-locks.ts";
 import { reserveWallet, settleWalletReservation } from "./wallet-store.ts";
@@ -56,7 +63,7 @@ export async function paymentInTransaction(tx: pg.PoolClient, tenantId: string, 
 export async function beginOrderPayment(
   db: pg.Pool,
   actor: BookingActor,
-  gateway: LocalMockPaymentGateway,
+  gateway: PaymentProviderPort,
   input: {
     orderId: string;
     walletCents: number;
@@ -87,6 +94,7 @@ export async function beginOrderPayment(
       if (pending.rowCount) throw new TennisWalletError("PAYMENT_ALREADY_PENDING");
       const paymentId = randomUUID();
       const externalCents = order.totalCents - input.walletCents;
+      const binding = externalCents > 0 ? await resolvePaymentMerchant(tx, actor.tenantId, gateway) : null;
       await tx.query(
         `INSERT INTO tennis.payment_attempts (id,tenant_id,venue_id,customer_id,order_id,provider,merchant_id,external_cents,wallet_cents,status,created_by)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',$10)`,
@@ -96,8 +104,8 @@ export async function beginOrderPayment(
           venueId,
           order.customerId,
           order.id,
-          externalCents ? gateway.provider : "WALLET",
-          externalCents ? gateway.merchantForTenant(actor.tenantId) : `wallet:${actor.tenantId}`,
+          binding?.provider ?? "WALLET",
+          binding?.merchantId ?? `wallet:${actor.tenantId}`,
           externalCents,
           input.walletCents,
           actor.subjectId,
@@ -109,6 +117,15 @@ export async function beginOrderPayment(
         [actor.tenantId, order.id],
       );
       if (!live.rowCount) throw new TennisWalletError("ORDER_NOT_PAYABLE");
+      if (binding)
+        await enqueuePaymentChannel(tx, {
+          tenantId: actor.tenantId,
+          sourceKind: "ORDER",
+          sourceId: paymentId,
+          binding,
+          amountCents: externalCents,
+          expiresAt: order.holdUntil!,
+        });
       if (externalCents === 0) {
         await settleWalletReservation(tx, actor.tenantId, order.customerId, paymentId, true);
         await tx.query(
@@ -124,7 +141,7 @@ export async function beginOrderPayment(
         orderId: order.id,
         walletCents: input.walletCents,
         externalCents,
-        provider: externalCents ? gateway.provider : "WALLET",
+        provider: binding?.provider ?? "WALLET",
         staffReason: input.staffReason ?? null,
       });
       return { paymentId };
@@ -151,7 +168,7 @@ async function financialException(
   tx: pg.PoolClient,
   tenantId: string,
   payment: PaymentRecord,
-  event: VerifiedPaymentEvent,
+  event: VerifiedPaymentSuccessEvent,
   kind: "LATE_PAYMENT" | "DUPLICATE_PAYMENT",
 ): Promise<void> {
   await tx.query(
@@ -204,7 +221,7 @@ export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentE
       payment.currency !== event.currency
     )
       throw new TennisWalletError("INVALID_PAYMENT_EVENT");
-    const hash = requestHash(event);
+    const hash = paymentEventSemanticHash(event);
     const oldEvent = (
       await tx.query<{ request_hash: string; payment_id: string }>(
         "SELECT request_hash,payment_id FROM tennis.payment_events WHERE provider=$1 AND merchant_id=$2 AND event_id=$3",
@@ -212,7 +229,11 @@ export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentE
       )
     ).rows[0];
     if (oldEvent) {
-      if (oldEvent.request_hash !== hash || oldEvent.payment_id !== payment.id)
+      // Legacy hashes included issuedAt; preserve exact legacy replay while new receipts use financial semantics.
+      if (
+        (oldEvent.request_hash !== hash && oldEvent.request_hash !== requestHash(event)) ||
+        oldEvent.payment_id !== payment.id
+      )
         throw new TennisWalletError("PAYMENT_EVENT_REUSED");
       await tx.query("COMMIT");
       return payment;

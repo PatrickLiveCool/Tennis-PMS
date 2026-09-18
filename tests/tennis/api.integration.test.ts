@@ -612,4 +612,64 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
       await locked.close();
     }
   });
+  it("exposes durable channel state and accepts only a signed raw notification for that operation", async () => {
+    const order = await booking();
+    const payment = await okay(customer, "POST", `/orders/${order.id}/payments`, { walletCents: 0, commandKey: key() });
+    const ready = await okay(customer, "GET", `/payments/${payment.id}/channel`);
+    expect(ready.state).toBe("READY");
+    expect((await request(foreign, "GET", `/payments/${payment.id}/channel`)).statusCode).toBe(404);
+    const pending = await okay(customer, "POST", `/payments/${payment.id}/channel/reconcile`, {});
+    expect(pending.state).toBe("PENDING");
+    expect(pending.checkout).toMatchObject({ kind: "LOCAL_SIMULATION", operationId: ready.operationId });
+    const payload = {
+      provider: "MOCK" as const,
+      operationId: ready.operationId,
+      paymentId: payment.id,
+      merchantId: payment.merchantId,
+      eventId: key(),
+      transactionId: key(),
+      status: "SUCCEEDED" as const,
+      amountCents: payment.externalCents,
+      currency: "CNY" as const,
+      issuedAt: Date.now(),
+    };
+    const signed = gateway.signForLocalSimulator(payload);
+    const url = `/api/tennis/payment-notifications/${ready.operationId}`;
+    expect(
+      (await app.inject({ method: "POST", url, headers: { "content-type": "application/json" }, payload: signed.body }))
+        .statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { "content-type": "application/json", "x-mock-signature": signed.signature },
+          payload: signed.body,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { "content-type": "application/json", "x-mock-signature": signed.signature },
+          payload: signed.body,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await okay(customer, "GET", `/payments/${payment.id}`)).status).toBe("SUCCEEDED");
+    expect((await okay(customer, "GET", `/payments/${payment.id}/channel`)).state).toBe("SUCCEEDED");
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { "content-type": "application/json", "x-mock-signature": signed.signature },
+          payload: signed.body + " ",
+        })
+      ).statusCode,
+    ).toBe(409);
+  });
 });

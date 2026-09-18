@@ -4,6 +4,7 @@ import { TennisApiError, type TennisApi } from "./api";
 import type { AIConfig } from "../../../../packages/db/src/tennis/external-agent";
 import type { TenantRecord } from "./types";
 import { PlatformGatewayPanel } from "./GatewayPanel";
+import { MerchantBindingsPanel } from "./MerchantBindingsPanel";
 import {
   dateTime,
   EmptyState,
@@ -207,6 +208,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
         <p className="tennis-muted">平台账号负责开通和维护服务；进入租户业务需要相应租户的员工权限。</p>
       </Panel>
       <PlatformGatewayPanel api={api} tenants={tenants.data ?? []} scope={scope} />
+      <MerchantBindingsPanel api={api} tenants={tenants.data ?? []} scope={scope} />
       <AISettings api={api} />
       {statusTenant && (
         <TenantStatusEditor

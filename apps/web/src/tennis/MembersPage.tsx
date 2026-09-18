@@ -4,6 +4,7 @@ import type { TennisApi } from "./api";
 import type { CustomerRecord, Session, TopupOffer, TopupPayment, TopupQuote, VenueRecord, Wallet } from "./types";
 import { permits } from "./types";
 import { CustomerPicker } from "./CustomerPicker";
+import { PaymentChannelPanel } from "./PaymentChannelPanel";
 import {
   Badge,
   cents,
@@ -325,6 +326,17 @@ function TopupDialog({
               <strong>{money(draft.payment.giftCents)}</strong>
             </div>
             <Badge value={draft.payment.status} />
+            <PaymentChannelPanel
+              api={api}
+              kind="topup"
+              sourceId={draft.payment.id}
+              scope={`${scope}:${session.contextVersion}`}
+              businessStatus={draft.payment.status}
+              timezone={venue.timezone}
+              canOperate={session.kind === "customer" || permits(session, "manage_members")}
+              businessBusy={command.busy}
+              onChanged={refreshPayment}
+            />
             <p className="tennis-note">
               {draft.payment.provider === "MOCK"
                 ? "本地模拟充值，不会发生真实扣费。"

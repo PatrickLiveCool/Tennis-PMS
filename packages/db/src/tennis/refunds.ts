@@ -4,7 +4,8 @@ import { allocateCents, assertCents } from "../../../domain/src/tennis-pricing.t
 import { recordTenantAudit, TenantAccessError, type TenantActor } from "./access.ts";
 import { locateOrder, orderInTransaction, requireBookingVenue } from "./booking.ts";
 import { withBookingTransaction, type BookingActor } from "./customers.ts";
-import { isVerifiedRefundEvent, type VerifiedRefundEvent } from "./mock-payments.ts";
+import { isVerifiedRefundEvent, refundEventSemanticHash, type VerifiedRefundEvent } from "./payment-port.ts";
+import { enqueueRefundChannel, retryRefundChannel } from "./channel-intents.ts";
 import { idempotentCommand, requestHash } from "./receipts.ts";
 import { lockTenantTransactions } from "./transaction-locks.ts";
 import { assertNoPendingAmendment, expireVenueAmendments } from "./amendments.ts";
@@ -308,6 +309,7 @@ export async function createRefundGroupInTransaction(
     }
     if (external === 0)
       await completeRefund(tx, actor.tenantId, await refundInTransaction(tx, actor.tenantId, refundId), null);
+    else await enqueueRefundChannel(tx, actor.tenantId, refundId);
   }
   for (const line of input.lines)
     if (line.cancel) {
@@ -441,6 +443,7 @@ export async function retryFailedRefund(
     await idempotentCommand(tx, actor, venueId, commandKey, "refund.retry", { refundId: id }, async () => {
       const refund = await refundInTransaction(tx, actor.tenantId, id);
       if (refund.status !== "FAILED") throw new TennisRefundError("REFUND_NOT_RETRYABLE");
+      await retryRefundChannel(tx, actor.tenantId, id);
       await tx.query("UPDATE tennis.refunds SET status='REQUESTED' WHERE tenant_id=$1 AND id=$2", [actor.tenantId, id]);
       await recordTenantAudit(tx, actor, "refund.retry", id);
       return { refundId: id };
@@ -480,12 +483,12 @@ export async function settleVerifiedRefund(db: pg.Pool, event: VerifiedRefundEve
     if (
       event.provider !== payment.provider ||
       event.merchantId !== payment.merchant_id ||
-      event.transactionId !== payment.provider_transaction_id ||
+      (event.transactionId !== undefined && event.transactionId !== payment.provider_transaction_id) ||
       event.amountCents !== refund.externalCents ||
       event.currency !== "CNY"
     )
       throw new TennisRefundError("INVALID_REFUND_EVENT");
-    const hash = requestHash(event);
+    const hash = refundEventSemanticHash(event);
     const existing = (
       await tx.query<{ request_hash: string }>(
         "SELECT request_hash FROM tennis.refund_events WHERE provider=$1 AND merchant_id=$2 AND event_id=$3",
@@ -493,7 +496,9 @@ export async function settleVerifiedRefund(db: pg.Pool, event: VerifiedRefundEve
       )
     ).rows[0];
     if (existing) {
-      if (existing.request_hash !== hash) throw new TennisRefundError("REFUND_EVENT_REUSED");
+      // Preserve exact replay of legacy hashes; new observations exclude the envelope timestamp.
+      if (existing.request_hash !== hash && existing.request_hash !== requestHash(event))
+        throw new TennisRefundError("REFUND_EVENT_REUSED");
       await tx.query("COMMIT");
       return refund;
     }
@@ -515,8 +520,16 @@ export async function settleVerifiedRefund(db: pg.Pool, event: VerifiedRefundEve
       )
         throw new TennisRefundError("INVALID_REFUND_EVENT");
       await completeRefund(tx, tenantId, refund, event.providerRefundId);
-    } else if (refund.status !== "SUCCEEDED")
-      await tx.query("UPDATE tennis.refunds SET status='FAILED' WHERE tenant_id=$1 AND id=$2", [tenantId, refund.id]);
+    } else if (refund.status !== "SUCCEEDED") {
+      const superseded = (
+        await tx.query(
+          `SELECT 1 FROM tennis.channel_observations obs JOIN tennis.channel_operations old ON old.id=obs.operation_id WHERE obs.provider=$1 AND obs.merchant_id=$2 AND obs.event_kind='REFUND' AND obs.event_id=$3 AND old.tenant_id=$4 AND old.source_id=$5 AND EXISTS (SELECT 1 FROM tennis.channel_operations newer WHERE newer.tenant_id=old.tenant_id AND newer.source_kind='REFUND' AND newer.source_id=old.source_id AND newer.generation>old.generation)`,
+          [event.provider, event.merchantId, event.eventId, tenantId, refund.id],
+        )
+      ).rowCount;
+      if (!superseded)
+        await tx.query("UPDATE tennis.refunds SET status='FAILED' WHERE tenant_id=$1 AND id=$2", [tenantId, refund.id]);
+    }
     await tx.query(
       "INSERT INTO tennis.refund_events (provider,merchant_id,event_id,tenant_id,refund_id,request_hash,payload) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)",
       [event.provider, event.merchantId, event.eventId, tenantId, refund.id, hash, JSON.stringify(event)],

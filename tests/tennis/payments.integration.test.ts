@@ -443,7 +443,7 @@ describe("wallet and local simulated payments", () => {
       commandKey: key(),
     });
     await expect(
-      settleVerifiedPayment(db, event(otherPayment, { transactionId: success.transactionId })),
+      settleVerifiedPayment(db, event(otherPayment, { transactionId: success.transactionId! })),
     ).rejects.toMatchObject({ code: "PAYMENT_TRANSACTION_REUSED" });
     await expect(settleVerifiedPayment(db, event(payment, { eventId: success.eventId }))).rejects.toMatchObject({
       code: "PAYMENT_EVENT_REUSED",
@@ -805,7 +805,7 @@ describe("online top-ups with authorized gifts", () => {
       commandKey: key(),
     });
     await expect(
-      settleVerifiedPayment(db, event(orderPayment, { transactionId: notification.transactionId })),
+      settleVerifiedPayment(db, event(orderPayment, { transactionId: notification.transactionId! })),
     ).rejects.toMatchObject({ code: "PAYMENT_TRANSACTION_REUSED" });
     const orderSuccess = event(orderPayment);
     await settleVerifiedPayment(db, orderSuccess);
@@ -816,7 +816,7 @@ describe("online top-ups with authorized gifts", () => {
     });
     const another = await beginTopupPayment(db, customer, gateway, { quoteId: anotherQuote.id, commandKey: key() });
     await expect(
-      settleVerifiedTopup(db, topupEvent(another, { transactionId: orderSuccess.transactionId })),
+      settleVerifiedTopup(db, topupEvent(another, { transactionId: orderSuccess.transactionId! })),
     ).rejects.toMatchObject({ code: "PAYMENT_TRANSACTION_REUSED" });
     expect((await getTopupPayment(db, customer, another.id)).status).toBe("PENDING");
     expect((await getWallet(db, customer, customer.customerId)).balance.totalCents).toBe(12000);

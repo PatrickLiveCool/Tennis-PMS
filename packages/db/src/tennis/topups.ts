@@ -7,7 +7,13 @@ import { requireBookingVenue } from "./booking.ts";
 import { venueInTransaction } from "./catalog.ts";
 import { claimChannelTransaction } from "./channel-transactions.ts";
 import { isCustomerActor, requireCustomer, withBookingTransaction, type BookingActor } from "./customers.ts";
-import { isVerifiedPaymentEvent, type LocalMockPaymentGateway, type VerifiedPaymentEvent } from "./mock-payments.ts";
+import {
+  isVerifiedPaymentEvent,
+  paymentEventSemanticHash,
+  type PaymentProviderPort,
+  type VerifiedPaymentEvent,
+} from "./payment-port.ts";
+import { resolvePaymentMerchant, enqueuePaymentChannel } from "./channel-intents.ts";
 import { idempotentCommand, requestHash } from "./receipts.ts";
 import { lockTenantTransactions } from "./transaction-locks.ts";
 import { creditWalletBatch } from "./wallet-store.ts";
@@ -190,7 +196,7 @@ export async function createTopupQuote(
 export async function beginTopupPayment(
   db: pg.Pool,
   actor: BookingActor,
-  gateway: LocalMockPaymentGateway,
+  gateway: PaymentProviderPort,
   input: { quoteId: string; commandKey: string },
 ): Promise<TopupPayment> {
   return withBookingTransaction(db, actor, async (tx) => {
@@ -222,6 +228,7 @@ export async function beginTopupPayment(
         const clock = (await tx.query<{ time: Date }>("SELECT clock_timestamp() AS time")).rows[0]!.time;
         if (quote.expiresAt <= clock) throw new TennisWalletError("INVALID_TOPUP");
         const id = randomUUID();
+        const binding = await resolvePaymentMerchant(tx, actor.tenantId, gateway);
         await tx.query(
           `INSERT INTO tennis.topup_payments (id,tenant_id,venue_id,customer_id,quote_id,provider,merchant_id,principal_cents,gift_cents,status,created_by)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',$10)`,
@@ -231,18 +238,26 @@ export async function beginTopupPayment(
             quote.venueId,
             quote.customerId,
             quote.id,
-            gateway.provider,
-            gateway.merchantForTenant(actor.tenantId),
+            binding.provider,
+            binding.merchantId,
             quote.principalCents,
             quote.giftCents,
             actor.subjectId,
           ],
         );
+        await enqueuePaymentChannel(tx, {
+          tenantId: actor.tenantId,
+          sourceKind: "TOPUP",
+          sourceId: id,
+          binding,
+          amountCents: quote.principalCents,
+          expiresAt: new Date(clock.getTime() + 10 * 60_000).toISOString(),
+        });
         await recordTenantAudit(tx, actor, "topup.begin", id, {
           quoteId: quote.id,
           principalCents: quote.principalCents,
           giftCents: quote.giftCents,
-          provider: gateway.provider,
+          provider: binding.provider,
         });
         return { topupId: id };
       },
@@ -290,7 +305,7 @@ export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEve
       event.currency !== "CNY"
     )
       throw new TennisWalletError("INVALID_PAYMENT_EVENT");
-    const hash = requestHash(event);
+    const hash = paymentEventSemanticHash(event);
     const previous = (
       await tx.query<{ request_hash: string }>(
         "SELECT request_hash FROM tennis.topup_events WHERE provider=$1 AND merchant_id=$2 AND event_id=$3",
@@ -298,7 +313,9 @@ export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEve
       )
     ).rows[0];
     if (previous) {
-      if (previous.request_hash !== hash) throw new TennisWalletError("PAYMENT_EVENT_REUSED");
+      // Pre-port receipts only support exact replay; new receipts ignore envelope timestamp changes.
+      if (previous.request_hash !== hash && previous.request_hash !== requestHash(event))
+        throw new TennisWalletError("PAYMENT_EVENT_REUSED");
       await tx.query("COMMIT");
       return payment;
     }
@@ -333,7 +350,7 @@ export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEve
           giftCents: payment.giftCents,
           sourceKind: event.provider,
           sourceReference: `${event.merchantId}:${event.transactionId}`,
-          reason: "线上充值到账（本地模拟）",
+          reason: event.provider === "MOCK" ? "线上充值到账（本地模拟）" : "线上充值到账",
         });
         await tx.query(
           "UPDATE tennis.topup_payments SET status='SUCCEEDED',wallet_batch_id=$1,provider_transaction_id=$2,settled_at=clock_timestamp() WHERE tenant_id=$3 AND id=$4",
