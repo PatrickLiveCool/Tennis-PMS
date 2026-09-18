@@ -82,6 +82,7 @@ import {
 } from "../../../../packages/db/src/tennis/topups.ts";
 import { LocalMockPaymentGateway } from "../../../../packages/db/src/tennis/mock-payments.ts";
 import { registerAssistantRoutes } from "./assistant-routes.ts";
+import { registerGatewayRoutes } from "./gateway-routes.ts";
 import type { AgentTransport } from "../../../../packages/db/src/tennis/external-agent.ts";
 import {
   previewOrderAmendment,
@@ -125,6 +126,12 @@ const obj = <T extends Record<string, TSchema>>(properties: T) =>
 const params = (request: FastifyRequest) => request.params as Record<string, string>;
 const query = (request: FastifyRequest) => request.query as Record<string, string | undefined>;
 const messages: Record<string, string> = {
+  GATEWAY_ACCESS_REVOKED: "渠道凭据或身份绑定已失效，请联系平台或租户管理员核对。",
+  GATEWAY_IDENTITY_UNBOUND: "此渠道身份尚未由管理员核对绑定。",
+  GATEWAY_MESSAGE_CONFLICT: "原渠道消息或绑定已存在，请核对原记录，不要另建交易。",
+  GATEWAY_SCOPE_CHANGED: "会话已接管或场馆范围已变更，请先核对原结果。",
+  GATEWAY_GRANT_CLOSED: "原请求授权已结束，请查询原请求结果，不可重发交易。",
+  INVALID_GATEWAY_INPUT: "请检查渠道接入参数。",
   ASSISTANT_NOT_CONFIGURED: "AI 助手尚未连接外部服务，请联系平台运营方配置。",
   ASSISTANT_BUSY: "上一条消息正在处理中，请稍后查看原会话结果。",
   ASSISTANT_RESULT_UNKNOWN: "AI 助手的处理结果尚未确认，请转人工核对原订单和付款后继续，避免重复交易。",
@@ -257,7 +264,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
     const origin = request.headers.origin;
     if (origin && !origins.has(origin)) throw new HttpError("ORIGIN_REJECTED", 403);
     const pathname = request.url.split("?")[0];
-    if (pathname === "/health" || pathname === "/api/tennis/auth/login" || pathname?.startsWith("/api/tennis/agent/"))
+    if (
+      pathname === "/health" ||
+      pathname === "/api/tennis/auth/login" ||
+      pathname?.startsWith("/api/tennis/agent/") ||
+      pathname?.startsWith("/api/tennis/gateway/")
+    )
       return;
     const recoveryRoute = ["/api/tennis/session", "/api/tennis/session/context", "/api/tennis/auth/logout"].includes(
       pathname ?? "",
@@ -721,6 +733,13 @@ export async function buildTennisServer(options: TennisServerOptions) {
       actor,
       subject: (request) => session(request).subjectId,
       ...(options.agentTransport ? { transport: options.agentTransport } : {}),
+    });
+  if (options.aiEncryptionKey)
+    registerGatewayRoutes(app, {
+      db,
+      key: options.aiEncryptionKey,
+      actor,
+      subject: (request) => session(request).subjectId,
     });
   let ticking = false;
   if (options.runExpiryWorker) {

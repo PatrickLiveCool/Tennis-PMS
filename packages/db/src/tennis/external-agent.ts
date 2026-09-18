@@ -222,6 +222,156 @@ export async function getConversation(db: pg.Pool, actor: BookingActor, id: stri
     return { conversation: item, messages };
   });
 }
+export interface AgentRequestSummary {
+  requestId: string;
+  messageId: string | null;
+  generation: number;
+  createdAt: string;
+  dispatchStatus: "IN_FLIGHT" | "SUCCEEDED" | "UNCERTAIN" | "ISSUED";
+  commandCount: number;
+}
+export interface AgentCommandResource {
+  type: string;
+  id: string;
+  status: string;
+  paymentStatus?: string;
+}
+export interface AgentCommandSummary {
+  commandKey: string;
+  commandType: string;
+  completedAt: string;
+  resources: AgentCommandResource[];
+}
+export interface AgentRequestDetail extends AgentRequestSummary {
+  commands: AgentCommandSummary[];
+  restrictedCommandCount: number;
+}
+interface RequestSummaryRow extends Omit<AgentRequestSummary, "createdAt"> {
+  createdAt: Date;
+}
+const requestSummaryColumns = `r.id AS "requestId",r.message_id AS "messageId",r.generation,r.created_at AS "createdAt",
+  coalesce(d.status,'ISSUED') AS "dispatchStatus",(SELECT count(*)::int FROM tennis.agent_command_links l WHERE l.tenant_id=r.tenant_id AND l.request_id=r.id) AS "commandCount"`;
+const requestSummary = (row: RequestSummaryRow): AgentRequestSummary => ({
+  ...row,
+  createdAt: row.createdAt.toISOString(),
+});
+/** A regular authorized identity can inspect history after the original write token is revoked. */
+export async function listConversationRequests(
+  db: pg.Pool,
+  actor: BookingActor,
+  id: string,
+  cursor?: string,
+): Promise<{ items: AgentRequestSummary[]; nextCursor: string | null }> {
+  return withBookingTransaction(db, actor, async (tx) => {
+    await conversation(tx, actor, id);
+    if (
+      cursor &&
+      !(
+        await tx.query("SELECT id FROM tennis.agent_requests WHERE tenant_id=$1 AND conversation_id=$2 AND id=$3", [
+          actor.tenantId,
+          id,
+          cursor,
+        ])
+      ).rowCount
+    )
+      throw new TenantAccessError("RESOURCE_NOT_FOUND");
+    const rows = (
+      await tx.query<RequestSummaryRow>(
+        `SELECT ${requestSummaryColumns} FROM tennis.agent_requests r
+      LEFT JOIN tennis.agent_message_dispatches d ON d.tenant_id=r.tenant_id AND d.conversation_id=r.conversation_id AND d.message_id=r.message_id
+      WHERE r.tenant_id=$1 AND r.conversation_id=$2 AND ($3::text IS NULL OR (r.created_at,r.id)<(SELECT created_at,id FROM tennis.agent_requests WHERE tenant_id=$1 AND conversation_id=$2 AND id=$3))
+      ORDER BY r.created_at DESC,r.id DESC LIMIT 21`,
+        [actor.tenantId, id, cursor ?? null],
+      )
+    ).rows;
+    return { items: rows.slice(0, 20).map(requestSummary), nextCursor: rows.length > 20 ? rows[19]!.requestId : null };
+  });
+}
+async function commandResources(
+  tx: pg.PoolClient,
+  actor: BookingActor,
+  venueId: string,
+  result: Record<string, unknown>,
+): Promise<AgentCommandResource[] | null> {
+  // Static table/field identifiers only. Never return request payloads or arbitrary receipt JSON.
+  const specs = [
+    ["orderId", "order", "orders"],
+    ["paymentId", "payment", "payment_attempts"],
+    ["topupId", "topup", "topup_payments"],
+    ["refundId", "refund", "refunds"],
+    ["refundGroupId", "refund-group", "refund_groups"],
+    ["amendmentId", "amendment", "order_amendments"],
+    ["batchId", "wallet-batch", "wallet_batches"],
+  ] as const;
+  const resources: AgentCommandResource[] = [];
+  for (const [field, type, table] of specs) {
+    const resourceId = result[field];
+    if (typeof resourceId !== "string") continue;
+    const status = table === "wallet_batches" ? "'CREDITED'" : table === "refund_groups" ? "'RECORDED'" : "status";
+    const row = (
+      await tx.query<{ status: string; paymentStatus?: string }>(
+        `SELECT ${status} AS status${table === "orders" ? ',payment_status AS "paymentStatus"' : ""} FROM tennis.${table}
+      WHERE tenant_id=$1 AND venue_id=$2 AND id=$3 AND ($4::text IS NULL OR customer_id=$4)`,
+        [actor.tenantId, venueId, resourceId, isCustomerActor(actor) ? actor.customerId : null],
+      )
+    ).rows[0];
+    if (!row) return null;
+    resources.push({ type, id: resourceId, ...row });
+  }
+  return resources;
+}
+export async function getConversationRequest(
+  db: pg.Pool,
+  actor: BookingActor,
+  id: string,
+  requestId: string,
+): Promise<AgentRequestDetail> {
+  return withBookingTransaction(db, actor, async (tx) => {
+    const conv = await conversation(tx, actor, id);
+    const row = (
+      await tx.query<RequestSummaryRow>(
+        `SELECT ${requestSummaryColumns} FROM tennis.agent_requests r
+      LEFT JOIN tennis.agent_message_dispatches d ON d.tenant_id=r.tenant_id AND d.conversation_id=r.conversation_id AND d.message_id=r.message_id
+      WHERE r.tenant_id=$1 AND r.conversation_id=$2 AND r.id=$3`,
+        [actor.tenantId, id, requestId],
+      )
+    ).rows[0];
+    if (!row) throw new TenantAccessError("RESOURCE_NOT_FOUND");
+    const receipts = (
+      await tx.query<{ commandKey: string; commandType: string; completedAt: Date; result: Record<string, unknown> }>(
+        `SELECT c.command_key AS "commandKey",c.command_type AS "commandType",c.completed_at AS "completedAt",c.result
+      FROM tennis.agent_command_links l JOIN tennis.command_receipts c ON c.tenant_id=l.tenant_id AND c.subject_id=l.subject_id AND c.command_key=l.command_key
+      WHERE l.tenant_id=$1 AND l.conversation_id=$2 AND l.request_id=$3 AND c.venue_id=$4 AND c.completed_at IS NOT NULL ORDER BY c.completed_at,c.command_key`,
+        [actor.tenantId, id, requestId, conv.venueId],
+      )
+    ).rows;
+    const commands: AgentCommandSummary[] = [];
+    let restrictedCommandCount = 0;
+    for (const receipt of receipts) {
+      if (!isCustomerActor(actor) && /^(topup|wallet)\./.test(receipt.commandType)) {
+        try {
+          await requireBookingVenue(tx, actor, conv.venueId, "manage_members");
+        } catch (error) {
+          if (!(error instanceof TenantAccessError)) throw error;
+          restrictedCommandCount++;
+          continue;
+        }
+      }
+      const resources = await commandResources(tx, actor, conv.venueId, receipt.result);
+      if (resources === null) {
+        restrictedCommandCount++;
+        continue;
+      }
+      commands.push({
+        commandKey: receipt.commandKey,
+        commandType: receipt.commandType,
+        completedAt: receipt.completedAt.toISOString(),
+        resources,
+      });
+    }
+    return { ...requestSummary(row), commands, restrictedCommandCount };
+  });
+}
 export async function setAssistantMessageFeedback(
   db: pg.Pool,
   actor: BookingActor,
@@ -290,49 +440,75 @@ export async function handoffConversation(
   });
 }
 export async function issueDelegation(db: pg.Pool, actor: BookingActor, id: string, messageId?: string) {
-  return withBookingTransaction(db, actor, async (tx) => {
-    const row = await conversation(tx, actor, id);
-    // A staff member taking over another person's conversation cannot mint their credentials.
-    if (row.subjectId !== actor.subjectId) throw new TenantAccessError("TENANT_ACCESS_DENIED");
-    if (row.mode !== "AGENT") throw new AgentAccessError("HUMAN_HANDOFF_ACTIVE");
-    if (messageId) {
-      const pending = (
-        await tx.query<{ status: string }>(
-          `SELECT status FROM tennis.agent_message_dispatches WHERE message_id=$1 OR (tenant_id=$2 AND conversation_id=$3 AND generation=$4 AND status<>'SUCCEEDED') ORDER BY created_at LIMIT 1`,
-          [messageId, actor.tenantId, id, row.generation],
-        )
-      ).rows[0];
-      if (pending)
-        throw new AgentAccessError(pending.status === "IN_FLIGHT" ? "ASSISTANT_BUSY" : "ASSISTANT_RESULT_UNKNOWN");
-      await tx.query(
-        "INSERT INTO tennis.agent_message_dispatches(message_id,tenant_id,conversation_id,generation,status) VALUES($1,$2,$3,$4,'IN_FLIGHT')",
+  return withBookingTransaction(db, actor, (tx) => issueDelegationInTransaction(tx, actor, id, messageId));
+}
+/** Caller owns the transaction; Gateway can bind its identity before this transaction commits. */
+export async function issueDelegationInTransaction(
+  tx: pg.PoolClient,
+  actor: BookingActor,
+  id: string,
+  messageId?: string,
+) {
+  const row = await conversation(tx, actor, id);
+  if (row.subjectId !== actor.subjectId) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+  if (row.mode !== "AGENT") throw new AgentAccessError("HUMAN_HANDOFF_ACTIVE");
+  if (messageId) {
+    const message = await tx.query(
+      `SELECT id FROM tennis.agent_messages WHERE tenant_id=$1 AND conversation_id=$2 AND id=$3 AND subject_id=$4 AND role='user'`,
+      [actor.tenantId, id, messageId, actor.subjectId],
+    );
+    if (message.rowCount !== 1) throw new AgentAccessError("INVALID_AGENT_MESSAGE");
+    const pending = (
+      await tx.query<{ status: string }>(
+        `SELECT status FROM tennis.agent_message_dispatches WHERE message_id=$1 OR (tenant_id=$2 AND conversation_id=$3 AND generation=$4 AND status<>'SUCCEEDED') ORDER BY created_at LIMIT 1`,
         [messageId, actor.tenantId, id, row.generation],
-      );
-    }
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = (
-      await tx.query<{ expiresAt: Date }>(
-        `INSERT INTO tennis.agent_delegations(token_hash,tenant_id,conversation_id,generation,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '15 minutes') RETURNING expires_at AS "expiresAt"`,
-        [hash(token), actor.tenantId, id, row.generation],
       )
-    ).rows[0]!.expiresAt;
-    const messages = (
-      await tx.query<{ id: string; role: string; content: string; createdAt: Date }>(
-        `SELECT id,role,content,created_at AS "createdAt" FROM (SELECT * FROM tennis.agent_messages WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY created_at DESC,id DESC LIMIT 200) m ORDER BY created_at,id`,
-        [actor.tenantId, id],
-      )
-    ).rows;
-    return { token, expiresAt, conversation: row, messages };
-  });
+    ).rows[0];
+    if (pending)
+      throw new AgentAccessError(pending.status === "IN_FLIGHT" ? "ASSISTANT_BUSY" : "ASSISTANT_RESULT_UNKNOWN");
+    await tx.query(
+      "INSERT INTO tennis.agent_message_dispatches(message_id,tenant_id,conversation_id,generation,status) VALUES($1,$2,$3,$4,'IN_FLIGHT')",
+      [messageId, actor.tenantId, id, row.generation],
+    );
+  }
+  const requestId = messageId ?? `delegation:${randomUUID()}`;
+  await tx.query(
+    `INSERT INTO tennis.agent_requests(id,tenant_id,conversation_id,subject_id,venue_id,generation,message_id)
+    VALUES($1,$2,$3,$4,$5,$6,$7)`,
+    [requestId, actor.tenantId, id, actor.subjectId, row.venueId, row.generation, messageId ?? null],
+  );
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = (
+    await tx.query<{ expiresAt: Date }>(
+      `INSERT INTO tennis.agent_delegations(token_hash,tenant_id,conversation_id,generation,request_id,expires_at)
+    VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '15 minutes') RETURNING expires_at AS "expiresAt"`,
+      [hash(token), actor.tenantId, id, row.generation, requestId],
+    )
+  ).rows[0]!.expiresAt;
+  // Anchor queued requests to their own message. Later user instructions must not
+  // become the context of an earlier request, even with more than 200 queued messages.
+  const messages = (
+    await tx.query<{ id: string; role: string; content: string; createdAt: Date }>(
+      `
+    SELECT id,role,content,created_at AS "createdAt" FROM (
+      SELECT * FROM tennis.agent_messages WHERE tenant_id=$1 AND conversation_id=$2
+      AND ($3::text IS NULL OR (created_at,id)<=(SELECT created_at,id FROM tennis.agent_messages
+        WHERE tenant_id=$1 AND conversation_id=$2 AND id=$3))
+      ORDER BY created_at DESC,id DESC LIMIT 200
+    ) m ORDER BY created_at,id`,
+      [actor.tenantId, id, messageId ?? null],
+    )
+  ).rows;
+  return { token, expiresAt, conversation: row, messages, requestId };
 }
 export async function resolveDelegation(
   db: pg.Pool,
   token: string,
-): Promise<{ actor: BookingActor; conversation: Conversation }> {
+): Promise<{ actor: BookingActor; conversation: Conversation; requestId: string }> {
   if (!/^[a-zA-Z0-9_-]{43}$/.test(token)) throw new AgentAccessError("AGENT_DELEGATION_REVOKED");
   const row = (
-    await db.query<Conversation>(
-      `SELECT c.id,c.tenant_id AS "tenantId",c.venue_id AS "venueId",c.subject_id AS "subjectId",c.customer_id AS "customerId",c.actor_kind AS "actorKind",c.mode,c.generation,c.taken_by AS "takenBy",c.updated_at AS "updatedAt" FROM tennis.agent_delegations d JOIN tennis.agent_conversations c ON c.tenant_id=d.tenant_id AND c.id=d.conversation_id WHERE d.token_hash=$1 AND d.expires_at>clock_timestamp() AND c.mode='AGENT' AND c.generation=d.generation`,
+    await db.query<Conversation & { requestId: string }>(
+      `SELECT d.request_id AS "requestId",c.id,c.tenant_id AS "tenantId",c.venue_id AS "venueId",c.subject_id AS "subjectId",c.customer_id AS "customerId",c.actor_kind AS "actorKind",c.mode,c.generation,c.taken_by AS "takenBy",c.updated_at AS "updatedAt" FROM tennis.agent_delegations d JOIN tennis.agent_conversations c ON c.tenant_id=d.tenant_id AND c.id=d.conversation_id WHERE d.token_hash=$1 AND d.expires_at>clock_timestamp() AND c.mode='AGENT' AND c.generation=d.generation`,
       [hash(token)],
     )
   ).rows[0];
@@ -344,11 +520,13 @@ export async function resolveDelegation(
   bindDelegation(actor, {
     tokenHash: hash(token),
     conversationId: row.id,
+    requestId: row.requestId,
     venueId: row.venueId,
     generation: row.generation,
   });
   await withBookingTransaction(db, actor, async (tx) => requireBookingVenue(tx, actor, row.venueId, "read"));
-  return { actor, conversation: row };
+  const { requestId, ...item } = row;
+  return { actor, conversation: item, requestId };
 }
 export interface AgentTransport {
   (

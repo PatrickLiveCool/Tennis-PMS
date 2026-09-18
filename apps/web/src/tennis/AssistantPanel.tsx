@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageCircle, Plus, Send } from "lucide-react";
 import type { TennisApi } from "./api";
+import type { AgentRequestDetail, AgentRequestSummary } from "../../../../packages/db/src/tennis/external-agent";
 import type { Session, VenueRecord, AssistantStatus } from "./types";
-import { dateTime, ErrorNotice, LoadingBlock, Modal, useLoad } from "./components";
+import { Badge, dateTime, ErrorNotice, LoadingBlock, Modal, Panel, RefreshButton, useLoad } from "./components";
 
 interface Conversation {
   id: string;
@@ -27,6 +28,216 @@ interface ConversationView {
   conversation: Conversation;
   messages: { id: string; role: string; content: string; createdAt: string; feedback?: boolean | null }[];
 }
+const requestStatusLabels: Record<AgentRequestSummary["dispatchStatus"], string> = {
+  IN_FLIGHT: "未收到处理结束回报",
+  SUCCEEDED: "已收到处理结束回报",
+  UNCERTAIN: "结果待核对",
+  ISSUED: "请求已签发",
+};
+const commandLabels: Record<string, string> = {
+  "quote.confirm": "确认预订并占位",
+  "order.payment": "订单付款",
+  "order.cancel_unpaid": "取消未付款预订",
+  "order.cancel_unpaid_lines": "取消未付款明细",
+  "order.cancel_free_lines": "取消无需付款明细",
+  "order.refund": "订单退款",
+  "order.refund_group": "订单退款",
+  "amendment.confirm": "确认改期",
+  "amendment.cancel": "取消改期",
+  "amendment.payment": "改期补款",
+  "topup.begin": "线上充值",
+  "wallet.offline_topup": "登记线下充值",
+  "refund.retry": "重试退款",
+};
+const resourceLabels: Record<string, string> = {
+  order: "订单",
+  payment: "付款",
+  topup: "充值",
+  refund: "退款",
+  "refund-group": "退款申请",
+  amendment: "改期",
+  "wallet-batch": "充值批次",
+};
+function ConversationRequests({
+  api,
+  conversationId,
+  timezone,
+  refreshVersion,
+}: {
+  api: TennisApi;
+  conversationId: string;
+  timezone: string;
+  refreshVersion: string;
+}) {
+  const [page, setPage] = useState<{ items: AgentRequestSummary[]; nextCursor: string | null }>();
+  const [selected, setSelected] = useState<AgentRequestSummary | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<unknown>();
+  const serial = useRef(0);
+  const path = `/assistant/conversations/${encodeURIComponent(conversationId)}/requests`;
+  const loadPage = useCallback(
+    async (cursor?: string) => {
+      const current = ++serial.current;
+      setBusy(true);
+      try {
+        const next = await api<{ items: AgentRequestSummary[]; nextCursor: string | null }>(
+          `${path}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+        );
+        if (current !== serial.current) return;
+        setPage((previous) => ({
+          items: cursor
+            ? [...new Map([...(previous?.items ?? []), ...next.items].map((item) => [item.requestId, item])).values()]
+            : next.items,
+          nextCursor: next.nextCursor,
+        }));
+        setSelected((previous) =>
+          previous
+            ? (next.items.find((item) => item.requestId === previous.requestId) ?? previous)
+            : (next.items[0] ?? null),
+        );
+        setError(undefined);
+      } catch (next) {
+        if (current === serial.current) setError(next);
+      } finally {
+        if (current === serial.current) setBusy(false);
+      }
+    },
+    [api, path],
+  );
+  useEffect(() => {
+    void loadPage();
+    return () => {
+      serial.current++;
+    };
+  }, [loadPage, refreshVersion]);
+  const detail = useLoad(
+    () =>
+      selected ? api<AgentRequestDetail>(`${path}/${encodeURIComponent(selected.requestId)}`) : Promise.resolve(null),
+    [api, path, selected?.requestId, refreshVersion],
+  );
+  const current = detail.data?.requestId === selected?.requestId ? detail.data : null;
+  const items =
+    selected && !page?.items.some((item) => item.requestId === selected.requestId)
+      ? [selected, ...(page?.items ?? [])]
+      : (page?.items ?? []);
+  function refresh() {
+    void loadPage();
+    void detail.refresh();
+  }
+  return (
+    <Panel title="办理记录" action={<RefreshButton busy={busy || detail.busy} onClick={refresh} />}>
+      <p className="tennis-muted">按本次会话核对已登记的业务操作和最新状态。刷新仅查询记录，不会重新办理。</p>
+      <ErrorNotice error={error} retry={refresh} />
+      {!!error && page && <p className="tennis-muted">列表刷新未成功，以下仍为上次读取的记录。</p>}
+      {busy && !page ? (
+        <LoadingBlock />
+      ) : !page?.items.length && !selected && !error ? (
+        <p className="tennis-muted">此会话暂无办理记录。</p>
+      ) : null}
+      {items.length > 0 && (
+        <>
+          <div className="tennis-toolbar">
+            <label>
+              选择办理请求
+              <select
+                aria-label="选择办理请求"
+                value={selected?.requestId ?? ""}
+                onChange={(event) => setSelected(items.find((item) => item.requestId === event.target.value) ?? null)}
+              >
+                {items.map((item) => (
+                  <option value={item.requestId} key={item.requestId}>
+                    {dateTime(item.createdAt, timezone)} · {requestStatusLabels[item.dispatchStatus]} ·{" "}
+                    {item.commandCount} 项操作 · {item.requestId.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {page?.nextCursor && (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() => void loadPage(page.nextCursor!)}
+              >
+                {busy ? "读取中…" : "加载更早记录"}
+              </button>
+            )}
+          </div>
+          <ErrorNotice error={detail.error} retry={() => void detail.refresh()} />
+          {detail.busy ? (
+            <LoadingBlock />
+          ) : current ? (
+            <>
+              {!!detail.error && (
+                <p className="tennis-note">本次核对未成功，以下为上次读取的状态，请重新读取后再判断。</p>
+              )}
+              <p style={{ overflowWrap: "anywhere" }}>
+                请求编号：<code>{current.requestId}</code>
+              </p>
+              <p>
+                回报状态：{requestStatusLabels[current.dispatchStatus]} · 已登记 {current.commandCount} 项操作
+              </p>
+              {(current.dispatchStatus === "UNCERTAIN" || current.dispatchStatus === "IN_FLIGHT") && (
+                <p className="tennis-note">
+                  回报未确认，不代表业务没有执行。请核对下方业务编号及当前状态，必要时交由工作人员处理。
+                </p>
+              )}
+              <p className="tennis-muted">
+                处理回报与付款结果分别核对；订单是否成立、款项是否到账，以业务记录的当前状态为准。
+              </p>
+              {current.commands.map((command) => (
+                <article key={command.commandKey} style={{ marginTop: 12 }}>
+                  <strong>{commandLabels[command.commandType] ?? command.commandType}</strong>
+                  <span className="tennis-muted"> · {dateTime(command.completedAt, timezone)}</span>
+                  <p style={{ overflowWrap: "anywhere" }}>
+                    操作编号：<code>{command.commandKey}</code>
+                  </p>
+                  {command.resources.length ? (
+                    <ul>
+                      {command.resources.map((resource) => (
+                        <li
+                          key={`${resource.type}:${resource.id}`}
+                          style={{ marginBottom: 8, overflowWrap: "anywhere" }}
+                        >
+                          {resourceLabels[resource.type] ?? resource.type}：<code>{resource.id}</code>{" "}
+                          {resource.status === "CREDITED" ? (
+                            "已入账"
+                          ) : resource.status === "RECORDED" ? (
+                            "已登记"
+                          ) : (
+                            <Badge value={resource.status} />
+                          )}
+                          {resource.paymentStatus && (
+                            <>
+                              {" "}
+                              · 付款：
+                              <Badge value={resource.paymentStatus} />
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="tennis-muted">操作已登记；没有可展示的关联业务记录。</p>
+                  )}
+                </article>
+              ))}
+              {current.restrictedCommandCount > 0 && (
+                <p className="tennis-note">
+                  有 {current.restrictedCommandCount} 项操作当前无权查看，请由有权限的工作人员核对。
+                </p>
+              )}
+              {!current.commandCount && (
+                <p className="tennis-muted">尚未查询到已登记的业务操作。仅凭此信息不能判断原请求是否执行。</p>
+              )}
+            </>
+          ) : null}
+        </>
+      )}
+    </Panel>
+  );
+}
+
 export interface AssistantPanelProps {
   api: TennisApi;
   session: Session;
@@ -311,6 +522,13 @@ export function AssistantPanel({ api, session, venue, context, onClose }: Assist
         )}
         {current && (
           <>
+            <ConversationRequests
+              key={`${session.tenantId}:${session.subjectId}:${session.contextVersion}:${venue.id}:${current.conversation.id}`}
+              api={api}
+              conversationId={current.conversation.id}
+              timezone={venue.timezone}
+              refreshVersion={current.conversation.updatedAt}
+            />
             <div className="tennis-note">
               {current.conversation.mode === "HUMAN"
                 ? "当前由工作人员处理，AI 操作已停止。"

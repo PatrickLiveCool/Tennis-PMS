@@ -7,6 +7,8 @@ import {
   createConversation,
   getAIConfig,
   getConversation,
+  getConversationRequest,
+  listConversationRequests,
   handoffConversation,
   listConversations,
   resolveDelegation,
@@ -38,6 +40,7 @@ import {
 } from "../../../../packages/db/src/tennis/topups.ts";
 import { LocalMockPaymentGateway } from "../../../../packages/db/src/tennis/mock-payments.ts";
 import { AgentAccessError } from "../../../../packages/db/src/tennis/agent-guard.ts";
+import { discoverAgentVenues } from "../../../../packages/db/src/tennis/agent-discovery.ts";
 
 export function registerAssistantRoutes(
   app: FastifyInstance,
@@ -88,6 +91,17 @@ export function registerAssistantRoutes(
   );
   app.get(base + "/assistant/conversations/:id", (request) =>
     getConversation(db, input.actor(request), param(request)),
+  );
+  app.get(base + "/assistant/conversations/:id/requests", (request) =>
+    listConversationRequests(db, input.actor(request), param(request), query(request).cursor),
+  );
+  app.get(base + "/assistant/conversations/:id/requests/:requestId", (request) =>
+    getConversationRequest(
+      db,
+      input.actor(request),
+      param(request),
+      (request.params as { requestId: string }).requestId,
+    ),
   );
   post(
     "/assistant/conversations/:id/handoff",
@@ -142,12 +156,23 @@ export function registerAssistantRoutes(
   }
   agentGet("/context", (request) => ({
     conversationId: principal(request).conversation.id,
+    requestId: principal(request).requestId,
     tenantId: agent(request).tenantId,
     venueId: venue(request),
     customerId: principal(request).conversation.customerId,
     actorKind: principal(request).conversation.actorKind,
     mode: principal(request).conversation.mode,
   }));
+  const discoveryQuery = obj({
+    startAt: Type.String({ minLength: 17, maxLength: 40 }),
+    endAt: Type.String({ minLength: 17, maxLength: 40 }),
+    courtCount: Type.Integer({ minimum: 1, maximum: 100 }),
+  });
+  app.get<{ Querystring: Static<typeof discoveryQuery> }>(
+    base + "/agent/available-venues",
+    { onRequest: auth, schema: { querystring: discoveryQuery } },
+    (request) => discoverAgentVenues(db, request.headers.authorization!.slice(7), request.query),
+  );
   agentGet("/booking-customers", (request) =>
     bookingCustomers(db, agent(request), venue(request), query(request).q ?? ""),
   );

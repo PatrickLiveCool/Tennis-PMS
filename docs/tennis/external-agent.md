@@ -19,6 +19,7 @@ PMS 向配置的 `externalAgentUrl` POST JSON（`protocol: tennis-agent/v1`）�
 - `context`：经过归属校验的页面名、可选订单 ID。
 - `messages`：签发本次凭据时的会话快照，不包含此后人工接管产生的内容。
 - `delegation.token`、`expiresAt`：本次有限授权，最长 15 分钟，响应结束后立即撤销。
+- 消息快照以本次 `requestId/messageId` 为边界，最多包含它及之前 199 条消息；已入站的后续指令不会混入旧请求。
 
 外部响应为 `{ "content": "回复正文" }`。超时为 30 秒；不跟随重定向。PMS 不信任回复正文中的“已付款/已预订”等自然语言事实，业务结果应由下列工具响应及订单查询确定。
 
@@ -54,6 +55,16 @@ PMS 向配置的 `externalAgentUrl` POST JSON（`protocol: tennis-agent/v1`）�
 
 同一消息的派发由数据库唯一记录声明所有权，避免并发执行两次外部 Runtime。外部结果不明时标记 `UNCERTAIN`，不自动重新派发；员工接管核对订单和回执后再恢复。页面显示回复延迟不等于业务失败，不能据此另建交易。
 
+## 请求结果核对
+
+015 追加迁移持久保存请求，并在业务命令与幂等回执的同一事务内关联 `conversationId/requestId → subjectId/commandKey`。新授权复用原命令键时也会关联原回执；失败或事务回滚不留下已完成命令假象。`GET /agent/context` 包含可信 `requestId`。
+
+- `GET /assistant/conversations/:id/requests?cursor=...`：每页 20 个请求，返回 `items/nextCursor`；使用数据库原时间精度排序，游标须属于原租户和会话。
+- `GET /assistant/conversations/:id/requests/:requestId`：返回该请求所有已提交命令的类型、原键、完成时间、白名单业务 ID 及当前状态，不返回原参数或任意回执 JSON。
+- 授权员工可以在助手“办理记录”核对客户请求，不需要冒用客户或恢复旧 token。没有会员管理权限时，充值/钱包命令结果隐藏，并计入 `restrictedCommandCount`。客户仅能查看本人会话及业务。
+- `IN_FLIGHT` 仅表示未收到结束回报，不证明 Runtime 仍在运行或授权仍有效；`SUCCEEDED` 是对话处理状态，不替代订单/资金状态。未知结果不自动重新派发。
+- Gateway 使用独立长期凭据的对应只读接口核对，见 [Gateway 契约](gateway.md)。它在人工接管后仍可核对当前身份有权读取的原结果，而旧写授权保持撤销。
+
 ## 尚待真实接入
 
-具体微信入口产品、账号、商户号、外部 Runtime 服务和真实部署地址均未提供。当前已有本地可信登录和上述适配契约；不代表企业微信/微信客服或真实微信支付已联调完成。外部渠道身份映射需在选择渠道后实现，不能直接把微信昵称或消息中的客户 ID 当作可信身份。
+具体微信入口产品、账号、商户号、外部 Runtime 服务和真实部署地址均未提供。当前已有本地可信登录和上述适配契约；不代表企业微信/微信客服或真实微信支付已联调完成。已提供人工绑定及渠道无关 Gateway 入口，但真实微信身份验证和收发适配仍需在确定渠道后接入，不能直接把微信昵称或消息中的客户 ID 当作可信身份。

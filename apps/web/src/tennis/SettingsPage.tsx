@@ -17,6 +17,7 @@ import {
 } from "./components";
 import { PricingPanel } from "./PricingPanel";
 import { StaffPanel } from "./StaffPanel";
+import { TenantGatewayPanel } from "./GatewayPanel";
 
 export const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 export function MinuteSelect({
@@ -81,6 +82,9 @@ export function SettingsPage({
             <button className={tab === "staff" ? "active" : ""} onClick={() => setTab("staff")}>
               员工权限
             </button>
+            <button className={tab === "gateway" ? "active" : ""} onClick={() => setTab("gateway")}>
+              渠道身份
+            </button>
           </>
         )}
       </div>
@@ -130,6 +134,11 @@ export function SettingsPage({
             )}
           </Panel>
         </div>
+      ) : tab === "gateway" && admin ? (
+        <TenantGatewayPanel
+          api={api}
+          scope={`${session.subjectId}:${session.kind}:${session.tenantId}:${session.contextVersion}`}
+        />
       ) : tab === "staff" ? (
         <StaffPanel api={api} />
       ) : (
