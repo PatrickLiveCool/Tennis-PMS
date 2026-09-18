@@ -606,12 +606,19 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
           <p className="tennis-muted">
             {venue.name} · {session.kind === "customer" ? "订场咨询与工作人员协助" : "当前工作区的咨询、预订与人工协作"}
           </p>
-          {canAttachOrder && (
+          {messageDraft.pending ? (
+            <p className="tennis-note">
+              {messageDraft.pending.context.orderId
+                ? `待核实消息关联订单 ${messageDraft.pending.context.orderId.slice(0, 8)}。`
+                : "待核实消息未关联订单。"}
+              请继续核对原消息，重试时保留原上下文。
+            </p>
+          ) : canAttachOrder ? (
             <p className="tennis-note">
               本次消息关联订单 {context.orderId!.slice(0, 8)}。关闭助手后可继续填写原订单表单。
             </p>
-          )}
-          {context.orderId && current && contextReady && !canAttachOrder && (
+          ) : null}
+          {!messageDraft.pending && context.orderId && current && contextReady && !canAttachOrder && (
             <p className="tennis-note">
               当前会话与正在查看的订单不匹配，发送消息不会附带该订单。可从本会话的历史关联订单继续核对。
             </p>
