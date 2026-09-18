@@ -23,7 +23,20 @@ export interface RefundPortInput {
   merchantRefundNo: string;
   refundId: string;
   amountCents: number;
+  /** Original channel transaction total (WeChat amount.total), excluding the PMS wallet.
+   * Absent only in historical persisted requests. A real createRefund must call requireRefundOriginalPaymentCents.
+   * Queries may recover an old request without changing its original payload or hash.
+   */
+  originalPaymentCents?: number;
   currency: "CNY";
+}
+/** Never infer an original transaction total from a partial refund or the current refundable balance. */
+export function requireRefundOriginalPaymentCents(input: RefundPortInput): number {
+  const total = input?.originalPaymentCents;
+  if (!input || !Number.isSafeInteger(input.amountCents) || input.amountCents <= 0 ||
+    typeof total !== "number" || !Number.isSafeInteger(total) || total <= 0 || total < input.amountCents)
+    throw new TennisWalletError("INVALID_PAYMENT_EVENT");
+  return total;
 }
 /** This release has no live provider: no payment URL or QR data is invented. */
 export interface CheckoutAction {

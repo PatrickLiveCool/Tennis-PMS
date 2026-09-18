@@ -9,7 +9,7 @@ import { confirmQuote, createQuote, getOrder } from "../../packages/db/src/tenni
 import { beginOrderPayment, getOrderPayment } from "../../packages/db/src/tennis/payments.ts";
 import { getWallet, recordOfflineTopup } from "../../packages/db/src/tennis/wallet.ts";
 import { beginTopupPayment, createTopupQuote, getTopupPayment } from "../../packages/db/src/tennis/topups.ts";
-import { getRefund, requestOrderRefund, retryFailedRefund } from "../../packages/db/src/tennis/refunds.ts";
+import { getRefund, requestOrderRefund, requestOrderRefundGroup, retryFailedRefund } from "../../packages/db/src/tennis/refunds.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
 import { postgresMockChannelStore } from "../../packages/db/src/tennis/mock-channel-store.ts";
 import { saveMerchantBinding } from "../../packages/db/src/tennis/merchant-bindings.ts";
@@ -27,6 +27,9 @@ import {
   simulatePaymentChannel,
   type ChannelSource,
 } from "../../packages/db/src/tennis/payment-channel.ts";
+import { beginAmendmentPayment, confirmOrderAmendment, previewOrderAmendment } from "../../packages/db/src/tennis/amendments.ts";
+import { enqueueRefundChannel } from "../../packages/db/src/tennis/channel-intents.ts";
+import { requestHash } from "../../packages/db/src/tennis/receipts.ts";
 import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
@@ -842,5 +845,109 @@ describe("durable payment channel reconciliation", () => {
     await expect(reconcilePaymentChannel(db, other, "ORDER", payment.id, gateway)).rejects.toMatchObject({
       code: "RESOURCE_NOT_FOUND",
     });
+  });
+});
+
+
+describe("refund channel original totals", () => {
+  async function paidMixedOrder() {
+    await credit(5000, 1000);
+    const order = await booking();
+    const payment = await beginOrderPayment(db, customer, mock(), {
+      orderId: order.id, walletCents: 6000, commandKey: key(),
+    });
+    await simulatePaymentChannel(db, customer, "ORDER", payment.id, mock(), "SUCCEEDED");
+    return { order, payment };
+  }
+  async function partial(orderId: string, cents: number) {
+    const paid = await getOrder(db, first.actor, orderId);
+    return requestOrderRefund(db, first.actor, {
+      orderId, expectedRevision: paid.revision, reason: "人工核准合成部分退款", commandKey: key(),
+      lines: [{ lineId: paid.lines[0]!.id, refundCents: cents, cancel: false }],
+    });
+  }
+  async function replaceFixtureRequest(refundId: string, input: RefundPortInput) {
+    await removeChannelLayer("REFUND", refundId);
+    await db.query(
+      `INSERT INTO tennis.channel_operations(id,tenant_id,source_kind,source_id,binding_id,provider,request,request_hash)
+       VALUES($1,$2,'REFUND',$3,$4,$5,$6::jsonb,$7)`,
+      [input.operationId, first.actor.tenantId, refundId, input.binding.id, input.binding.provider, JSON.stringify(input), requestHash(input)],
+    );
+  }
+  async function storedRequest(id: string) {
+    return (await db.query("SELECT request,request_hash FROM tennis.channel_operations WHERE id=$1", [id])).rows[0];
+  }
+  it("keeps the original external total through repeated partial mixed-payment refunds", async () => {
+    const { order, payment } = await paidMixedOrder();
+    const recording = new RecordingGateway();
+    for (const amount of [2400, 3600]) {
+      const refund = await partial(order.id, amount);
+      expect(refund.externalCents).toBe(amount / 2);
+      await reconcilePaymentChannel(db, first.actor, "REFUND", refund.id, recording);
+      expect(recording.refundCreates.at(-1)).toMatchObject({
+        sourceId: payment.id, amountCents: amount / 2, originalPaymentCents: 6000,
+      });
+      await simulatePaymentChannel(db, first.actor, "REFUND", refund.id, mock(), "SUCCEEDED");
+    }
+    expect((await getWallet(db, first.actor, customer.customerId)).balance.totalCents).toBe(3000);
+    expect(await count("external_refund_receipts")).toBe(2);
+  });
+  it("uses each captured payment total when an amendment adds a second receipt", async () => {
+    const { order, payment } = await paidMixedOrder();
+    const paid = await getOrder(db, first.actor, order.id);
+    const preview = await previewOrderAmendment(db, first.actor, {
+      orderId: order.id, expectedRevision: paid.revision, reason: "客户增加半小时",
+      changes: [{ lineId: paid.lines[0]!.id, courtId, startAt: "2099-09-18T19:00:00+08:00", endAt: "2099-09-18T20:30:00+08:00" }],
+    });
+    await confirmOrderAmendment(db, first.actor, { amendmentId: preview.id, commandKey: key(), approvedRefundLines: [] });
+    await credit(2000, 0);
+    const added = await beginAmendmentPayment(db, customer, mock(), { amendmentId: preview.id, walletCents: 2000, commandKey: key() });
+    expect(added.externalCents).toBe(4000);
+    await simulatePaymentChannel(db, customer, "ORDER", added.id, mock(), "SUCCEEDED");
+    const updated = await getOrder(db, first.actor, order.id);
+    const group = await requestOrderRefundGroup(db, first.actor, {
+      orderId: order.id, expectedRevision: updated.revision, reason: "人工核准整单取消", commandKey: key(),
+      lines: [{ lineId: updated.lines[0]!.id, refundCents: updated.totalCents, cancel: true }],
+    });
+    expect(group.refunds).toHaveLength(2);
+    const totals = new Map([[payment.id, 6000], [added.id, 4000]]);
+    for (const refund of group.refunds) {
+      const op = await operation<RefundPortInput>("REFUND", refund.id);
+      expect(op.request).toMatchObject({ sourceId: refund.paymentId, originalPaymentCents: totals.get(refund.paymentId), amountCents: totals.get(refund.paymentId) });
+      await simulatePaymentChannel(db, first.actor, "REFUND", refund.id, mock(), "SUCCEEDED");
+    }
+    expect((await getWallet(db, first.actor, customer.customerId)).balance.totalCents).toBe(8000);
+  });
+  it("leaves a historical request untouched on enqueue and enriches only its authorized retry", async () => {
+    const { order } = await paidMixedOrder();
+    const refund = await partial(order.id, 2400);
+    const op = await operation<RefundPortInput>("REFUND", refund.id);
+    const { originalPaymentCents: _total, ...legacy } = op.request;
+    await replaceFixtureRequest(refund.id, legacy);
+    const before = await storedRequest(op.id);
+    const tx = await db.connect();
+    try { await enqueueRefundChannel(tx, first.actor.tenantId, refund.id); } finally { tx.release(); }
+    expect(await storedRequest(op.id)).toEqual(before);
+    await simulatePaymentChannel(db, first.actor, "REFUND", refund.id, mock(), "FAILED");
+    await retryFailedRefund(db, first.actor, refund.id, key());
+    const retry = await operation<RefundPortInput>("REFUND", refund.id);
+    expect(retry.id).not.toBe(op.id);
+    expect(retry.request).toMatchObject({ originalPaymentCents: 6000, amountCents: 1200, transactionId: legacy.transactionId, binding: legacy.binding });
+    expect(await storedRequest(op.id)).toEqual(before);
+    await simulatePaymentChannel(db, first.actor, "REFUND", refund.id, mock(), "SUCCEEDED");
+    expect(await count("external_refund_receipts")).toBe(1);
+  });
+  it("rejects a contradictory persisted total instead of correcting and sending a new refund", async () => {
+    const { order } = await paidMixedOrder();
+    const refund = await partial(order.id, 2400);
+    const op = await operation<RefundPortInput>("REFUND", refund.id);
+    await replaceFixtureRequest(refund.id, { ...op.request, originalPaymentCents: 5000 });
+    await simulatePaymentChannel(db, first.actor, "REFUND", refund.id, mock(), "FAILED");
+    const before = await storedRequest(op.id);
+    await expect(retryFailedRefund(db, first.actor, refund.id, key())).rejects.toMatchObject({ code: "CHANNEL_REQUEST_CONFLICT" });
+    expect((await operation("REFUND", refund.id)).id).toBe(op.id);
+    expect(await storedRequest(op.id)).toEqual(before);
+    expect((await getRefund(db, first.actor, refund.id)).status).toBe("FAILED");
+    expect(await count("external_refund_receipts")).toBe(0);
   });
 });

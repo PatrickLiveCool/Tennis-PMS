@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import {
   isVerifiedRefundEvent,
   paymentEventSemanticHash,
   refundEventSemanticHash,
+  requireRefundOriginalPaymentCents,
   type PaymentPortInput,
   type RefundPortInput,
 } from "../../packages/db/src/tennis/payment-port.ts";
@@ -330,5 +332,54 @@ describe("durable local simulated payment channel", () => {
     rows[0]!.outcome = { kind: "PAYMENT", event: { ...paymentPayload(), amountCents: 1 } };
     writeFileSync(file, JSON.stringify(rows));
     expect(await restarted().queryPayment(input)).toEqual({ status: "UNKNOWN", code: "MOCK_STORED_RESULT_INVALID" });
+  });
+});
+
+
+describe("original channel refund totals", () => {
+  it.each([undefined, null, 0, -1, 2999, 3000.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity])(
+    "refuses missing or invalid original totals (%s) for live refund creation", (total) => {
+      expect(() => requireRefundOriginalPaymentCents({ ...refund(), originalPaymentCents: total as number }))
+        .toThrow("INVALID_PAYMENT_EVENT");
+    },
+  );
+  it("accepts a full or partial refund only against a valid original channel total", () => {
+    expect(requireRefundOriginalPaymentCents({ ...refund(), originalPaymentCents: 3000 })).toBe(3000);
+    expect(requireRefundOriginalPaymentCents({ ...refund(), originalPaymentCents: 12000 })).toBe(12000);
+    for (const amountCents of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      expect(() => requireRefundOriginalPaymentCents({ ...refund(), amountCents, originalPaymentCents: 12000 }))
+        .toThrow("INVALID_PAYMENT_EVENT");
+  });
+  it("persists a new total and refuses changing or removing it under the same refund number", async () => {
+    const input = { ...refund(), originalPaymentCents: 12000 };
+    expect(await gateway.createRefund(input)).toEqual({ status: "PENDING" });
+    const snapshot = store.records();
+    for (const changed of [{ ...input, originalPaymentCents: 6000 }, refund()]) {
+      expect(await restarted().createRefund(changed)).toEqual({ status: "UNKNOWN", code: "MOCK_REQUEST_CONFLICT" });
+      expect(await restarted().queryRefund(changed)).toEqual({ status: "UNKNOWN", code: "MOCK_REQUEST_CONFLICT" });
+    }
+    for (const originalPaymentCents of [0, -1, 2999, 12000.5])
+      await expect(restarted().createRefund({ ...input, originalPaymentCents })).rejects.toThrow("INVALID_PAYMENT_EVENT");
+    expect(store.records()).toEqual(snapshot);
+    expect((await restarted().simulateRefund(input, "SUCCEEDED")).status).toBe("SUCCEEDED");
+  });
+  it("recovers a pre-F15 persisted request without modifying its bytes, hash or merchant number", async () => {
+    // Construct the historical stored record independently of the current adapter normalizer.
+    const input = refund();
+    const oldHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    writeFileSync(file, JSON.stringify([{
+      kind: "REFUND", merchantId: binding.merchantId, merchantReference: input.merchantRefundNo,
+      input, requestHash: oldHash, outcome: null,
+    }]));
+    const before = readFileSync(file, "utf8");
+    expect(await restarted().queryRefund(input)).toEqual({ status: "PENDING" });
+    expect(await restarted().createRefund(input)).toEqual({ status: "PENDING" });
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(await restarted().queryRefund({ ...input, originalPaymentCents: 12000 }))
+      .toEqual({ status: "UNKNOWN", code: "MOCK_REQUEST_CONFLICT" });
+    expect((await restarted().simulateRefund(input, "SUCCEEDED")).status).toBe("SUCCEEDED");
+    expect((await restarted().queryRefund(input)).status).toBe("SUCCEEDED");
+    expect(store.records()[0]).toMatchObject({ input, requestHash: oldHash });
+    expect(store.records()[0]!.input).not.toHaveProperty("originalPaymentCents");
   });
 });

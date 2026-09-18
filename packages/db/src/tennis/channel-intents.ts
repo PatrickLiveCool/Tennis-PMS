@@ -90,38 +90,88 @@ async function originalBinding(
   ).rows[0]!;
   return merchantSnapshot(binding);
 }
+interface RefundFunding {
+  refundId: string;
+  source_kind: "ORDER" | "TOPUP";
+  source_id: string;
+  provider: "MOCK" | "WECHAT";
+  merchant_id: string;
+  transaction_id: string;
+  amountCents: number;
+  originalPaymentCents: number;
+}
+async function refundOperationExists(
+  tx: pg.PoolClient, tenantId: string, kind: "REFUND" | "EXCEPTION_REFUND", refundId: string,
+): Promise<boolean> {
+  return Boolean((await tx.query(
+    "SELECT 1 FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind=$2 AND source_id=$3 LIMIT 1",
+    [tenantId, kind, refundId],
+  )).rowCount);
+}
+/** Read the exact authenticated channel capture. Current order totals and remaining refundable amounts are irrelevant. */
+async function refundFunding(
+  tx: pg.PoolClient, tenantId: string, kind: "REFUND" | "EXCEPTION_REFUND", refundId: string,
+): Promise<RefundFunding> {
+  const query = kind === "REFUND"
+    ? `SELECT 'ORDER'::text AS source_kind,p.id AS source_id,p.provider,p.merchant_id,
+        p.provider_transaction_id AS transaction_id,r.external_cents AS refund_cents,
+        p.external_cents AS expected_cents,c.amount_cents AS original_payment_cents
+      FROM tennis.refunds r JOIN tennis.payment_attempts p ON p.tenant_id=r.tenant_id AND p.id=r.payment_id
+      JOIN tennis.channel_transactions c ON c.provider=p.provider AND c.merchant_id=p.merchant_id
+        AND c.transaction_id=p.provider_transaction_id AND c.tenant_id=p.tenant_id AND c.source_type='ORDER' AND c.source_id=p.id
+      WHERE r.tenant_id=$1 AND r.id=$2`
+    : `SELECT r.source_kind,r.source_id,r.provider,r.merchant_id,r.transaction_id,
+        r.amount_cents AS refund_cents,r.amount_cents AS expected_cents,c.amount_cents AS original_payment_cents
+      FROM tennis.exception_refunds r JOIN tennis.channel_transactions c
+        ON c.provider=r.provider AND c.merchant_id=r.merchant_id AND c.transaction_id=r.transaction_id
+        AND c.tenant_id=r.tenant_id AND c.source_type=r.source_kind AND c.source_id=r.source_id
+      WHERE r.tenant_id=$1 AND r.id=$2`;
+  const row = (await tx.query<Omit<RefundFunding, "refundId" | "amountCents" | "originalPaymentCents"> & {
+    refund_cents: string; expected_cents: string; original_payment_cents: string;
+  }>(query, [tenantId, refundId])).rows[0];
+  if (!row) throw new PaymentChannelError("CHANNEL_NOT_READY");
+  const amountCents = Number(row.refund_cents), originalPaymentCents = Number(row.original_payment_cents);
+  if (!["MOCK", "WECHAT"].includes(row.provider) || !row.transaction_id ||
+    !Number.isSafeInteger(amountCents) || amountCents <= 0 ||
+    !Number.isSafeInteger(originalPaymentCents) || originalPaymentCents < amountCents ||
+    originalPaymentCents !== Number(row.expected_cents)) throw new PaymentChannelError("CHANNEL_REQUEST_CONFLICT");
+  return { ...row, refundId, amountCents, originalPaymentCents };
+}
+function checkRefundBinding(binding: MerchantBindingSnapshot, tenantId: string, funding: RefundFunding): void {
+  if (!binding || binding.tenantId !== tenantId || binding.provider !== funding.provider || binding.merchantId !== funding.merchant_id)
+    throw new PaymentChannelError("CHANNEL_REQUEST_CONFLICT");
+}
+/** Only a new, explicitly authorized retry receives missing facts; never repair a contradictory old snapshot. */
+function retryRefundTotal(input: RefundPortInput, tenantId: string, funding: RefundFunding): number {
+  checkRefundBinding(input.binding, tenantId, funding);
+  if (input.refundId !== funding.refundId || input.sourceId !== funding.source_id || input.transactionId !== funding.transaction_id ||
+    input.amountCents !== funding.amountCents || input.currency !== "CNY" ||
+    (input.originalPaymentCents !== undefined && input.originalPaymentCents !== funding.originalPaymentCents))
+    throw new PaymentChannelError("CHANNEL_REQUEST_CONFLICT");
+  return funding.originalPaymentCents;
+}
 export async function enqueueRefundChannel(tx: pg.PoolClient, tenantId: string, refundId: string): Promise<void> {
-  const source = (
-    await tx.query<{
-      payment_id: string;
-      external_cents: string;
-      provider: "MOCK" | "WECHAT";
-      merchant_id: string;
-      provider_transaction_id: string;
-    }>(
-      `SELECT r.payment_id,r.external_cents,p.provider,p.merchant_id,p.provider_transaction_id FROM tennis.refunds r JOIN tennis.payment_attempts p ON p.tenant_id=r.tenant_id AND p.id=r.payment_id WHERE r.tenant_id=$1 AND r.id=$2`,
-      [tenantId, refundId],
-    )
-  ).rows[0];
-  if (!source || !source.provider_transaction_id || Number(source.external_cents) <= 0)
-    throw new PaymentChannelError("CHANNEL_NOT_READY");
+  if (await refundOperationExists(tx, tenantId, "REFUND", refundId)) return;
+  const source = await refundFunding(tx, tenantId, "REFUND", refundId);
   const original = (
     await tx.query<{ request: PaymentPortInput }>(
       `SELECT request FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind='ORDER' AND source_id=$2`,
-      [tenantId, source.payment_id],
+      [tenantId, source.source_id],
     )
   ).rows[0]?.request;
   const binding = original?.binding ?? (await originalBinding(tx, tenantId, source.provider, source.merchant_id));
+  checkRefundBinding(binding, tenantId, source);
   const id = randomUUID();
   const request: RefundPortInput = {
     binding,
     operationId: id,
-    merchantOrderNo: original?.merchantOrderNo ?? source.payment_id.replaceAll("-", ""),
-    sourceId: source.payment_id,
-    transactionId: source.provider_transaction_id,
+    merchantOrderNo: original?.merchantOrderNo ?? source.source_id.replaceAll("-", ""),
+    sourceId: source.source_id,
+    transactionId: source.transaction_id,
     merchantRefundNo: refundId.replaceAll("-", ""),
     refundId,
-    amountCents: Number(source.external_cents),
+    amountCents: source.amountCents,
+    originalPaymentCents: source.originalPaymentCents,
     currency: "CNY",
   };
   await tx.query(
@@ -150,7 +200,11 @@ export async function retryRefundChannel(tx: pg.PoolClient, tenantId: string, re
   if (op.state !== "FAILED" && !legacyFailure) throw new PaymentChannelError("CHANNEL_RESULT_UNKNOWN");
   if (legacyFailure) await tx.query(`UPDATE tennis.channel_operations SET state='FAILED' WHERE id=$1`, [op.id]);
   const id = randomUUID();
-  const request: RefundPortInput = { ...op.request, operationId: id, merchantRefundNo: id.replaceAll("-", "") };
+  const funding = await refundFunding(tx, tenantId, "REFUND", refundId);
+  const request: RefundPortInput = {
+    ...op.request, originalPaymentCents: retryRefundTotal(op.request, tenantId, funding),
+    operationId: id, merchantRefundNo: id.replaceAll("-", ""),
+  };
   await tx.query(
     `INSERT INTO tennis.channel_operations(id,tenant_id,source_kind,source_id,generation,binding_id,provider,request,request_hash) VALUES($1,$2,'REFUND',$3,$4,$5,$6,$7::jsonb,$8)`,
     [
@@ -212,20 +266,8 @@ export async function enqueueExceptionRefundChannel(
   tenantId: string,
   refundId: string,
 ): Promise<void> {
-  const source = (
-    await tx.query<{
-      source_kind: "ORDER" | "TOPUP";
-      source_id: string;
-      provider: "MOCK" | "WECHAT";
-      merchant_id: string;
-      transaction_id: string;
-      amount_cents: string;
-    }>(
-      `SELECT source_kind,source_id,provider,merchant_id,transaction_id,amount_cents FROM tennis.exception_refunds WHERE tenant_id=$1 AND id=$2`,
-      [tenantId, refundId],
-    )
-  ).rows[0];
-  if (!source) throw new PaymentChannelError("CHANNEL_NOT_READY");
+  if (await refundOperationExists(tx, tenantId, "EXCEPTION_REFUND", refundId)) return;
+  const source = await refundFunding(tx, tenantId, "EXCEPTION_REFUND", refundId);
   const original = (
     await tx.query<{ request: PaymentPortInput }>(
       `SELECT request FROM tennis.channel_operations WHERE tenant_id=$1 AND source_kind=$2 AND source_id=$3 ORDER BY generation DESC LIMIT 1`,
@@ -233,8 +275,7 @@ export async function enqueueExceptionRefundChannel(
     )
   ).rows[0]?.request;
   const binding = original?.binding ?? (await originalBinding(tx, tenantId, source.provider, source.merchant_id));
-  if (binding.provider !== source.provider || binding.merchantId !== source.merchant_id)
-    throw new PaymentChannelError("CHANNEL_REQUEST_CONFLICT");
+  checkRefundBinding(binding, tenantId, source);
   const id = randomUUID();
   const request: RefundPortInput = {
     binding,
@@ -244,7 +285,8 @@ export async function enqueueExceptionRefundChannel(
     transactionId: source.transaction_id,
     merchantRefundNo: refundId.replaceAll("-", ""),
     refundId,
-    amountCents: Number(source.amount_cents),
+    amountCents: source.amountCents,
+    originalPaymentCents: source.originalPaymentCents,
     currency: "CNY",
   };
   await tx.query(
@@ -265,7 +307,11 @@ export async function retryExceptionRefundChannel(
   ).rows[0];
   if (!op || op.state !== "FAILED") throw new PaymentChannelError("CHANNEL_RESULT_UNKNOWN");
   const id = randomUUID();
-  const request: RefundPortInput = { ...op.request, operationId: id, merchantRefundNo: id.replaceAll("-", "") };
+  const funding = await refundFunding(tx, tenantId, "EXCEPTION_REFUND", refundId);
+  const request: RefundPortInput = {
+    ...op.request, originalPaymentCents: retryRefundTotal(op.request, tenantId, funding),
+    operationId: id, merchantRefundNo: id.replaceAll("-", ""),
+  };
   await tx.query(
     `INSERT INTO tennis.channel_operations(id,tenant_id,source_kind,source_id,generation,binding_id,provider,request,request_hash) VALUES($1,$2,'EXCEPTION_REFUND',$3,$4,$5,$6,$7::jsonb,$8)`,
     [

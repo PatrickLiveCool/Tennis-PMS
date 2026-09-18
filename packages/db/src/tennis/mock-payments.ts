@@ -3,6 +3,7 @@ import { TennisWalletError } from "../../../domain/src/tennis-wallet.ts";
 import type { MerchantBindingSnapshot } from "./merchant-bindings.ts";
 import {
   TrustedPaymentProvider,
+  requireRefundOriginalPaymentCents,
   type PaymentCreateResult,
   type PaymentEventData,
   type PaymentNotificationInput,
@@ -86,6 +87,8 @@ function refundInput(input: RefundPortInput): RefundPortInput {
     binding: bindingSnapshot(input.binding), operationId: input.operationId, merchantOrderNo: input.merchantOrderNo,
     sourceId: input.sourceId, transactionId: input.transactionId, merchantRefundNo: input.merchantRefundNo,
     refundId: input.refundId, amountCents: input.amountCents, currency: input.currency,
+    // Keep pre-F15 bytes/hash unchanged; only newly supplied totals enter the immutable mock request.
+    ...(input.originalPaymentCents === undefined ? {} : { originalPaymentCents: requireRefundOriginalPaymentCents(input) }),
   });
 }
 const paymentKey = (input: PaymentPortInput): MockChannelKey =>

@@ -47,6 +47,8 @@ import {
   settleVerifiedExceptionRefund,
   type ExceptionRefundRecord,
 } from "../../packages/db/src/tennis/exception-refunds.ts";
+import { enqueueExceptionRefundChannel } from "../../packages/db/src/tennis/channel-intents.ts";
+import { requestHash } from "../../packages/db/src/tennis/receipts.ts";
 import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
@@ -294,6 +296,7 @@ describe("verified excess cash refunds", () => {
         sourceId: exception.sourceId,
         transactionId: exception.transactionId,
         amountCents: exception.amountCents,
+        originalPaymentCents: exception.amountCents,
         binding: { merchantId: exception.merchantId },
       });
       expect(await businessState()).toEqual(before);
@@ -423,6 +426,7 @@ describe("verified excess cash refunds", () => {
     expect(retried.request).toMatchObject({
       transactionId: original.request.transactionId,
       amountCents: original.request.amountCents,
+      originalPaymentCents: exception.amountCents,
       binding: original.request.binding,
     });
     await reconcilePaymentChannel(db, first.actor, "EXCEPTION_REFUND", refund.id, gateway);
@@ -580,5 +584,43 @@ describe("verified excess cash refunds", () => {
       "SUCCEEDED",
     );
     expect((await getCashException(db, first.actor, exception.id)).status).toBe("RESOLVED");
+  });
+});
+
+
+describe("historical exception refund totals", () => {
+  it.each(["missing", "contradictory"])("handles a %s original total without altering the old request", async (scenario) => {
+    const { exception } = await createException("EXTRA_TOPUP_RECEIPT");
+    const refund = await requestExceptionRefund(db, first.actor, request(exception));
+    const op = await channelOperation(refund.id);
+    const { originalPaymentCents: _total, ...old } = op.request;
+    const input = scenario === "missing" ? old : { ...old, originalPaymentCents: 6000 };
+    // Reconstruct only this fixture's pre-F15 channel request; never disable the immutable-request trigger.
+    await db.query("DELETE FROM tennis.channel_operations WHERE id=$1 AND tenant_id=$2", [op.id, first.actor.tenantId]);
+    await db.query(
+      `INSERT INTO tennis.channel_operations(id,tenant_id,source_kind,source_id,binding_id,provider,request,request_hash)
+       VALUES($1,$2,'EXCEPTION_REFUND',$3,$4,$5,$6::jsonb,$7)`,
+      [op.id, first.actor.tenantId, refund.id, input.binding.id, input.binding.provider, JSON.stringify(input), requestHash(input)],
+    );
+    const snapshot = async () => (await db.query("SELECT request,request_hash FROM tennis.channel_operations WHERE id=$1", [op.id])).rows[0];
+    const before = await snapshot();
+    const tx = await db.connect();
+    try { await enqueueExceptionRefundChannel(tx, first.actor.tenantId, refund.id); } finally { tx.release(); }
+    expect(await snapshot()).toEqual(before);
+    await simulatePaymentChannel(db, first.actor, "EXCEPTION_REFUND", refund.id, gateway, "FAILED");
+    if (scenario === "contradictory") {
+      await expect(retryExceptionRefund(db, first.actor, refund.id, key())).rejects.toMatchObject({ code: "CHANNEL_REQUEST_CONFLICT" });
+      expect((await channelOperation(refund.id)).id).toBe(op.id);
+      expect((await getExceptionRefund(db, first.actor, refund.id)).status).toBe("FAILED");
+    } else {
+      await retryExceptionRefund(db, first.actor, refund.id, key());
+      const retry = await channelOperation(refund.id);
+      expect(retry.id).not.toBe(op.id);
+      expect(retry.request).toMatchObject({ originalPaymentCents: 5000, amountCents: 5000, transactionId: exception.transactionId, binding: input.binding });
+      await simulatePaymentChannel(db, first.actor, "EXCEPTION_REFUND", refund.id, gateway, "SUCCEEDED");
+      expect((await getCashException(db, first.actor, exception.id)).status).toBe("RESOLVED");
+    }
+    expect(await snapshot()).toEqual(before);
+    expect((await getWallet(db, first.actor, customer.customerId)).balance.totalCents).toBe(6000);
   });
 });
