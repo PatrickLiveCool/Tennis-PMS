@@ -97,7 +97,9 @@
 
 ## 剩余事项与完成边界
 
-本轮只读配置核对显示：AI `enabled=false`，模型、Base URL、Runtime端点及密钥均未配置；商户记录只有MOCK共2个版本。见 [外部配置状态](/private/tmp/tennis-f12-external-state.json)。此证据未输出凭据。F12浏览器、DB与构建证据已汇总保存于 [总项目验证日志](</Users/feather/Documents/Codex project/Tennis/outputs/Tennis-PMS-F12-verification.log>)。
+F13 新增 [微信 API v3 共用安全层](wechatpay-v3-security.md)：请求签名、响应验签、通知验签/解密已有实现；未发送 HTTP、未接入资金事实映射、未启用真实 provider。它推进实际支付适配的共用部分，不改变下面真实产品及商户联调尚未完成的判定。F13 验证结果以实施状态为准，F11/F12 记录仍分别保留原范围。
+
+F12 只读配置核对显示：AI `enabled=false`，模型、Base URL、Runtime端点及密钥均未配置；商户记录只有MOCK共2个版本。见 [外部配置状态](/private/tmp/tennis-f12-external-state.json)。此证据未输出凭据。F12浏览器、DB与构建证据已汇总保存于 [总项目验证日志](</Users/feather/Documents/Codex project/Tennis/outputs/Tennis-PMS-F12-verification.log>)。
 
 1. **真实支付adapter仍需开发及验证。** 当前 `CheckoutAction` 仅有 `LOCAL_SIMULATION`，本地启动器只实例化MOCK；WECHAT配置不是可用的微信付款。需要确定租户商户及支付产品，接入真实发起、付款人/交易事实、签名回调、主动查单、原交易退款和渠道异常核对，证明款进入正确租户账户。
 2. **真实微信入口和体外Runtime需要联调。** 微信产品、账号、消息签名、真实首绑、回复通道及指定模型/Base URL未提供。PMS已有受控接口、上下文、事件与接管；不在PMS内补造智能体Runtime，不把模拟绑定或人工留言冒充微信智能体服务。
