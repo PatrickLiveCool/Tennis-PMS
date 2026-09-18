@@ -1,83 +1,21 @@
+# Local Tennis foundation only. No housing API, workers, seed or production service.
+name: tennis-pms-local
 services:
   postgres:
-    container_name: ${POSTGRES_CONTAINER_NAME:-qintopia-postgres}
-    image: ${POSTGRES_IMAGE:-docker.m.daocloud.io/library/postgres:16-alpine}
+    image: ${TENNIS_POSTGRES_IMAGE:-docker.m.daocloud.io/library/postgres:16-alpine}
     environment:
-      POSTGRES_USER: ${MIGRATION_DATABASE_USER:-qintopia_migrator}
-      POSTGRES_PASSWORD: ${MIGRATION_DATABASE_PASSWORD:-qintopia_migrator}
-      POSTGRES_DB: qintopia
+      POSTGRES_USER: tennis_dev
+      POSTGRES_PASSWORD: tennis_local_only
+      POSTGRES_DB: tennis_dev
     ports:
-      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-55432}:5432"
+      - "127.0.0.1:55439:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MIGRATION_DATABASE_USER:-qintopia_migrator} -d qintopia"]
+      test: ["CMD-SHELL", "pg_isready -U tennis_dev -d tennis_dev"]
       interval: 2s
       timeout: 3s
       retries: 20
     volumes:
-      - qintopia-postgres:/var/lib/postgresql/data
-
-  migrate:
-    build:
-      context: .
-      target: build
-    command: ["sh", "-c", "npm run db:migrate"]
-    environment:
-      DATABASE_URL: postgres://${RUNTIME_DATABASE_USER:-qintopia_runtime}:${RUNTIME_DATABASE_PASSWORD:-qintopia_runtime}@postgres:5432/qintopia
-      MIGRATION_DATABASE_URL: postgres://${MIGRATION_DATABASE_USER:-qintopia_migrator}:${MIGRATION_DATABASE_PASSWORD:-qintopia_migrator}@postgres:5432/qintopia
-      RUNTIME_DATABASE_PASSWORD: ${RUNTIME_DATABASE_PASSWORD:-qintopia_runtime}
-      STAFF_PROFILE_MANIFEST_NAME: ${MIGRATION_STAFF_PROFILE_MANIFEST_NAME:-${STAFF_PROFILE_MANIFEST_NAME:-unconfigured}}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-
-  seed:
-    build:
-      context: .
-      target: build
-    command: ["sh", "-c", "if [ \"${SEED_DEMO_DATA:-false}\" = \"true\" ]; then npm run db:seed; fi"]
-    environment:
-      DATABASE_URL: postgres://${MIGRATION_DATABASE_USER:-qintopia_migrator}:${MIGRATION_DATABASE_PASSWORD:-qintopia_migrator}@postgres:5432/qintopia
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    restart: "no"
-
-  reference-import:
-    build:
-      context: .
-      target: build
-    command: ["sh", "-c", "if [ \"${IMPORT_2026_REFERENCE_CATALOG:-false}\" = \"true\" ]; then npm run db:import:2026; fi"]
-    environment:
-      DATABASE_URL: postgres://${MIGRATION_DATABASE_USER:-qintopia_migrator}:${MIGRATION_DATABASE_PASSWORD:-qintopia_migrator}@postgres:5432/qintopia
-    depends_on:
-      seed:
-        condition: service_completed_successfully
-    restart: "no"
-
-  app:
-    build: .
-    environment:
-      DATABASE_URL: postgres://${RUNTIME_DATABASE_USER:-qintopia_runtime}:${RUNTIME_DATABASE_PASSWORD:-qintopia_runtime}@postgres:5432/qintopia
-      STAFF_PROFILE_MANIFEST_NAME: ${STAFF_PROFILE_MANIFEST_NAME:-unconfigured}
-      PORT: 4100
-      WEB_ORIGIN: "http://127.0.0.1:${APP_HOST_PORT:-4100}"
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
-      BEARER_AUTH_RATE_LIMIT_MAX: ${BEARER_AUTH_RATE_LIMIT_MAX:-600}
-    ports:
-      - "${APP_BIND:-127.0.0.1}:${APP_HOST_PORT:-4100}:4100"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      seed:
-        condition: service_completed_successfully
-      reference-import:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
+      - tennis-data:/var/lib/postgresql/data
+      - ./scripts/tennis/init-databases.sql:/docker-entrypoint-initdb.d/010-tennis.sql:ro
 volumes:
-  qintopia-postgres:
+  tennis-data:

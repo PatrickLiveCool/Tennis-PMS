@@ -1,4 +1,4 @@
-name: GreenPMS CI
+name: Tennis PMS CI
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: greenpms-ci-${{ github.ref }}
+  group: tennis-pms-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -36,6 +36,17 @@ jobs:
     name: Node and release checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tennis_dev
+          POSTGRES_PASSWORD: tennis_local_only
+          POSTGRES_DB: tennis_test
+        ports: ["55439:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tennis_dev -d tennis_test"
+          --health-interval 2s --health-timeout 3s --health-retries 20
     env:
       CI: true
       NODE_ENV: test
@@ -52,5 +63,4 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Test release harness
-        run: python3 -m unittest discover -s scripts/release/tests -v
+      - run: npm run test:integration
