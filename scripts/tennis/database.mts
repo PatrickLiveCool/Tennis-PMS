@@ -2,10 +2,11 @@ import pg from "pg";
 import { assertLocalTennisDatabaseUrl, localTennisDatabaseUrl } from "../../packages/db/src/tennis/local-config.ts";
 import { migrateTennis } from "../../packages/db/src/tennis/migrate.ts";
 
-const connectionString = assertLocalTennisDatabaseUrl(
-  process.env.TENNIS_DATABASE_URL ?? localTennisDatabaseUrl,
-  "development",
-);
+const configuredUrl = process.env.TENNIS_DATABASE_URL ?? localTennisDatabaseUrl;
+const connectionString =
+  process.env.TENNIS_ALLOW_NONLOCAL_DATABASE === "true"
+    ? configuredUrl
+    : assertLocalTennisDatabaseUrl(configuredUrl, "development");
 const pool = new pg.Pool({ connectionString, max: 1, connectionTimeoutMillis: 5000 });
 try {
   const client = await pool.connect();

@@ -24,8 +24,8 @@ from common import (ARCHIVE, FILES, HEX, ReleaseError, image_tag, json_bytes,
                     release_prefix, require, sha256_file, utcnow,
                     validate_bundle, validate_identity, validate_migrations)
 
-ROOT_CONFIG = Path("/etc/greenpms/deploy.json")
-MANAGED_REPOSITORIES = {"greenpms", "green-pms-app", "qintopia-pms"}
+ROOT_CONFIG = Path("/etc/tennis-green-pms/deploy.json")
+MANAGED_REPOSITORIES = {"tennis-green-pms", "tennis-green-pms-app"}
 
 
 def atomic_json(path, value):
@@ -53,7 +53,7 @@ def deployment_lock(directory):
         try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise ReleaseError("another GreenPMS deployment owns the lock") from None
+            raise ReleaseError("another Tennis-Green-PMS deployment owns the lock") from None
         try:
             yield
         finally:
@@ -88,15 +88,12 @@ class Docker:
         require(len(items) == 1, f"expected production {service} container missing")
         container = items[0]
         labels = container.get("labels") or {}
-        require(labels.get("com.docker.compose.project") == "green-pms"
+        require(labels.get("com.docker.compose.project") == "tennis-green-pms"
                 and labels.get("com.docker.compose.service") == service, "container ownership mismatch")
         return container
 
     def current(self):
-        return self.service("app", "qintopia-pms-app")
-
-    def worker(self):
-        return self.service("wecom-worker", "qintopia-pms-wecom-worker")
+        return self.service("app", "tennis-green-pms-app")
 
     def inspect_image(self, identity):
         template = '{"Id":{{json .Id}},"RepoTags":{{json .RepoTags}},"Os":{{json .Os}},"Architecture":{{json .Architecture}},"Labels":{{if index .Config "Labels"}}{{json (index .Config "Labels")}}{{else}}null{{end}},"RootfsDiffIds":{{json .RootFS.Layers}}}'
@@ -113,10 +110,10 @@ class Docker:
         require(image["Id"] == runtime_image_id(release), "image identity changed before switch")
         if not release.get("legacy"):
             verify_image(image, manifest)
-        environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GREENPMS_IMAGE": identity}
-        command(["docker", "compose", "--project-name", "green-pms", "--file", self.config["composeFile"],
+        environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "TENNIS_GREEN_PMS_IMAGE": identity}
+        command(["docker", "compose", "--project-name", "tennis-green-pms", "--file", self.config["composeFile"],
                  "--env-file", self.config["envFile"], "up", "--detach", "--no-build", "--pull", "never", "--force-recreate",
-                 "app", "wecom-worker"],
+                 "app"],
                 env=environment, timeout=180)
 
     def images(self):
@@ -185,7 +182,7 @@ def cleanup_images(docker, state, dry_run=False):
         identity = image["Id"]
         references = {c["imageId"] for c in docker.containers()}
         reason = "current/previous" if identity in protected else "container reference" if identity in references else None
-        deletion_reason = "old GreenPMS tags; other repository tags retained" if len(owned) != len(tags) else "old GreenPMS image"
+        deletion_reason = "old Tennis-Green-PMS tags; other repository tags retained" if len(owned) != len(tags) else "old Tennis-Green-PMS image"
         decisions.append({"imageId": identity, "action": "keep" if reason else "delete", "reason": reason or deletion_reason})
         if reason or dry_run:
             continue
@@ -206,18 +203,18 @@ class Health:
         deadline = time.monotonic() + self.config.get("healthTimeoutSeconds", 150)
         while time.monotonic() < deadline:
             current = self.docker.current()
-            worker = self.docker.worker()
-            if (current["imageId"] == runtime_image_id(release) and current["running"] and current["health"] == "healthy"
-                    and worker["imageId"] == runtime_image_id(release) and worker["running"]):
+            if current["imageId"] == runtime_image_id(release) and current["running"] and current["health"] == "healthy":
                 try:
-                    version = release["manifest"]["version"].removeprefix("v")
                     base = self.config["localBaseUrl"].rstrip("/")
-                    for url, expected_version in ((base + "/health/ready", None), (base + "/api/v1/version", version),
-                                                  (self.config["publicReadyUrl"], None), (self.config["publicVersionUrl"], version)):
+                    for url, check_identity in ((base + "/health", False), (self.config["publicReadyUrl"], False),
+                                                (base + "/version", True), (self.config["publicVersionUrl"], True)):
                         with urllib.request.urlopen(url, timeout=10) as response:
                             require(response.status == 200, "health HTTP status failed")
-                            if expected_version:
-                                require(json.loads(response.read(65536)).get("version") == expected_version, "health version mismatch")
+                            if check_identity:
+                                identity = json.loads(response.read(65536))
+                                require(identity.get("version") == release["manifest"]["version"].removeprefix("v")
+                                        and identity.get("revision") == release["manifest"]["gitRevision"],
+                                        "health release identity mismatch")
                     return
                 except Exception:
                     pass  # Only a fixed failure reason is exposed, never response data.
@@ -255,7 +252,7 @@ class Deployer:
         try:
             self.audit(event, **fields)
         except Exception:
-            print("GreenPMS: failure audit unavailable; inspect deployment journal", file=sys.stderr)
+            print("Tennis-Green-PMS: failure audit unavailable; inspect deployment journal", file=sys.stderr)
 
     def config_hash(self):
         return hashlib.sha256((sha256_file(self.config["composeFile"]) + sha256_file(self.config["envFile"])).encode()).hexdigest()
@@ -270,7 +267,7 @@ class Deployer:
         require(self.docker.current()["imageId"] == runtime_image_id(state["current"]), "running container differs from recorded current; recover first")
 
     def receipt(self, state):
-        return {"application": "greenpms", "status": "healthy", "deployedAt": state["deployedAt"],
+        return {"application": "tennis-green-pms", "status": "healthy", "deployedAt": state["deployedAt"],
                 **{key: state.get(key) for key in ("current", "previous", "rollbackFrom")}}
 
     def recover(self):
@@ -317,14 +314,14 @@ class Deployer:
 
     def deploy(self, version, revision, key, manifest_sha, *, rollback=False, dry_run=False):
         validate_identity(version, revision)
-        require(key == release_prefix("greenpms/releases/", version, revision), "invalid COS release key")
+        require(key == release_prefix("tennis-green-pms/releases/", version, revision), "invalid COS release key")
         require(HEX.fullmatch(manifest_sha), "invalid manifest checksum")
         require(not self.journal.exists(), "unfinished deployment requires recovery")
         before = self.state()
         self.observe(before)
         require(rollback or tuple(map(int, version[1:].split("."))) >= tuple(map(int, before["current"]["manifest"]["version"][1:].split("."))), "older version requires explicit rollback")
         if dry_run:
-            return {"application": "greenpms", "status": "dry-run", "version": version, "key": key}
+            return {"application": "tennis-green-pms", "status": "dry-run", "version": version, "key": key}
         self.clear_stale_downloads()
         self.audit("started", version=version, revision=revision, rollback=rollback)
         previous = before.get("previous")
@@ -400,10 +397,10 @@ def load_config():
     config = json.loads(ROOT_CONFIG.read_bytes())
     for key in ("stateDir", "composeFile", "envFile"):
         root_owned(config[key], secret=key == "envFile")
-    require(config["localBaseUrl"] == "http://127.0.0.1:4100", "unexpected local health URL")
+    require(config["localBaseUrl"] == "http://127.0.0.1:4200", "unexpected local health URL")
     for key in ("publicReadyUrl", "publicVersionUrl"):
         require(config[key].startswith("https://") and "@" not in config[key], "public health URL requires HTTPS without credentials")
-    require(config["publicReadyUrl"].endswith("/health/ready") and config["publicVersionUrl"].endswith("/api/v1/version"), "invalid public health endpoint")
+    require(config["publicReadyUrl"].endswith("/health") and config["publicVersionUrl"].endswith("/version"), "invalid public health endpoint")
     return config
 
 
@@ -424,7 +421,7 @@ def serve(argv=None):
     if operation in ("deploy", "rollback"):
         require(len(args) == 4, "expected version revision COS key manifest SHA")
         validate_identity(args[0], args[1])
-        require(args[2] == release_prefix("greenpms/releases/", args[0], args[1]) and HEX.fullmatch(args[3]), "invalid deploy request")
+        require(args[2] == release_prefix("tennis-green-pms/releases/", args[0], args[1]) and HEX.fullmatch(args[3]), "invalid deploy request")
     elif operation == "adopt":
         require(len(args) == 4, "adoption needs version revision image ID migration baseline JSON")
     else:
@@ -494,7 +491,7 @@ def serve(argv=None):
                 decisions = cleanup_images(docker, deployer.state())
                 deployer.audit("local-cleanup", decisions=decisions)
                 require(not any(d["action"] == "keep" and d["reason"] != "current/previous" for d in decisions),
-                        "extra GreenPMS images remain protected by external references")
+                        "extra Tennis-Green-PMS images remain protected by external references")
             except Exception:
                 deployer.audit("local-cleanup-failed")
                 raise ReleaseError("local image cleanup failed; healthy version retained; maintenance retry required") from None
@@ -506,5 +503,5 @@ if __name__ == "__main__":
     except BaseException as error:
         if isinstance(error, SystemExit):
             raise
-        print("GreenPMS: " + (str(error) if isinstance(error, ReleaseError) else "deployment failed; restricted operator investigation required"), file=sys.stderr)
+        print("Tennis-Green-PMS: " + (str(error) if isinstance(error, ReleaseError) else "deployment failed; restricted operator investigation required"), file=sys.stderr)
         sys.exit(1)

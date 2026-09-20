@@ -1,4 +1,4 @@
-"""Unit tests for the GreenPMS server deployment boundary.
+"""Unit tests for the Tennis-Green-PMS server deployment boundary.
 
 These tests intentionally use only local fakes.  They do not require Docker,
 COS, SSH, a database, or a production configuration.
@@ -7,6 +7,7 @@ COS, SSH, a database, or a production configuration.
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import json
 import multiprocessing
 import os
@@ -46,7 +47,7 @@ def migration(name: str = "001_initial.sql") -> dict[str, str]:
 
 
 def release_key(version: str, revision: str) -> str:
-    return f"greenpms/releases/{version}/{revision}/"
+    return f"tennis-green-pms/releases/{version}/{revision}/"
 
 
 def make_manifest(
@@ -61,7 +62,7 @@ def make_manifest(
 ) -> tuple[dict[str, object], dict[str, bytes]]:
     manifest: dict[str, object] = {
         "schemaVersion": 1,
-        "application": "greenpms",
+        "application": "tennis-green-pms",
         "version": version,
         "gitRevision": revision,
         "platform": "linux/amd64",
@@ -127,7 +128,7 @@ class FakeDocker:
         self.switches: list[str] = []
         self.load_calls: list[Path] = []
         self.remove_calls: list[str] = []
-        self.volumes = ["greenpms-data", "other-project-data"]
+        self.volumes = ["tennis-green-pms-data", "other-project-data"]
 
     def add_image(
         self,
@@ -162,10 +163,10 @@ class FakeDocker:
         return {
             "id": "container-id",
             "imageId": self.current_image_id,
-            "name": "/qintopia-pms-app",
+            "name": "/tennis-green-pms-app",
             "running": True,
             "health": "healthy",
-            "labels": {"com.docker.compose.project": "green-pms", "com.docker.compose.service": "app"},
+            "labels": {"com.docker.compose.project": "tennis-green-pms", "com.docker.compose.service": "app"},
         }
 
     def containers(self) -> list[dict[str, object]]:
@@ -206,7 +207,7 @@ class DockerAdapterTests(unittest.TestCase):
             if args[:3] == ["docker", "ps", "-aq"]:
                 return "healthy-id\nplain-id\n"
             return "\n".join((
-                '{"id":"healthy-id","imageId":"sha256:a","name":"/qintopia-pms-app","running":true,"health":"healthy","labels":{}}',
+                '{"id":"healthy-id","imageId":"sha256:a","name":"/tennis-green-pms-app","running":true,"health":"healthy","labels":{}}',
                 '{"id":"plain-id","imageId":"sha256:b","name":"/other","running":true,"health":"none","labels":{}}',
             ))
 
@@ -242,23 +243,18 @@ class DockerAdapterTests(unittest.TestCase):
         self.assertNotIn(".Config.Labels", template)
         self.assertIn(".RootFS.Layers", template)
 
-    def test_health_rejects_worker_on_a_different_image(self) -> None:
+    def test_health_rejects_an_unhealthy_app(self) -> None:
         docker = Mock()
         docker.current.return_value = {
             "imageId": "sha256:" + "a" * 64,
             "running": True,
-            "health": "healthy",
-        }
-        docker.worker.return_value = {
-            "imageId": "sha256:" + "b" * 64,
-            "running": True,
-            "health": "none",
+            "health": "starting",
         }
         health = server.Health(docker, {
             "healthTimeoutSeconds": 1,
-            "localBaseUrl": "http://127.0.0.1:4100",
-            "publicReadyUrl": "https://example.test/health/ready",
-            "publicVersionUrl": "https://example.test/api/v1/version",
+            "localBaseUrl": "http://127.0.0.1:4200",
+            "publicReadyUrl": "https://example.test/health",
+            "publicVersionUrl": "https://example.test/version",
         })
         release = {
             "runtimeImageId": "sha256:" + "a" * 64,
@@ -269,6 +265,31 @@ class DockerAdapterTests(unittest.TestCase):
                 self.assertRaisesRegex(ReleaseError, "readiness or version gate failed"):
             health(release)
         sleep.assert_called_once_with(2)
+
+    def test_health_checks_public_and_local_release_identity(self) -> None:
+        revision = "b" * 40
+        release = {"runtimeImageId": "sha256:" + "a" * 64,
+                   "manifest": {"version": "v1.2.4", "gitRevision": revision}}
+        docker = Mock()
+        docker.current.return_value = {"imageId": release["runtimeImageId"], "running": True, "health": "healthy"}
+        health = server.Health(docker, {"healthTimeoutSeconds": 1, "localBaseUrl": "http://127.0.0.1:4200",
+                                       "publicReadyUrl": "https://example.test/health",
+                                       "publicVersionUrl": "https://example.test/version"})
+        for version, actual_revision, accepted in (("1.2.4", revision, True), ("1.2.3", revision, False),
+                                                    ("1.2.4", "c" * 40, False)):
+            with self.subTest(version=version, revision=actual_revision):
+                def response(url, timeout):
+                    result = BytesIO(json.dumps({"version": version, "revision": actual_revision}).encode())
+                    result.status = 200
+                    return result
+                with patch("server.urllib.request.urlopen", side_effect=response) as request, \
+                        patch("server.time.monotonic", side_effect=[0, 0, 2]), patch("server.time.sleep"):
+                    if accepted:
+                        health(release)
+                        self.assertEqual(request.call_count, 4)
+                    else:
+                        with self.assertRaisesRegex(ReleaseError, "readiness or version gate failed"):
+                            health(release)
 
 
 class FakeHealth:
@@ -296,7 +317,7 @@ class DeployerFixture:
     new_runtime_image_id = "sha256:" + "c" * 64
 
     def __init__(self, *, health: FakeHealth | None = None) -> None:
-        self.temp = tempfile.TemporaryDirectory(prefix="greenpms-server-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="tennis-green-pms-server-test-")
         root = Path(self.temp.name)
         self.state_dir = root / "state"
         self.state_dir.mkdir()
@@ -308,9 +329,9 @@ class DeployerFixture:
             "stateDir": str(self.state_dir),
             "composeFile": str(self.compose_file),
             "envFile": str(self.env_file),
-            "localBaseUrl": "http://127.0.0.1:4100",
-            "publicReadyUrl": "https://example.test/health/ready",
-            "publicVersionUrl": "https://example.test/api/v1/version",
+            "localBaseUrl": "http://127.0.0.1:4200",
+            "publicReadyUrl": "https://example.test/health",
+            "publicVersionUrl": "https://example.test/version",
             "healthTimeoutSeconds": 0,
         }
         self.docker = FakeDocker(self.old_image_id)
@@ -710,7 +731,7 @@ class DeploymentTests(unittest.TestCase):
     def test_flock_allows_only_one_process(self) -> None:
         if "fork" not in multiprocessing.get_all_start_methods():
             self.skipTest("POSIX fork is required for this flock test")
-        with tempfile.TemporaryDirectory(prefix="greenpms-flock-test-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="tennis-green-pms-flock-test-") as temporary:
             context = multiprocessing.get_context("fork")
             ready = context.Event()
             release = context.Event()
@@ -735,7 +756,7 @@ class DeploymentTests(unittest.TestCase):
         class Interrupted(Exception):
             pass
 
-        with tempfile.TemporaryDirectory(prefix="greenpms-command-signal-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="tennis-green-pms-command-signal-") as temporary:
             probe = Path(temporary) / "child.pid"
             previous_handler = signal.getsignal(signal.SIGTERM)
 
@@ -792,7 +813,7 @@ class DeploymentTests(unittest.TestCase):
     def test_cleanup_rejects_tag_rebind_before_final_inspect(self) -> None:
         old_id = "sha256:" + "9" * 64
         replacement_id = "sha256:" + "a" * 64
-        tag = "greenpms:v1.0.2"
+        tag = "tennis-green-pms:v1.0.2"
 
         class RetaggingDocker(FakeDocker):
             def __init__(self) -> None:
@@ -837,17 +858,17 @@ class CleanupTests(unittest.TestCase):
 
     def test_cleanup_deduplicates_by_image_id_and_removes_all_owned_tags(self) -> None:
         old_id = "sha256:" + "3" * 64
-        self.docker.add_image(old_id, ["greenpms:v1.0.0", "greenpms:legacy"])
+        self.docker.add_image(old_id, ["tennis-green-pms:v1.0.0", "tennis-green-pms:legacy"])
         decisions = server.cleanup_images(self.docker, self.state())  # type: ignore[union-attr]
 
         self.assertEqual(len(decisions), 1)
         self.assertEqual(decisions[0]["imageId"], old_id)
-        self.assertEqual(set(self.docker.remove_calls), {"greenpms:v1.0.0", "greenpms:legacy"})
+        self.assertEqual(set(self.docker.remove_calls), {"tennis-green-pms:v1.0.0", "tennis-green-pms:legacy"})
 
     def test_cleanup_protects_any_container_reference(self) -> None:
         referenced_id = "sha256:" + "4" * 64
-        self.docker.add_image(referenced_id, ["greenpms:v1.0.1"])
-        self.docker.extra_containers.append({"imageId": referenced_id, "name": "/stopped-greenpms", "running": False})
+        self.docker.add_image(referenced_id, ["tennis-green-pms:v1.0.1"])
+        self.docker.extra_containers.append({"imageId": referenced_id, "name": "/stopped-tennis-green-pms", "running": False})
 
         decisions = server.cleanup_images(self.docker, self.state())  # type: ignore[union-attr]
 
@@ -858,19 +879,19 @@ class CleanupTests(unittest.TestCase):
     def test_cleanup_only_removes_managed_images_and_preserves_volumes(self) -> None:
         old_id = "sha256:" + "5" * 64
         other_id = "sha256:" + "6" * 64
-        self.docker.add_image(old_id, ["green-pms-app:v1.0.0"])
+        self.docker.add_image(old_id, ["tennis-green-pms-app:v1.0.0"])
         self.docker.add_image(other_id, ["other-project:latest"])
         volumes_before = list(self.docker.volumes)
 
         server.cleanup_images(self.docker, self.state())  # type: ignore[union-attr]
 
-        self.assertEqual(self.docker.remove_calls, ["green-pms-app:v1.0.0"])
+        self.assertEqual(self.docker.remove_calls, ["tennis-green-pms-app:v1.0.0"])
         self.assertEqual(self.docker.inspect_image("other-project:latest")["RepoTags"], ["other-project:latest"])
         self.assertEqual(self.docker.volumes, volumes_before)
 
-    def test_cleanup_removes_greenpms_tags_from_image_shared_with_other_repository(self) -> None:
+    def test_cleanup_removes_tennis_green_pms_tags_from_image_shared_with_other_repository(self) -> None:
         shared_id = "sha256:" + "9" * 64
-        managed_tag = "greenpms:v1.0.3"
+        managed_tag = "tennis-green-pms:v1.0.3"
         other_tag = "other-project:shared"
         self.docker.add_image(shared_id, [managed_tag, other_tag])
 
@@ -882,19 +903,19 @@ class CleanupTests(unittest.TestCase):
 
     def test_repeated_cleanup_is_idempotent(self) -> None:
         old_id = "sha256:" + "7" * 64
-        self.docker.add_image(old_id, ["qintopia-pms:v1.0.0"])
+        self.docker.add_image(old_id, ["tennis-green-pms:v1.0.0"])
 
         server.cleanup_images(self.docker, self.state())  # type: ignore[union-attr]
         first_removals = list(self.docker.remove_calls)
         second = server.cleanup_images(self.docker, self.state())  # type: ignore[union-attr]
 
-        self.assertEqual(first_removals, ["qintopia-pms:v1.0.0"])
+        self.assertEqual(first_removals, ["tennis-green-pms:v1.0.0"])
         self.assertEqual(self.docker.remove_calls, first_removals)
         self.assertEqual(second, [])
 
     def test_dry_run_does_not_write_resources(self) -> None:
         old_id = "sha256:" + "8" * 64
-        self.docker.add_image(old_id, ["greenpms:v1.0.0", "greenpms:alias"])
+        self.docker.add_image(old_id, ["tennis-green-pms:v1.0.0", "tennis-green-pms:alias"])
         before = self.docker.images()
 
         decisions = server.cleanup_images(self.docker, self.state(), dry_run=True)  # type: ignore[union-attr]

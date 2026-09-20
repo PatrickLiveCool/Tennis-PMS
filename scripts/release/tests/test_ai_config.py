@@ -12,7 +12,7 @@ import server
 from common import ReleaseError
 from test_server import DeployerFixture
 
-COMPOSE = b'services:\n  app:\n    environment:\n      DATABASE_URL: ${DATABASE_URL}\n  wecom-worker:\n    environment:\n      WORKER: yes\n'
+COMPOSE = b'services:\n  app:\n    environment:\n      TENNIS_DATABASE_URL: ${TENNIS_DATABASE_URL}\n'
 KEY = base64.b64encode(b'x' * 32)
 
 
@@ -22,7 +22,7 @@ class ConfigurationTests(unittest.TestCase):
         self.addCleanup(self.fixture.close)
         self.d = self.fixture.deployer
         self.fixture.compose_file.write_bytes(COMPOSE)
-        self.fixture.env_file.write_bytes(b'DATABASE_URL=do-not-log\n')
+        self.fixture.env_file.write_bytes(b'TENNIS_DATABASE_URL=do-not-log\n')
         state = json.loads(self.d.state_file.read_bytes())
         state['configurationSha256'] = self.d.config_hash()
         server.atomic_json(self.d.state_file, state)
@@ -51,13 +51,14 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(self.fixture.env_file.stat().st_mode & 0o777, 0o600)
 
     def test_preexisting_valid_key_is_never_rotated(self):
-        compose, env, generated = ai_config.candidates(COMPOSE, b'OTHER=keep\nAI_SETTINGS_ENCRYPTION_KEY=' + KEY + b'\n')
+        compose, env, generated = ai_config.candidates(COMPOSE, b'OTHER=keep\nTENNIS_AI_ENCRYPTION_KEY=' + KEY + b'\n')
         self.assertFalse(generated)
         self.assertIn(KEY, env)
-        self.assertEqual(compose.split(b'  wecom-worker:')[1], COMPOSE.split(b'  wecom-worker:')[1])
+        self.assertEqual(compose.split(b'  app:', 1)[0], COMPOSE.split(b'  app:', 1)[0])
+        self.assertNotIn(b'wecom-worker', compose)
         for invalid in (b'', b'bad', b'"' + KEY + b'"'):
             with self.subTest(invalid=bool(invalid)), self.assertRaises(ReleaseError):
-                ai_config.candidates(COMPOSE, b'AI_SETTINGS_ENCRYPTION_KEY=' + invalid + b'\n')
+                ai_config.candidates(COMPOSE, b'TENNIS_AI_ENCRYPTION_KEY=' + invalid + b'\n')
 
     def test_existing_encrypted_settings_prevent_initialization(self):
         self.check_empty_settings.side_effect = ReleaseError('existing settings')

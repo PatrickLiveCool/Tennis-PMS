@@ -1,4 +1,6 @@
-# GreenPMS 生产发布快速开始
+# Tennis-Green-PMS 生产发布快速开始
+
+> 当前状态：目标为 `PatrickLiveCool/Tennis-PMS`。只有 Tennis CI 已启用，release-please、release、retention、rollback 均保持 `.github/upstream-workflows/*.disabled`；下文自动发布步骤是接入草案，现在合并或发布 GitHub Release 不会启动这些流程。CI 差异和当前可执行验证见 [迁移记录](tennis-green-pms-infrastructure.md)。Environment 审批、分支保护、云端权限须另行确认，不能按源项目约定直接套用。运行环境需要 Node 22、Python 3.10+、Docker Compose v2。
 
 这套流程已经写入仓库，但当前文档不代表真实 COS 或生产已经配置完成。首次接入尚未执行，本文也没有生产发布或生产验收记录。下文命令是待执行指南；不在终端、日志或归档中输出凭据。
 
@@ -6,13 +8,13 @@
 
 日常发布不需要登录服务器，也不需要手工上传镜像：
 
-1. 合并业务 PR 到 `main`。`GreenPMS Release Please` 会自动创建或更新版本 PR；它自动更新 `package.json`、`package-lock.json`、`CHANGELOG.md`、`deploy/release-policy.json` 的版本字段。无需本地执行版本命令或 Git tag 命令。
+1. 合并业务 PR 到 `main`。`Tennis-Green-PMS Release Please` 会自动创建或更新版本 PR；它自动更新 `package.json`、`package-lock.json`、`CHANGELOG.md`、`deploy/release-policy.json` 的版本字段。无需本地执行版本命令或 Git tag 命令。
 2. 检查自动版本 PR 的版本和 `CHANGELOG.md`。本次若有数据库迁移或回退不兼容变化，在这个 PR 中修改 `deploy/release-policy.json` 的 `rollbackCompatibility`；没有迁移时保持 `same-migrations-only`。合并版本 PR。
 3. Release Please 自动创建不可变的 `vX.Y.Z` tag 和 Draft GitHub Release。确认说明和上线时机后，打开 GitHub Releases，点击 **Publish release**。
-4. `release.published` 自动启动 **GreenPMS Release**。它会验证 tag 指向 `main` 历史中的提交，运行测试和构建，生成 linux/amd64 镜像、archive、checksum、SBOM，上传并回读 COS，然后通过受限 SSH 自动更新服务器上的 app 和企业微信同步 worker。
+4. `release.published` 自动启动 **Tennis-Green-PMS Release**。它会验证 tag 指向 `main` 历史中的提交，运行测试和构建，生成 linux/amd64 镜像、archive、checksum、SBOM，上传并回读 COS，然后通过受限 SSH 自动更新服务器上的 Tennis app。
 5. 不需要再点击 Environment 审批。GitHub Release 的 **Publish release**（`release.published`）就是本次生产发布的唯一批准点；只使用一个 `production` Environment，且不设置 reviewer 或 wait timer。
 
-成功条件是 Release workflow 绿色、`/health/ready` 和 `/api/v1/version` 通过，COS 版本目录出现 `deployed.json`。下载/校验、Compose 启动或健康检查失败时，服务器不写成功标记，启动或健康失败会尽力恢复部署前容器，也不执行成功版本 retention；如果健康检查已经通过而 marker、retention 或本地清理失败，新版本保持运行，marker 可能已经创建，workflow 报错后可重试，不自动回退。
+成功条件是 Release workflow 绿色、`/health` 通过，COS 版本目录出现 `deployed.json`。下载/校验、Compose 启动或健康检查失败时，服务器不写成功标记，启动或健康失败会尽力恢复部署前容器，也不执行成功版本 retention；如果健康检查已经通过而 marker、retention 或本地清理失败，新版本保持运行，marker 可能已经创建，workflow 报错后可重试，不自动回退。
 
 同一 Release 重放时，Actions 从受保护的 `main` 解析并固定一个发布 harness commit，再把目标 tag checkout 到独立目录。应用源码和版本身份始终来自不可变 tag；所有 job 的打包、COS 和 SSH 工具来自同一个 harness commit，所以修复发布工具后可以重放旧 tag。Actions 随后查找该版本的完整且已校验 bundle，并复用不可变产物，不重新构建。若 COS 前缀只有部分文件或内容校验失败，流程会拒绝重建和覆盖；等待候选按 7 天策略清理，或使用新的版本/tag。
 
@@ -22,7 +24,7 @@
 
 常规回退也不需要 SSH：
 
-1. GitHub → Actions → **GreenPMS Rollback** → **Run workflow**，分支选择 `main`。
+1. GitHub → Actions → **Tennis-Green-PMS Rollback** → **Run workflow**，分支选择 `main`。
 2. `version` 填要回退到的版本，例如 `v1.2.4`；只有同一版本存在多个成功 revision 时才填写完整 40 位 `revision`。
 3. 运行 workflow。它只接受 COS 中同时具备完整产物、有效 manifest、匹配 checksum 和有效 `deployed.json` 的成功版本，再执行已有迁移兼容性、镜像身份和健康检查。
 
@@ -38,7 +40,7 @@
 
 - 从未启用 COS 版本控制；`Enabled` 或 `Suspended` 都不能使用。
 - 开启服务端加密，禁止公开访问。
-- Lifecycle 只终止过期未完成分片上传，例如 1 天；不要给 `greenpms/releases/` 设置按天过期。
+- Lifecycle 只终止过期未完成分片上传，例如 1 天；不要给 `tennis-green-pms/releases/` 设置按天过期。
 - 如果使用全局加速，先在 COS 为桶开启加速，再把 `COS_ENDPOINT` 设为 `cos.accelerate.myqcloud.com`。不设置时使用地域默认 endpoint。
 
 在本地生成无密钥配置和三份 CAM policy。这个命令不访问 COS、不连接服务器：
@@ -48,7 +50,7 @@ rtk proxy python3 scripts/release/setup.py \
   --bucket YOUR_BUCKET \
   --region YOUR_REGION \
   --public-host YOUR_PMS_HOST \
-  --output /tmp/greenpms-onboarding
+  --output /tmp/tennis-green-pms-onboarding
 ```
 
 输出是 `cam-upload.json`、`cam-retention.json`、`cam-reader.json` 和 `deploy.json`。目录已存在时脚本拒绝覆盖，换一个新的输出目录即可。
@@ -63,7 +65,7 @@ rtk proxy python3 scripts/release/setup.py \
 | retention | `cam-retention.json` | 查看成功版本并删除旧版本，唯一拥有 `DeleteObject` 的身份 |
 | reader | `cam-reader.json` | 服务器只读下载 archive、manifest、checksum 和 SBOM |
 
-所有 resource 都限制在本桶的 `greenpms/releases/` 前缀。不要授予全 COS、数据库备份、TencentDB 或其他项目权限。marker 是代码中的逻辑 client，但使用 upload 身份的 credentials；没有第四个 marker 账号或 policy。
+所有 resource 都限制在本桶的 `tennis-green-pms/releases/` 前缀。不要授予全 COS、数据库备份、TencentDB 或其他项目权限。marker 是代码中的逻辑 client，但使用 upload 身份的 credentials；没有第四个 marker 账号或 policy。
 
 ### 3. 配置 GitHub
 
@@ -74,7 +76,7 @@ rtk proxy python3 scripts/release/setup.py \
 | Variable | `COS_BUCKET` | 完整 COS 桶名 |
 | Variable | `COS_REGION` | COS 地域代码 |
 | Variable | `DEPLOY_HOST` | 生产服务器地址 |
-| Variable | `DEPLOY_USER` | `greenpms-deploy` |
+| Variable | `DEPLOY_USER` | `tennis-green-pms-deploy` |
 | Variable（可选） | `COS_ENDPOINT` | 全局加速时为 `cos.accelerate.myqcloud.com` |
 
 在 Repository secrets（不是 `production` Environment）中增加 `RELEASE_PLEASE_TOKEN`。它使用两位合并人之一的专用 Fine-grained PAT，仅授予本仓库的 Contents read/write 和 Pull requests read/write；它只用于 Release Please 创建版本 PR 并让 PR CI 正常触发，不授予 COS、SSH、数据库或其他仓库权限。
@@ -107,7 +109,7 @@ rtk npm run test:release
 rtk npm run release:check
 ```
 
-真实首次发布前，用 GitHub Actions 的 Retention workflow 在 `main` 上运行 `dry_run`，确认只会检查 GreenPMS 前缀。真实发布验收完成前，不要把工程完成误认为生产已验收。
+真实首次发布前，用 GitHub Actions 的 Retention workflow 在 `main` 上运行 `dry_run`，确认只会检查 Tennis-Green-PMS 前缀。真实发布验收完成前，不要把工程完成误认为生产已验收。
 
 ## 人工介入点
 

@@ -18,14 +18,14 @@ from scripts.release.package import forbidden_path, indexed_archive_path, inspec
 IMAGE_ID = "sha256:" + "0" * 64
 VERSION = "v1.2.3"
 REVISION = "a" * 40
-IMAGE_TAG = f"greenpms:{VERSION}-{REVISION}"
+IMAGE_TAG = f"tennis-green-pms:{VERSION}-{REVISION}"
 CREATED = "2026-09-09T00:00:00Z"
 
 
 def manifest():
     return {
         "schemaVersion": 1,
-        "application": "greenpms",
+        "application": "tennis-green-pms",
         "version": VERSION,
         "gitRevision": REVISION,
         "platform": "linux/amd64",
@@ -34,7 +34,7 @@ def manifest():
         "archiveSha256": "1" * 64,
         "sbomSha256": "2" * 64,
         "createdAt": CREATED,
-        "source": "https://github.com/qintopia-agent-studio/GreenPMS",
+        "source": "https://github.com/PatrickLiveCool/Tennis-PMS",
         "requiredMigrations": [{"name": "001_initial.sql", "sha256": "3" * 64}],
         "rollbackCompatibility": {
             "mode": "same-migrations-only",
@@ -53,7 +53,7 @@ def docker_archive(current, *, tag=IMAGE_TAG, repo_tags=None, labels=None, layer
     labels = labels or {
         "org.opencontainers.image.version": VERSION,
         "org.opencontainers.image.revision": REVISION,
-        "org.opencontainers.image.source": "https://github.com/qintopia-agent-studio/GreenPMS",
+        "org.opencontainers.image.source": "https://github.com/PatrickLiveCool/Tennis-PMS",
         "org.opencontainers.image.created": CREATED,
     }
     layer_buffer = io.BytesIO()
@@ -105,7 +105,7 @@ class PackageScannerTests(unittest.TestCase):
     def test_rejects_tag_mismatch(self):
         current = manifest()
         with self.assertRaises(ReleaseError):
-            inspect_archive(self.write_archive(docker_archive(current, tag="greenpms:wrong")), current)
+            inspect_archive(self.write_archive(docker_archive(current, tag="tennis-green-pms:wrong")), current)
 
     def test_rejects_extra_repo_tags(self):
         current = manifest()
@@ -120,7 +120,7 @@ class PackageScannerTests(unittest.TestCase):
         labels = {
             "org.opencontainers.image.version": VERSION,
             "org.opencontainers.image.revision": "b" * 40,
-            "org.opencontainers.image.source": "https://github.com/qintopia-agent-studio/GreenPMS",
+            "org.opencontainers.image.source": "https://github.com/PatrickLiveCool/Tennis-PMS",
             "org.opencontainers.image.created": CREATED,
         }
         with self.assertRaises(ReleaseError):
@@ -187,7 +187,7 @@ class BundleValidationTests(unittest.TestCase):
     def test_rejects_sbom_hash_mismatch(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            archive = directory / "greenpms-linux-amd64.docker.tar.zst"
+            archive = directory / "tennis-green-pms-linux-amd64.docker.tar.zst"
             sbom = directory / "sbom.spdx.json"
             archive.write_bytes(b"archive")
             sbom.write_text(json.dumps({"spdxVersion": "SPDX-2.3"}))

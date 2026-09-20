@@ -1,21 +1,60 @@
-# Local Tennis foundation only. No housing API, workers, seed or production service.
-name: tennis-pms-local
+name: tennis-green-pms-local
+
 services:
   postgres:
+    container_name: ${TENNIS_POSTGRES_CONTAINER_NAME:-tennis-green-pms-postgres}
     image: ${TENNIS_POSTGRES_IMAGE:-docker.m.daocloud.io/library/postgres:16-alpine}
     environment:
-      POSTGRES_USER: tennis_dev
-      POSTGRES_PASSWORD: tennis_local_only
-      POSTGRES_DB: tennis_dev
+      POSTGRES_USER: ${TENNIS_POSTGRES_USER:-tennis_dev}
+      POSTGRES_PASSWORD: ${TENNIS_POSTGRES_PASSWORD:-tennis_local_only}
+      POSTGRES_DB: ${TENNIS_POSTGRES_DB:-tennis_dev}
     ports:
-      - "127.0.0.1:55439:5432"
+      - "${TENNIS_POSTGRES_BIND:-127.0.0.1}:${TENNIS_POSTGRES_HOST_PORT:-55439}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tennis_dev -d tennis_dev"]
+      test: ["CMD-SHELL", "pg_isready -U ${TENNIS_POSTGRES_USER:-tennis_dev} -d ${TENNIS_POSTGRES_DB:-tennis_dev}"]
       interval: 2s
       timeout: 3s
       retries: 20
     volumes:
-      - tennis-data:/var/lib/postgresql/data
-      - ./scripts/tennis/init-databases.sql:/docker-entrypoint-initdb.d/010-tennis.sql:ro
+      - tennis-green-pms-data:/var/lib/postgresql/data
+      - ./scripts/tennis/init-databases.sql:/docker-entrypoint-initdb.d/01-tennis-test.sql:ro
+
+  migrate:
+    build:
+      context: .
+      target: build
+    command: ["node", "--import", "tsx", "scripts/tennis/database.mts"]
+    environment:
+      TENNIS_DATABASE_URL: postgres://${TENNIS_POSTGRES_USER:-tennis_dev}:${TENNIS_POSTGRES_PASSWORD:-tennis_local_only}@postgres:5432/${TENNIS_POSTGRES_DB:-tennis_dev}
+      TENNIS_ALLOW_NONLOCAL_DATABASE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: .
+    container_name: ${TENNIS_APP_CONTAINER_NAME:-tennis-green-pms-app}
+    environment:
+      NODE_ENV: development
+      TENNIS_DATABASE_URL: postgres://${TENNIS_POSTGRES_USER:-tennis_dev}:${TENNIS_POSTGRES_PASSWORD:-tennis_local_only}@postgres:5432/${TENNIS_POSTGRES_DB:-tennis_dev}
+      TENNIS_ALLOW_NONLOCAL_DATABASE: "true"
+      TENNIS_ALLOW_SIMULATION: ${TENNIS_ALLOW_SIMULATION:-true}
+      TENNIS_HTTP_HOST: 0.0.0.0
+      TENNIS_HTTP_PORT: 4200
+      TENNIS_WEB_ORIGINS: "http://127.0.0.1:${TENNIS_APP_HOST_PORT:-4200},http://localhost:${TENNIS_APP_HOST_PORT:-4200}"
+      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:-}
+      TENNIS_PAYMENT_SIGNING_KEY: ${TENNIS_PAYMENT_SIGNING_KEY:-tennis-local-simulation-only-32-characters}
+    ports:
+      - "${TENNIS_APP_BIND:-127.0.0.1}:${TENNIS_APP_HOST_PORT:-4200}:4200"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
-  tennis-data:
+  tennis-green-pms-data:

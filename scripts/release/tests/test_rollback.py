@@ -18,7 +18,7 @@ class RollbackFormTests(unittest.TestCase):
             self.client, "v1.2.4", "a" * 40, "2026-09-09T10:00:00Z")
 
     def test_version_form_passes_exact_cos_identity_to_locked_rollback(self):
-        receipt = {"application": "greenpms", "status": "healthy",
+        receipt = {"application": "tennis-green-pms", "status": "healthy",
                    "deployedAt": "2026-09-10T10:00:00Z",
                    "current": {"prefix": self.prefix, "manifestSha256": self.digest,
                                "manifest": self.manifest, "runtimeImageId": "sha256:" + "f" * 64},

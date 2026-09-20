@@ -15,8 +15,8 @@ from scripts.release.orchestrate import (MAX_RECEIPT_BYTES, LockedSSH, deploy, m
                                           retention_plan, validate_receipt)
 
 
-ROOT = "greenpms/releases/"
-SOURCE = "https://github.com/qintopia-agent-studio/GreenPMS"
+ROOT = "tennis-green-pms/releases/"
+SOURCE = "https://github.com/PatrickLiveCool/Tennis-PMS"
 
 
 class FakeCosError(Exception):
@@ -130,12 +130,12 @@ def make_manifest(version, revision, archive=b"archive", sbom=b"{}", migration_c
     image_id = "sha256:" + (revision * 2)[:64]
     return {
         "schemaVersion": 1,
-        "application": "greenpms",
+        "application": "tennis-green-pms",
         "version": version,
         "gitRevision": revision,
         "platform": "linux/amd64",
         "imageId": image_id,
-        "imageTag": f"greenpms:{version}-{revision}",
+        "imageTag": f"tennis-green-pms:{version}-{revision}",
         "archiveSha256": hashlib.sha256(archive).hexdigest(),
         "sbomSha256": hashlib.sha256(sbom).hexdigest(),
         "createdAt": "2026-09-09T00:00:00Z",
@@ -159,7 +159,7 @@ def add_release(client, version, revision, deployed_at, *, marker=True, migratio
     if marker:
         client.objects[prefix + "deployed.json"] = json_bytes({
             "schemaVersion": 1,
-            "application": "greenpms",
+            "application": "tennis-green-pms",
             "version": version,
             "gitRevision": revision,
             "imageId": manifest["imageId"],
@@ -237,7 +237,7 @@ class CosStoreTests(unittest.TestCase):
 
     def test_mutation_roles_and_versioning_are_fail_closed(self):
         data = b"x"
-        key = ROOT + "v1.2.3/" + "a" * 40 + "/greenpms-linux-amd64.docker.tar.zst"
+        key = ROOT + "v1.2.3/" + "a" * 40 + "/tennis-green-pms-linux-amd64.docker.tar.zst"
         with tempfile.NamedTemporaryFile() as source:
             source.write(data)
             source.flush()
@@ -257,7 +257,7 @@ class CosStoreTests(unittest.TestCase):
                 return {"Unexpected": "value"}
 
         data = b"x"
-        key = ROOT + "v1.2.3/" + "a" * 40 + "/greenpms-linux-amd64.docker.tar.zst"
+        key = ROOT + "v1.2.3/" + "a" * 40 + "/tennis-green-pms-linux-amd64.docker.tar.zst"
         with tempfile.NamedTemporaryFile() as source:
             source.write(data)
             source.flush()
@@ -271,7 +271,7 @@ class CosStoreTests(unittest.TestCase):
                 return {"VersioningConfiguration": None}
 
         client = NeverVersioned()
-        key = ROOT + "v1.2.3/" + "a" * 40 + "/greenpms-linux-amd64.docker.tar.zst"
+        key = ROOT + "v1.2.3/" + "a" * 40 + "/tennis-green-pms-linux-amd64.docker.tar.zst"
         complete_store(client, role="UPLOAD").put_immutable(key, b"archive")
 
         self.assertEqual(client.versioning_calls, 1)
@@ -394,7 +394,7 @@ class OrchestrationTests(unittest.TestCase):
         known_hosts.write_text("host")
         return patch.dict(os.environ, {
             "DEPLOY_HOST": "deploy.example",
-            "DEPLOY_USER": "greenpms-deploy",
+            "DEPLOY_USER": "tennis-green-pms-deploy",
             "DEPLOY_SSH_KEY_FILE": str(key),
             "DEPLOY_KNOWN_HOSTS_FILE": str(known_hosts),
         }, clear=False)
@@ -403,7 +403,7 @@ class OrchestrationTests(unittest.TestCase):
         client = FakeCos()
         marker_store = CosStore("bucket", "region", role="MARKER", client=client)
         prefix, manifest, manifest_sha = add_release(client, "v2.0.0", "a" * 40, "2026-09-09T10:00:00Z", marker=False, migration_count=57)
-        receipt = {"application": "greenpms", "status": "healthy", "deployedAt": "2026-09-09T10:00:00Z",
+        receipt = {"application": "tennis-green-pms", "status": "healthy", "deployedAt": "2026-09-09T10:00:00Z",
                    "current": {"prefix": prefix, "manifestSha256": manifest_sha, "manifest": manifest,
                                "runtimeImageId": "sha256:" + "f" * 64},
                    "previous": None, "rollbackFrom": None}
@@ -441,7 +441,7 @@ class OrchestrationTests(unittest.TestCase):
         legacy_manifest = {"version": "v1.2.3", "gitRevision": "c" * 40, "imageId": "sha256:" + "1" * 64,
                            "imageTag": "sha256:" + "1" * 64, "requiredMigrations": migrations(57),
                            "rollbackCompatibility": {"mode": "same-migrations-only", "reason": "baseline"}}
-        legacy_receipt = {"application": "greenpms", "status": "healthy", "deployedAt": "2026-09-09T10:00:00Z",
+        legacy_receipt = {"application": "tennis-green-pms", "status": "healthy", "deployedAt": "2026-09-09T10:00:00Z",
                           "current": {"legacy": True, "prefix": None, "manifestSha256": None, "manifest": legacy_manifest},
                           "previous": None, "rollbackFrom": None,
                           "localImagePlan": [{"imageId": "sha256:" + "2" * 64, "action": "keep", "reason": "current/previous"}]}
@@ -464,7 +464,7 @@ class OrchestrationTests(unittest.TestCase):
         manifest = make_manifest("v2.1.0", "b" * 40)
         current = {"prefix": prefix, "manifestSha256": "c" * 64, "manifest": manifest,
                    "runtimeImageId": "sha256:" + "f" * 64}
-        receipt = {"application": "greenpms", "status": "healthy", "deployedAt": "2026-09-09T10:00:00Z",
+        receipt = {"application": "tennis-green-pms", "status": "healthy", "deployedAt": "2026-09-09T10:00:00Z",
                    "current": current, "previous": None, "rollbackFrom": None}
         validate_receipt(receipt)
         with self.assertRaisesRegex(ReleaseError, "unexpected schema"):
@@ -477,7 +477,7 @@ class OrchestrationTests(unittest.TestCase):
     def test_restricted_server_error_is_reported_without_arbitrary_stderr(self):
         with tempfile.TemporaryDirectory() as temporary, self.ssh_environment(temporary):
             session = LockedSSH("maintenance", ssh_factory=lambda argv: FakeSSH(
-                None, returncode=1, stderr="GreenPMS: running container differs from recorded current; recover first\n"
+                None, returncode=1, stderr="Tennis-Green-PMS: running container differs from recorded current; recover first\n"
             ))
             with self.assertRaisesRegex(ReleaseError, "running container differs"):
                 session.receipt()

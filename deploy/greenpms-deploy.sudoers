@@ -1,3 +1,0 @@
-# Validate with visudo -cf; install as root:root 0440 after explicit approval.
-Defaults:greenpms-deploy !setenv
-greenpms-deploy ALL=(root) NOPASSWD: /usr/local/sbin/greenpms-deploy deploy *, /usr/local/sbin/greenpms-deploy rollback *, /usr/local/sbin/greenpms-deploy maintenance

@@ -1,0 +1,27 @@
+# Server deployment only. Use a prebuilt immutable image and an externally
+# managed PostgreSQL database; this file never builds or migrates production data.
+# Template only: the current business payment adapter rejects production startup.
+name: tennis-green-pms
+
+services:
+  app:
+    image: ${TENNIS_GREEN_PMS_IMAGE:?TENNIS_GREEN_PMS_IMAGE must name an immutable prebuilt release}
+    pull_policy: never
+    container_name: ${TENNIS_GREEN_PMS_CONTAINER_NAME:-tennis-green-pms-app}
+    restart: unless-stopped
+    environment:
+      TENNIS_DATABASE_URL: ${TENNIS_DATABASE_URL:?TENNIS_DATABASE_URL is required}
+      TENNIS_ALLOW_NONLOCAL_DATABASE: "true"
+      TENNIS_ALLOW_SIMULATION: ${TENNIS_ALLOW_SIMULATION:-false}
+      TENNIS_HTTP_HOST: 0.0.0.0
+      TENNIS_HTTP_PORT: 4200
+      TENNIS_WEB_ORIGINS: ${TENNIS_WEB_ORIGINS:?TENNIS_WEB_ORIGINS is required}
+      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:-}
+      TENNIS_PAYMENT_SIGNING_KEY: ${TENNIS_PAYMENT_SIGNING_KEY:?TENNIS_PAYMENT_SIGNING_KEY is required}
+    ports:
+      - "${TENNIS_APP_BIND:-127.0.0.1}:${TENNIS_APP_HOST_PORT:-4200}:4200"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

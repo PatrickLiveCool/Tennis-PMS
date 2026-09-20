@@ -1,4 +1,4 @@
-"""Tencent COS adapter and immutable GreenPMS bundle uploader."""
+"""Tencent COS adapter and immutable Tennis-Green-PMS bundle uploader."""
 
 from __future__ import annotations
 
@@ -21,15 +21,15 @@ except ImportError:
                         validate_bundle, validate_identity)
 
 
-ROOT_PREFIX = "greenpms/releases/"
+ROOT_PREFIX = "tennis-green-pms/releases/"
 MARKER = "deployed.json"
 _ROLES = {"UPLOAD", "MARKER", "RETENTION"}
 _KNOWN_OBJECTS = set(FILES) | {"deployed.json"}
 _RELEASE_KEY = re.compile(
-    r"^greenpms/releases/v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)/[0-9a-f]{40}/(?:greenpms-linux-amd64\.docker\.tar\.zst|manifest\.json|SHA256SUMS|sbom\.spdx\.json|deployed\.json)$"
+    r"^tennis-green-pms/releases/v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)/[0-9a-f]{40}/(?:tennis-green-pms-linux-amd64\.docker\.tar\.zst|manifest\.json|SHA256SUMS|sbom\.spdx\.json|deployed\.json)$"
 )
 _RELEASE_PREFIX = re.compile(
-    r"^greenpms/releases/v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)/[0-9a-f]{40}/$"
+    r"^tennis-green-pms/releases/v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)/[0-9a-f]{40}/$"
 )
 _JSON_LIMIT = 4 * 1024 * 1024
 # qcloud_cos passes this value unchanged to requests. A tuple bounds the
@@ -42,7 +42,7 @@ _ALLOWED_ENDPOINTS = frozenset({"cos.accelerate.myqcloud.com"})
 # - API 19889: once versioning is enabled it cannot be disabled; Suspended is
 #   still versioned, so both Enabled and Suspended are rejected.
 # - API 71307: CAM cos:prefix values must URL-encode the slash
-#   (greenpms%2Freleases%2F); prefix-scoped string_like policies need an
+#   (tennis-green-pms%2Freleases%2F); prefix-scoped string_like policies need an
 #   operator-side CAM simulation before production rollout.
 
 
@@ -98,7 +98,7 @@ class CosStore:
         self.region = region or _first_env(_role_env(role, "REGION"))
         self.prefix = prefix if prefix.endswith("/") else prefix + "/"
         if self.prefix != ROOT_PREFIX:
-            raise ReleaseError("COS prefix must be greenpms/releases/")
+            raise ReleaseError("COS prefix must be tennis-green-pms/releases/")
         self.role = role.upper() if role else None
         if self.role is not None:
             if self.role not in _ROLES:
@@ -220,13 +220,13 @@ class CosStore:
 
     def _validate_key(self, key: str, *, allow_marker: bool = True) -> None:
         if not isinstance(key, str) or _RELEASE_KEY.fullmatch(key) is None:
-            raise ReleaseError("invalid GreenPMS COS object key")
+            raise ReleaseError("invalid Tennis-Green-PMS COS object key")
         if not allow_marker and key.endswith("deployed.json"):
             raise ReleaseError("COS object key is not allowed for this operation")
 
     def _validate_list_prefix(self, prefix: str) -> None:
         if prefix != self.prefix and _RELEASE_PREFIX.fullmatch(prefix) is None:
-            raise ReleaseError("invalid GreenPMS COS list prefix")
+            raise ReleaseError("invalid Tennis-Green-PMS COS list prefix")
 
     @staticmethod
     def _not_found(exc: BaseException) -> bool:
@@ -263,7 +263,7 @@ class CosStore:
             elif hasattr(body, "get_raw_stream"):
                 data = body.get_raw_stream().read(_JSON_LIMIT + 1)
             elif hasattr(body, "get_stream_to_file"):
-                with tempfile.TemporaryDirectory(prefix="greenpms-cos-json-") as temporary:
+                with tempfile.TemporaryDirectory(prefix="tennis-green-pms-cos-json-") as temporary:
                     path = Path(temporary) / "object"
                     body.get_stream_to_file(str(path))
                     if path.stat().st_size > _JSON_LIMIT:
@@ -282,7 +282,7 @@ class CosStore:
             raise ReleaseError("COS object download failed") from exc
 
     def _sha256_object(self, key: str) -> str:
-        with tempfile.TemporaryDirectory(prefix="greenpms-cos-hash-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="tennis-green-pms-cos-hash-") as temporary:
             path = Path(temporary) / "object"
             self.download(key, path)
             return sha256_file(path)
@@ -441,7 +441,7 @@ def upload_bundle(store: CosStore, directory: str | Path, prefix: str = ROOT_PRE
     validate_bundle(root, manifest_sha, manifest["version"], manifest["gitRevision"])
     key_prefix = release_prefix(prefix, manifest["version"], manifest["gitRevision"])
     uploaded: list[str] = []
-    with tempfile.TemporaryDirectory(prefix="greenpms-cos-readback-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="tennis-green-pms-cos-readback-") as temporary:
         temporary_root = Path(temporary)
         for name in FILES:
             key = key_prefix + name
@@ -452,7 +452,7 @@ def upload_bundle(store: CosStore, directory: str | Path, prefix: str = ROOT_PRE
             if sha256_file(readback) != expected:
                 raise ReleaseError(f"COS readback checksum mismatch: {name}")
             uploaded.append(name)
-    return {"application": "greenpms", "version": manifest["version"], "gitRevision": manifest["gitRevision"],
+    return {"application": "tennis-green-pms", "version": manifest["version"], "gitRevision": manifest["gitRevision"],
             "prefix": key_prefix, "manifestSha256": manifest_sha, "uploaded": uploaded}
 
 
@@ -482,7 +482,7 @@ def fetch_bundle(store: CosStore, version: str, revision: str, directory: str | 
     if destination.exists() and any(destination.iterdir()):
         raise ReleaseError("fetch destination is not empty")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="greenpms-fetch-", dir=destination.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix="tennis-green-pms-fetch-", dir=destination.parent) as temporary:
         staging = Path(temporary)
         for name in FILES:
             store.download(key_prefix + name, staging / name)
@@ -502,7 +502,7 @@ def fetch_bundle(store: CosStore, version: str, revision: str, directory: str | 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Upload an immutable GreenPMS bundle to COS")
+    parser = argparse.ArgumentParser(description="Upload an immutable Tennis-Green-PMS bundle to COS")
     subparsers = parser.add_subparsers(dest="operation", required=True)
     upload = subparsers.add_parser("upload")
     upload.add_argument("--directory", required=True)
@@ -522,7 +522,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     elif args.operation == "fetch":
         code = fetch_bundle(CosStore(args.bucket, args.region, prefix=args.prefix, role="UPLOAD"), args.version, args.revision, args.directory, args.prefix)
-        print(json.dumps({"application": "greenpms", "status": "missing" if code == 3 else "fetched", "version": args.version,
+        print(json.dumps({"application": "tennis-green-pms", "status": "missing" if code == 3 else "fetched", "version": args.version,
                           "gitRevision": args.revision, "prefix": release_prefix(args.prefix, args.version, args.revision)},
                          ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return code
@@ -533,5 +533,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except ReleaseError as error:
-        print(f"GreenPMS: {error}", file=os.sys.stderr)
+        print(f"Tennis-Green-PMS: {error}", file=os.sys.stderr)
         raise SystemExit(1)

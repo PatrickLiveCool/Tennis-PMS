@@ -1,12 +1,14 @@
 # AI 助手连接与维护
 
+> 本文的页面、表结构和住房操作说明保留为上游历史参考。Tennis 配置依据 `docs/tennis/backoffice-assistant.md`（若当前业务分支已提供）与 `docs/tennis/external-agent.md`；运行时密钥变量为 `TENNIS_AI_ENCRYPTION_KEY`。下文服务端入口仅完成密钥映射、格式和运行时模块检查，不代表真实模型接入或业务验收已完成。发布 workflow 仍停用。
+
 本功能为网页登录用户提供获权查询和操作引导。没有模型配置时，PMS 其他功能正常使用。实际续住、资金和库存变更仍通过原有表单、Preview / Confirm 完成。
 
 提问记录保存在同一数据库的 `ai_question_records`；Codex 应使用 `ai_question_export` 视图和 `ai_question_daily` 汇总。表字段、90 天明细保留和只读同步方式见 [AI 提问记录与 Codex 同步指南](./ai-question-records.md)，无需数据查看界面。
 
 ## 首次配置
 
-1. 部署人员生成独立的 32 字节 base64 随机值，例如 `openssl rand -base64 32`，作为服务端 `AI_SETTINGS_ENCRYPTION_KEY`。此值为加密主密钥，不是供应商 API Key。生产 Compose 已支持传入该变量。
+1. 部署人员生成独立的 32 字节 base64 随机值，例如 `openssl rand -base64 32`，作为服务端 `TENNIS_AI_ENCRYPTION_KEY`。此值为加密主密钥，不是供应商 API Key。Tennis Compose 模板已支持传入该变量。
 2. 通过项目正式发布入口部署含本功能的镜像，依次应用 `062_ai_assistant.sql` 和 `063_ai_question_records.sql`（在主线 `061_room_catalog_management.sql` 之后）。不要在生产目录构建。
 3. 管理员登录，在“设置 → AI 助手”填写 HTTPS Base URL、API Key 或 Bearer 访问 Token、模型名称。Base URL 为 API 根地址，如供应商的 `/v1`；系统追加 `/chat/completions`。
 4. 点击“测试连接”。使用非流式 Chat Completions、`max_tokens`、function tools，并要求模型返回一次工具调用。此测试产生一次供应商请求，不含业务资料，不保存配置。
@@ -39,15 +41,15 @@
 当设置页提示服务端密钥保护未配置、勾选启用后保存变灰时，与填写顺序及供应商选择无关。先由管理员在安装了本节对应发布工具的服务器执行：
 
 ```bash
-sudo /usr/local/sbin/greenpms-deploy configure-ai
+sudo /usr/local/sbin/tennis-green-pms-deploy configure-ai
 ```
 
-此入口不发布新应用版本，不修改供应商配置或数据库。它持有发布锁，先验证原配置 hash、当前镜像及本地/公网健康；只在没有现有加密凭据和运行时密钥时生成 32 字节随机密钥，写入 root-owned `/etc/greenpms/app.env`，并为固定 Compose 的 app 补齐映射。已有合法密钥原样保留；异常、空值或歧义定义拒绝自动覆盖，不执行密钥轮换。不要把 app.env、命令中的凭据或备份内容复制到聊天、Git 或日志。
+此入口不发布新应用版本，不修改供应商配置或数据库。它持有发布锁，先验证原配置 hash、当前镜像及本地/公网健康；只在没有现有加密凭据和运行时密钥时生成 32 字节随机密钥，写入 root-owned `/etc/tennis-green-pms/app.env`，并为固定 Compose 的 app 补齐映射。已有合法密钥原样保留；异常、空值或歧义定义拒绝自动覆盖，不执行密钥轮换。不要把 app.env、命令中的凭据或备份内容复制到聊天、Git 或日志。
 
-执行期间会重建当前版本的 app 和 worker，短暂影响访问，请等待命令结束后再保存模型设置。它检查 Docker、本地/公网 ready/version，以及实际应用模块的加密解密自检，通过后才登记新配置 hash，保留 current、previous、迁移基线和发布时间。重复执行不会轮换密钥。
+执行期间会重建当前版本的 app，短暂影响访问，请等待命令结束后再保存模型设置。它检查 Docker、本地/公网 `/health` 与 `/version`、密钥格式和实际运行时模块能否加载，通过后才登记新配置 hash，保留 current、previous、迁移基线和发布时间。重复执行不会轮换密钥。实际模型调用与业务加密行为另行验收。
 
-配置前后文件保存在 `/var/lib/greenpms-release/ai-config-*/`（目录 0700、文件 0600）；该备份包含加密密钥，须按生产秘密备份管理，不能随镜像清理或下载至工作区。`audit.jsonl` 只记状态及备份目录名。此密钥必须长期保留：之后在设置页更换供应商、模型或 API Key 都不需要换服务器加密密钥。
+配置前后文件保存在 `/var/lib/tennis-green-pms-release/ai-config-*/`（目录 0700、文件 0600）；该备份包含加密密钥，须按生产秘密备份管理，不能随镜像清理或下载至工作区。`audit.jsonl` 只记状态及备份目录名。此密钥必须长期保留：之后在设置页更换供应商、模型或 API Key 都不需要换服务器加密密钥。
 
-失败时按事务恢复原配置和原镜像；断电/中断由既有 recovery timer 或管理员 `sudo /usr/local/sbin/greenpms-deploy recover` 恢复。状态已提交则保留新配置，未提交则恢复旧配置；遇到备份损坏或事务之外的改动会保留 journal 并停止，不覆盖未知配置。不得手改 state.json 或删除 adoption 绕过配置校验。若失败窗口中已保存供应商凭据，须保留新密钥备份并由管理员核对恢复，不能再次生成密钥。
+失败时按事务恢复原配置和原镜像；断电/中断由既有 recovery timer 或管理员 `sudo /usr/local/sbin/tennis-green-pms-deploy recover` 恢复。状态已提交则保留新配置，未提交则恢复旧配置；遇到备份损坏或事务之外的改动会保留 journal 并停止，不覆盖未知配置。不得手改 state.json 或删除 adoption 绕过配置校验。若失败窗口中已保存供应商凭据，须保留新密钥备份并由管理员核对恢复，不能再次生成密钥。
 
 该操作仅管理员可执行，GitHub 专用部署身份不能调用。旧服务器先从已合并的 main 更新 root-owned 发布库 `server.py` 和 `ai_config.py`（核对原库版本、无未完成事务、持发布锁并保留旧库副本），无需重建应用镜像或替换整份生产配置。用户刷新“设置 → AI 助手”后，应能按任意顺序填写信息和勾选启用，再保存；实际模型连接由用户所填供应商参数决定。

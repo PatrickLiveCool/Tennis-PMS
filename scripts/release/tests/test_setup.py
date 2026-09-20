@@ -27,31 +27,31 @@ class SetupTests(unittest.TestCase):
                     self.assertEqual(role, "upload")
                     self.assertTrue(any(resource.endswith("/deployed.json") for resource in statement["resource"]))
                 if "name/cos:GetBucket" in statement["action"]:
-                    self.assertEqual(statement["condition"]["string_like"]["cos:prefix"], ["greenpms%2Freleases%2F*"])
+                    self.assertEqual(statement["condition"]["string_like"]["cos:prefix"], ["tennis-green-pms%2Freleases%2F*"])
         upload = documents["cam-upload.json"]["statement"]
         self.assertEqual(
             {r.rsplit("/", 1)[-1] for s in upload if "name/cos:GetObject" in s["action"] for r in s["resource"]},
-            {"greenpms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
+            {"tennis-green-pms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
         )
         self.assertEqual(
             {r.rsplit("/", 1)[-1] for s in upload if "name/cos:HeadObject" in s["action"] for r in s["resource"]},
-            {"greenpms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
+            {"tennis-green-pms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
         )
         self.assertEqual(
             {r.rsplit("/", 1)[-1] for s in upload if "name/cos:PutObject" in s["action"] for r in s["resource"]},
-            {"greenpms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
+            {"tennis-green-pms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
         )
         self.assertFalse(any("name/cos:DeleteObject" in s["action"] for s in upload))
         retention = documents["cam-retention.json"]["statement"]
         self.assertEqual(
             {r.rsplit("/", 1)[-1] for s in retention if "name/cos:DeleteObject" in s["action"] for r in s["resource"]},
-            {"greenpms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
+            {"tennis-green-pms-linux-amd64.docker.tar.zst", "manifest.json", "SHA256SUMS", "sbom.spdx.json", "deployed.json"},
         )
         reader = documents["cam-reader.json"]["statement"]
         self.assertEqual(len(reader), 1)
         self.assertEqual(reader[0]["action"], ["name/cos:GetObject"])
         self.assertFalse(any(resource.endswith("/deployed.json") for resource in reader[0]["resource"]))
-        self.assertEqual(documents["deploy.json"]["publicReadyUrl"], "https://pms.example.com/health/ready")
+        self.assertEqual(documents["deploy.json"]["publicReadyUrl"], "https://pms.example.com/health")
 
     def test_invalid_input_is_rejected(self):
         for bucket, region, host in (("other/*", "ap-guangzhou", "pms.example.com"),

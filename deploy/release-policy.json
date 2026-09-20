@@ -1,8 +1,8 @@
 {
-  "application": "greenpms",
+  "application": "tennis-green-pms",
   "version": "1.4.3",
   "rollbackCompatibility": {
     "mode": "forward-only",
-    "reason": "061 增加运营房型、库存版本和价格生效引用；执行迁移后不得仅回退旧应用镜像，应前向修复，或按正式恢复流程核验并恢复整套备份。"
+    "reason": "Tennis fork 的业务及迁移基线独立于住房版本；当前尚无经过验收的 Tennis 回退镜像，保持 forward-only。生产启动仅核对 Tennis SQL 校验和，数据库迁移和恢复必须另行授权并验收。"
   }
 }

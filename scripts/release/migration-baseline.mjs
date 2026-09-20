@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
-const migrationDirectory = 'packages/db/src/migrations';
+const migrationDirectory = 'packages/db/src/tennis/migrations';
 const [mode, ref, ...extra] = process.argv.slice(2);
 if (extra.length || (mode !== '--git' && mode !== '--image') || (mode === '--git' ? !ref || ref.startsWith('-') : ref)) {
   throw new Error('Use --git VERIFIED_REF locally, or --image inside the running container');

@@ -20,7 +20,7 @@ def configuration(bucket: str, region: str, public_host: str) -> dict[str, dict]
         raise ValueError("public host must be a hostname without https://, path or credentials")
     appid = bucket.rsplit("-", 1)[1]
     bucket_resource = f"qcs::cos:{region}:uid/{appid}:{bucket}/*"
-    objects = f"qcs::cos:{region}:uid/{appid}:{bucket}/greenpms/releases/*"
+    objects = f"qcs::cos:{region}:uid/{appid}:{bucket}/tennis-green-pms/releases/*"
     result = {}
     upload_names = (*FILES, "deployed.json")
     for role in ("upload", "retention", "reader"):
@@ -38,7 +38,7 @@ def configuration(bucket: str, region: str, public_host: str) -> dict[str, dict]
         if role in ("upload", "retention"):
             statements.append({"effect": "allow", "action": ["name/cos:GetBucket"],
                                "resource": [bucket_resource],
-                               "condition": {"string_like": {"cos:prefix": ["greenpms%2Freleases%2F*"]}}})
+                               "condition": {"string_like": {"cos:prefix": ["tennis-green-pms%2Freleases%2F*"]}}})
         if role == "upload":
             statements.append({"effect": "allow", "action": ["name/cos:PutObject"],
                                "resource": [objects + "/" + name for name in upload_names]})
@@ -49,8 +49,8 @@ def configuration(bucket: str, region: str, public_host: str) -> dict[str, dict]
     template = Path(__file__).resolve().parents[2] / "deploy/server-config.example.json"
     deploy = json.loads(template.read_text())
     deploy["cos"] = {"bucket": bucket, "region": region}
-    deploy["publicReadyUrl"] = f"https://{public_host}/health/ready"
-    deploy["publicVersionUrl"] = f"https://{public_host}/api/v1/version"
+    deploy["publicReadyUrl"] = f"https://{public_host}/health"
+    deploy["publicVersionUrl"] = f"https://{public_host}/version"
     result["deploy.json"] = deploy
     return result
 
@@ -74,7 +74,7 @@ def main() -> None:
         documents = configuration(args.bucket, args.region, args.public_host)
         write_configuration(args.output, documents)
     except (ValueError, OSError) as error:
-        parser.exit(1, f"GreenPMS setup: {error}\n")
+        parser.exit(1, f"Tennis-Green-PMS setup: {error}\n")
     print("Created three CAM policy files and deploy.json. No cloud or server changes made.")
 
 

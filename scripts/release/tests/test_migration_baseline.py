@@ -18,7 +18,7 @@ class MigrationBaselineTests(unittest.TestCase):
             def git(*args):
                 return subprocess.run(["git", *args], cwd=root, env=environment, check=True, capture_output=True)
             git("init", "-q")
-            migrations = root / "packages/db/src/migrations"
+            migrations = root / "packages/db/src/tennis/migrations"
             migrations.mkdir(parents=True)
             (migrations / "002_next.sql").write_bytes(b"SELECT 2;\n")
             (migrations / "001_initial.sql").write_bytes(b"SELECT 1;\n")

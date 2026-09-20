@@ -1,14 +1,14 @@
 {
-  "stateDir": "/var/lib/greenpms-release",
-  "composeFile": "/etc/greenpms/compose.server.yaml",
-  "envFile": "/etc/greenpms/app.env",
-  "cosCredentialsFile": "/etc/greenpms/cos-readonly.json",
-  "localBaseUrl": "http://127.0.0.1:4100",
-  "publicReadyUrl": "https://REPLACE_WITH_PRODUCTION_HOST/health/ready",
-  "publicVersionUrl": "https://REPLACE_WITH_PRODUCTION_HOST/api/v1/version",
+  "stateDir": "/var/lib/tennis-green-pms-release",
+  "composeFile": "/etc/tennis-green-pms/compose.server.yaml",
+  "envFile": "/etc/tennis-green-pms/app.env",
+  "cosCredentialsFile": "/etc/tennis-green-pms/cos-readonly.json",
+  "localBaseUrl": "http://127.0.0.1:4200",
+  "publicReadyUrl": "https://REPLACE_WITH_PRODUCTION_HOST/health",
+  "publicVersionUrl": "https://REPLACE_WITH_PRODUCTION_HOST/version",
   "healthTimeoutSeconds": 150,
   "cos": {
-    "bucket": "REPLACE_WITH_PRIVATE_BUCKET_APPID",
+    "bucket": "REPLACE_WITH_TENNIS_BUCKET_APPID",
     "region": "REPLACE_WITH_COS_REGION"
   }
 }
