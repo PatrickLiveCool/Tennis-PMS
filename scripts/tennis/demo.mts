@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 import { assertLocalTennisDatabaseUrl, localTennisDatabaseUrl } from "../../packages/db/src/tennis/local-config.ts";
@@ -19,6 +19,7 @@ import { confirmQuote, createQuote, listOrders } from "../../packages/db/src/ten
 import { beginOrderPayment } from "../../packages/db/src/tennis/payments.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
 import { occupyCourt } from "../../packages/db/src/tennis/inventory.ts";
+import { demoPassword as password, credentialsPath, syncDemoCredentials } from "./demo-credentials.mts";
 
 if (process.env.NODE_ENV === "production") throw new Error("Synthetic demo is local-only");
 const db = new pg.Pool({
@@ -28,25 +29,7 @@ const db = new pg.Pool({
   ),
   connectionTimeoutMillis: 5000,
 });
-const credentialsPath = ".local-workspace/demo-credentials.json";
 await mkdir(".local-workspace", { recursive: true });
-try {
-  await writeFile(
-    credentialsPath,
-    JSON.stringify(
-      {
-        password: randomBytes(18).toString("base64url"),
-        accounts: ["demo.platform", "demo.green", "demo.staff", "demo.customer", "demo.second"],
-      },
-      null,
-      2,
-    ),
-    { flag: "wx", mode: 0o600 },
-  );
-} catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-}
-const { password } = JSON.parse(await readFile(credentialsPath, "utf8")) as { password: string };
 async function account(username: string) {
   return (
     await db.query<{ subjectId: string; displayName: string }>(
@@ -206,9 +189,10 @@ try {
       customerId: customer.id,
     });
   }
+  await syncDemoCredentials(db);
   await writeFile(".local-workspace/demo-data.json", JSON.stringify(report, null, 2), { mode: 0o600 });
   console.log(
-    "合成演示数据就绪；账号与随机密码保存在 .local-workspace/demo-credentials.json。未使用真实客户、商户或款项。",
+    "合成演示数据就绪；固定账号密码保存在 .local-workspace/demo-credentials.json。未使用真实客户、商户或款项。",
   );
 } finally {
   await db.end();

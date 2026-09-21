@@ -12,6 +12,7 @@ import {
   paymentEventSemanticHash,
   type PaymentProviderPort,
   type VerifiedPaymentEvent,
+  type PaymentSettlementTransactionHook,
 } from "./payment-port.ts";
 import { resolvePaymentMerchant, enqueuePaymentChannel } from "./channel-intents.ts";
 import { idempotentCommand, requestHash } from "./receipts.ts";
@@ -278,7 +279,7 @@ export async function getTopupPayment(db: pg.Pool, actor: BookingActor, id: stri
     return paymentInTransaction(tx, actor.tenantId, id);
   });
 }
-export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEvent): Promise<TopupPayment> {
+export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEvent, hook?: PaymentSettlementTransactionHook): Promise<TopupPayment> {
   if (!isVerifiedPaymentEvent(event)) throw new TennisWalletError("INVALID_PAYMENT_EVENT");
   const location = (
     await db.query<{ tenant_id: string; venue_id: string }>(
@@ -293,6 +294,7 @@ export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEve
   try {
     await tx.query("BEGIN");
     await lockTenantTransactions(tx, tenantId);
+    await hook?.beforeSettlement(tx, tenantId);
     await tx.query("SELECT id FROM tennis.venues WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [
       tenantId,
       location.venue_id,
@@ -316,6 +318,7 @@ export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEve
       // Pre-port receipts only support exact replay; new receipts ignore envelope timestamp changes.
       if (previous.request_hash !== hash && previous.request_hash !== requestHash(event))
         throw new TennisWalletError("PAYMENT_EVENT_REUSED");
+      await hook?.beforeCommit(tx, tenantId);
       await tx.query("COMMIT");
       return payment;
     }
@@ -371,6 +374,7 @@ export async function settleVerifiedTopup(db: pg.Pool, event: VerifiedPaymentEve
     );
     await recordTenantAudit(tx, actor, "topup.event", payment.id, { eventId: event.eventId, outcome });
     const result = await paymentInTransaction(tx, tenantId, payment.id);
+    await hook?.beforeCommit(tx, tenantId);
     await tx.query("COMMIT");
     return result;
   } catch (error) {

@@ -3,12 +3,14 @@ import type pg from "pg";
 import {
   recordTenantAudit,
   requireTenantPermission,
+  requireVenuePermission,
   TenantAccessError,
   withTenantTransaction,
   type TenantActor,
 } from "./access.ts";
 import { lockTenantTransactions } from "./transaction-locks.ts";
 import { assertDelegation } from "./agent-guard.ts";
+import { idempotentCommand } from "./receipts.ts";
 
 export interface CustomerRecord {
   id: string;
@@ -16,6 +18,7 @@ export interface CustomerRecord {
   nickname: string;
   phone: string | null;
   active: boolean;
+  hasContact?: boolean;
 }
 export interface CustomerActor extends TenantActor {
   kind: "customer";
@@ -31,12 +34,42 @@ export class TennisCustomerError extends Error {
     this.name = "TennisCustomerError";
   }
 }
-function normalizedPhone(value?: string | null): string | null {
+export function normalizedPhone(value?: string | null): string | null {
   if (!value?.trim()) return null;
   const compact = value.replace(/[\s()-]/g, "");
   const phone = /^1[3-9]\d{9}$/.test(compact) ? `+86${compact}` : compact;
   if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw new TennisCustomerError("INVALID_CUSTOMER");
   return phone;
+}
+/** Minimal booking identity only. No wallet, channel binding or profile-edit authority. */
+export async function registerBookingCustomer(
+  db: pg.Pool,
+  actor: TenantActor,
+  input: { venueId: string; commandKey: string; nickname: string; phone?: string | null },
+) {
+  if (!input.nickname.trim() || input.nickname.length > 200) throw new TennisCustomerError("INVALID_CUSTOMER");
+  const phone = normalizedPhone(input.phone);
+  return withBookingTransaction(db, actor, async (tx) => {
+    if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+    await requireVenuePermission(tx, actor, input.venueId, "book");
+    return idempotentCommand(tx, actor, input.venueId, input.commandKey, "booking.customer",
+      { nickname: input.nickname.trim(), phone }, async () => {
+        const existing = phone ? (await tx.query<CustomerRecord>(
+          `SELECT id,tenant_id AS "tenantId",nickname,phone,active FROM tennis.customers WHERE tenant_id=$1 AND phone=$2`,
+          [actor.tenantId, phone],
+        )).rows[0] : undefined;
+        // Reuse requires an explicit selection in the UI, never merge by name or overwrite the profile.
+        if (existing) throw new TennisCustomerError("PHONE_ALREADY_EXISTS");
+        const id = randomUUID();
+        await tx.query("INSERT INTO tennis.customers(id,tenant_id,nickname,phone) VALUES($1,$2,$3,$4)",
+          [id, actor.tenantId, input.nickname.trim(), phone]);
+        await recordTenantAudit(tx, actor, "booking.customer", id, { venueId: input.venueId });
+        return { customerId: id, customer: { id, tenantId: actor.tenantId, nickname: input.nickname.trim(), phone: null, hasContact: Boolean(phone), active: true } };
+      });
+  }).catch((error: unknown) => {
+    if ((error as { code?: string }).code === "23505") throw new TennisCustomerError("PHONE_ALREADY_EXISTS");
+    throw error;
+  });
 }
 export async function createCustomer(
   db: pg.Pool,

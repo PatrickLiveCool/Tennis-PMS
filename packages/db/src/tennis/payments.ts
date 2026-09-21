@@ -17,6 +17,7 @@ import {
   type PaymentProviderPort,
   type VerifiedPaymentEvent,
   type VerifiedPaymentSuccessEvent,
+  type PaymentSettlementTransactionHook,
 } from "./payment-port.ts";
 import { resolvePaymentMerchant, enqueuePaymentChannel } from "./channel-intents.ts";
 import { idempotentCommand, requestHash } from "./receipts.ts";
@@ -191,7 +192,7 @@ async function financialException(
   );
 }
 /** Only accepts an event authenticated by a payment gateway, never a request-body cast. */
-export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentEvent): Promise<PaymentRecord> {
+export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentEvent, hook?: PaymentSettlementTransactionHook): Promise<PaymentRecord> {
   if (!isVerifiedPaymentEvent(event)) throw new TennisWalletError("INVALID_PAYMENT_EVENT");
   const located = (
     await db.query<{ tenant_id: string; venue_id: string; order_id: string }>(
@@ -206,6 +207,7 @@ export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentE
   try {
     await tx.query("BEGIN");
     await lockTenantTransactions(tx, tenantId);
+    await hook?.beforeSettlement(tx, tenantId);
     await tx.query("SELECT id FROM tennis.venues WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [
       tenantId,
       located.venue_id,
@@ -235,6 +237,7 @@ export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentE
         oldEvent.payment_id !== payment.id
       )
         throw new TennisWalletError("PAYMENT_EVENT_REUSED");
+      await hook?.beforeCommit(tx, tenantId);
       await tx.query("COMMIT");
       return payment;
     }
@@ -355,6 +358,7 @@ export async function settleVerifiedPayment(db: pg.Pool, event: VerifiedPaymentE
     );
     await recordTenantAudit(tx, actor, "payment.event", payment.id, { eventId: event.eventId, outcome });
     const result = await paymentInTransaction(tx, tenantId, payment.id);
+    await hook?.beforeCommit(tx, tenantId);
     await tx.query("COMMIT");
     return result;
   } catch (error) {

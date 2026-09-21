@@ -14,7 +14,9 @@ npm run tennis:demo
 npm run dev
 ```
 
-浏览器打开 `http://127.0.0.1:4273`。API 只监听 `127.0.0.1:4200`，Web 通过同源代理访问。演示脚本可重复运行，仅用于独立本地开发库；创建两个模拟租户和平台、租户管理员、前台、客户账号。随机密码保存在忽略文件 `.local-workspace/demo-credentials.json`，不写入源码或公开日志。
+浏览器打开 `http://127.0.0.1:4273`。API 只监听 `127.0.0.1:4200`，Web 通过同源代理访问。演示脚本可重复运行，仅用于独立本地开发库；创建两个模拟租户和平台、租户管理员、前台、客户账号。本地演示账号统一固定密码 `TennisPMS123!`，同时记录在忽略文件 `.local-workspace/demo-credentials.json`。日常验收使用前台 `demo.staff`；管理员 `demo.green`，客户 `demo.customer`，第二租户管理员 `demo.second`，平台运营 `demo.platform`。每次交付验收须附地址及当前所需账号密码。
+
+已有本地演示账号可执行 `node --import tsx scripts/tennis/demo-credentials.mts` 同步固定密码；此命令只更新已识别的五个模拟账号密码，不重建场馆、订单、余额或权限。`npm run tennis:demo` 创建/重建演示数据时也沿用这些固定凭据。
 
 验证命令：
 

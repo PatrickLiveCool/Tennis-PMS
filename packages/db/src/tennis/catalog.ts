@@ -57,6 +57,7 @@ export interface CourtRecord {
   name: string;
   active: boolean;
   indoor: boolean;
+  surface: "UNSPECIFIED" | "CLAY";
   hourlyPriceCents: number | null;
   revision: number;
 }
@@ -66,7 +67,7 @@ export interface SavedDiscount extends DiscountRule {
 }
 const venueColumns = `id, tenant_id AS "tenantId", name, address, timezone, active, opening_hours AS "openingHours",
   minimum_booking_minutes AS "minimumBookingMinutes", catalog_revision AS "catalogRevision"`;
-const courtColumns = `id, tenant_id AS "tenantId", venue_id AS "venueId", name, active, indoor,
+const courtColumns = `id, tenant_id AS "tenantId", venue_id AS "venueId", name, active, indoor, surface,
   hourly_price_cents::float8 AS "hourlyPriceCents", revision`;
 
 function requiredName(name: string): void {
@@ -208,18 +209,20 @@ export async function updateVenue(
 export async function createCourt(
   db: pg.Pool,
   actor: TenantActor,
-  input: { venueId: string; name: string; indoor: boolean },
+  input: { venueId: string; name: string; indoor: boolean; surface?: CourtRecord["surface"] },
 ): Promise<CourtRecord> {
   requiredName(input.name);
+  if (input.surface !== undefined && !["UNSPECIFIED", "CLAY"].includes(input.surface)) throw new TennisCatalogError("INVALID_CONFIGURATION", { field: "surface" });
   return withTenantTransaction(db, actor, async (tx) => {
     await requireVenuePermission(tx, actor, input.venueId, "manage_assets", "update");
     const id = randomUUID();
-    await tx.query("INSERT INTO tennis.courts (id, tenant_id, venue_id, name, indoor) VALUES ($1,$2,$3,$4,$5)", [
+    await tx.query("INSERT INTO tennis.courts (id, tenant_id, venue_id, name, indoor, surface) VALUES ($1,$2,$3,$4,$5,$6)", [
       id,
       actor.tenantId,
       input.venueId,
       input.name.trim(),
       input.indoor,
+      input.surface ?? "UNSPECIFIED",
     ]);
     await bumpCatalog(tx, actor, input.venueId);
     await recordTenantAudit(tx, actor, "court.create", id, input);
@@ -246,10 +249,12 @@ export async function updateCourt(
     expectedRevision: number;
     name: string;
     indoor: boolean;
+    surface?: CourtRecord["surface"];
     active: boolean;
   },
 ): Promise<CourtRecord> {
   requiredName(input.name);
+  if (input.surface !== undefined && !["UNSPECIFIED", "CLAY"].includes(input.surface)) throw new TennisCatalogError("INVALID_CONFIGURATION", { field: "surface" });
   return withTenantTransaction(db, actor, async (tx) => {
     await requireVenuePermission(tx, actor, input.venueId, "manage_assets", "update");
     const current = await courtInTransaction(tx, actor, input.venueId, input.id);
@@ -264,8 +269,8 @@ export async function updateCourt(
         throw new TennisCatalogError("AFFECTED_OCCUPANCIES", { occupancyIds: affected.rows.map((row) => row.id) });
     }
     await tx.query(
-      "UPDATE tennis.courts SET name=$1, indoor=$2, active=$3, revision=revision+1 WHERE tenant_id=$4 AND id=$5",
-      [input.name.trim(), input.indoor, input.active, actor.tenantId, input.id],
+      "UPDATE tennis.courts SET name=$1, indoor=$2, active=$3, surface=$6, revision=revision+1 WHERE tenant_id=$4 AND id=$5",
+      [input.name.trim(), input.indoor, input.active, actor.tenantId, input.id, input.surface ?? current.surface],
     );
     await bumpCatalog(tx, actor, input.venueId);
     await recordTenantAudit(tx, actor, "court.update", input.id, { before: current, after: input });

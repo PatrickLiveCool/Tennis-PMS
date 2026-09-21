@@ -5,6 +5,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   LogOut,
+  MessagesSquare,
   Settings,
   Sparkles,
   Users,
@@ -20,7 +21,7 @@ import { OrderPagination, useOrderDirectory } from "./OrderDirectory";
 import { FinancePanel } from "./FinancePanel";
 import { PlatformPage } from "./PlatformPage";
 import { SettingsPage, NewVenue } from "./SettingsPage";
-import { AssistantPanel } from "./AssistantPanel";
+import { AssistantPanel, BusinessConversationPanel } from "./AssistantPanel";
 import { MembersPage } from "./MembersPage";
 import { TopupRecordDialog } from "./TopupHistoryPanel";
 import {
@@ -128,14 +129,14 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
             {busy ? "正在登录…" : "进入工作台"}
           </button>
         </form>
-        <p className="tennis-muted">使用平台分配的账号。演示账号与随机密码见本地启动凭据。</p>
+        <p className="tennis-muted">使用平台分配的账号。本地演示使用固定账号密码，见验收说明。</p>
       </section>
     </main>
   );
 }
 const navigation = [
-  { id: "today", name: "工作台", icon: LayoutDashboard },
   { id: "booking", name: "场地排期", icon: CalendarDays },
+  { id: "today", name: "经营概览", icon: LayoutDashboard },
   { id: "orders", name: "预订订单", icon: ClipboardList },
   { id: "members", name: "客户与余额", icon: Users },
   { id: "settings", name: "场地与定价", icon: Settings },
@@ -157,12 +158,30 @@ function Workspace({
   );
   const [selectedVenue, setSelectedVenue] = useDraft(`tennis:venue:${identityScope}`, "");
   const [page, setPage] = useDraft(`tennis:page:${identityScope}`, "booking");
+  const [scheduleEntryMigrated, setScheduleEntryMigrated] = useDraft(`tennis:schedule-entry-v1:${identityScope}`, false);
+  useLayoutEffect(() => {
+    if (!scheduleEntryMigrated) {
+      if (page === "today") setPage("booking");
+      setScheduleEntryMigrated(true);
+    }
+  }, [scheduleEntryMigrated]);
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantOrderId, setAssistantOrderId] = useState<string | null>(null);
+  const [businessConversationsOpen, setBusinessConversationsOpen] = useState(false);
   const [creatingVenue, setCreatingVenue] = useState(false);
   const venue = venues.data?.find((v) => v.id === selectedVenue) ?? venues.data?.[0];
+  const assistantScope = `${identityScope}:${session.contextVersion}:${venue?.id}`;
+  useEffect(() => {
+    setAssistantOrderId(null); setAssistantOpen(false);
+    const show = (event: Event) => { if ((event as CustomEvent).detail.scope === assistantScope) setAssistantOpen(true); };
+    const focus = (event: Event) => { const data = (event as CustomEvent).detail; if (data.scope === assistantScope) setAssistantOrderId(data.orderId); };
+    window.addEventListener("tennis-assistant-open", show);
+    window.addEventListener("tennis-assistant-order-context", focus);
+    return () => { window.removeEventListener("tennis-assistant-open", show); window.removeEventListener("tennis-assistant-order-context", focus); };
+  }, [assistantScope]);
   async function context(value: string) {
     const [kind, tenantId] = value.split(":");
     setBusy(true);
@@ -240,9 +259,16 @@ function Workspace({
           </div>
         )}
         <div className="sidebar-utilities">
+          {session.kind === "staff" && permits(session, "book") && (
+            <button className="nav-link" onClick={() => setBusinessConversationsOpen(true)}>
+              <MessagesSquare size={19} />
+              <span>业务会话</span>
+            </button>
+          )}
           <button
-            disabled={session.kind !== "customer" && !permits(session, "book")}
+            disabled={session.kind !== "customer" && !permits(session, "read")}
             className="nav-link tennis-assistant-trigger"
+            aria-controls="ai-assistant-panel" aria-expanded={assistantOpen}
             onClick={() => setAssistantOpen(!assistantOpen)}
           >
             <Sparkles size={19} />
@@ -318,11 +344,17 @@ function Workspace({
               ↻
             </button>
             {session.localSimulation && <span className="tennis-demo-badge">本地模拟</span>}
+            {session.kind === "staff" && permits(session, "book") && (
+              <button className="icon-button" aria-label="打开智能体业务会话" title="智能体业务会话" onClick={() => setBusinessConversationsOpen(true)}>
+                <MessagesSquare size={19} />
+              </button>
+            )}
             <button
-              disabled={session.kind !== "customer" && !permits(session, "book")}
+              disabled={session.kind !== "customer" && !permits(session, "read")}
               className="icon-button"
               aria-label="打开 AI 助手"
-              onClick={() => setAssistantOpen(!assistantOpen)}
+              aria-controls="ai-assistant-panel" aria-expanded={assistantOpen}
+            onClick={() => setAssistantOpen(!assistantOpen)}
             >
               <Sparkles size={19} />
             </button>
@@ -364,20 +396,34 @@ function Workspace({
               onVenueChange={() => void venues.refresh()}
             />
           )}
-          {assistantOpen &&
+          {(assistantOpen || session.kind === "staff") &&
             venue &&
             session.contextValid !== false &&
-            (session.kind === "customer" || permits(session, "book")) && (
+            (session.kind === "customer" || permits(session, "read")) && (
               <AssistantPanel
                 key={`${identityScope}:${session.contextVersion}:${venue.id}`}
                 api={api}
                 session={session}
                 venue={venue}
                 scope={`${identityScope}:${session.contextVersion}:${venue.id}`}
-                context={{ page: currentPage }}
+                open={assistantOpen}
+                context={assistantOrderId ? { page: "orders", orderId: assistantOrderId } : { page: currentPage }}
+                onPrepare={(entry) => window.dispatchEvent(new CustomEvent("tennis-assistant-prepare-order", { detail: { scope: assistantScope, entry } }))}
+                onNavigate={(destination) => setPage(destination)}
                 onClose={() => setAssistantOpen(false)}
               />
             )}
+          {businessConversationsOpen && venue && session.contextValid !== false && permits(session, "book") && (
+            <BusinessConversationPanel
+              key={`${identityScope}:${session.contextVersion}:${venue.id}:business`}
+              api={api}
+              session={session}
+              venue={venue}
+              scope={`${identityScope}:${session.contextVersion}:${venue.id}`}
+              context={{ page: currentPage }}
+              onClose={() => setBusinessConversationsOpen(false)}
+            />
+          )}
           {creatingVenue && (
             <NewVenue
               api={api}
@@ -472,6 +518,11 @@ function BusinessWorkspace({
     };
   }, [scope, page]);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [assistantPreparation, setAssistantPreparation] = useState<import("../../../../packages/db/src/tennis/backoffice-assistant").BackofficeAction | undefined>();
+  useEffect(() => {
+    const show = (event: Event) => { const data = (event as CustomEvent).detail; if (data.scope === scope) { setAssistantPreparation(data.preparation); setOrderId(data.orderId); } };
+    window.addEventListener("tennis-open-order", show); return () => window.removeEventListener("tennis-open-order", show);
+  }, [scope]);
   const [topupId, setTopupId] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   return (
@@ -522,7 +573,8 @@ function BusinessWorkspace({
           venue={venue}
           scope={scope}
           orderId={orderId}
-          onClose={() => setOrderId(null)}
+          initialPreparation={assistantPreparation}
+          onClose={() => { setOrderId(null); setAssistantPreparation(undefined); }}
           onChanged={() => setRevision((value) => value + 1)}
         />
       )}
@@ -584,7 +636,7 @@ function TodayPage({
         )}
         <OrderPagination directory={orders} />
       </Panel>
-      <FinancePanel api={api} session={session} venue={venue} openOrder={openOrder} />
+      <FinancePanel api={api} session={session} venue={venue} openOrder={openOrder} onChanged={orders.refresh} />
     </>
   );
 }

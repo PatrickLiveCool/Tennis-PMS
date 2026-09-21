@@ -92,6 +92,19 @@ afterAll(async () => {
 });
 
 describe("tenant catalog and pricing", () => {
+  it("persists clay independently of indoor status and preserves it for older update clients", async () => {
+    const original = await setupCourt();
+    expect(original.surface).toBe("UNSPECIFIED");
+    const clay = await updateCourt(db, first.actor, { ...original, expectedRevision: original.revision, indoor: true, surface: "CLAY" });
+    expect(clay).toMatchObject({ indoor: true, surface: "CLAY", hourlyPriceCents: 10000 });
+    const { surface: _surface, ...legacy } = clay;
+    const renamed = await updateCourt(db, first.actor, { ...legacy, name: "室内红土", expectedRevision: clay.revision });
+    expect(renamed.surface).toBe("CLAY");
+    expect((await findAvailableCourts(db, first.actor, first.venueId, interval())).courts[0]?.court.surface).toBe("CLAY");
+    expect((await priceSelection(db, first.actor, first.venueId, [{ courtId: clay.id, ...interval() }])).totalCents).toBe(10000);
+    await expect(updateCourt(db, second.actor, { ...renamed, expectedRevision: renamed.revision, surface: "UNSPECIFIED" })).rejects.toBeTruthy();
+    await expect(updateCourt(db, first.actor, { ...renamed, expectedRevision: renamed.revision, surface: "unsafe" as never })).rejects.toMatchObject({ code: "INVALID_CONFIGURATION" });
+  });
   it("starts new assets unconfigured instead of inventing sale hours or prices", async () => {
     const venue = await createVenue(db, first.actor, {
       name: "新校区",

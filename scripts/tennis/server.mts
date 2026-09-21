@@ -2,6 +2,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import pg from "pg";
+import { applyLocalAIDefaults } from "./local-ai-defaults.mts";
+import { createTennisModelTransport } from "../../apps/api/src/tennis/model-transport.ts";
+import { resolveLocalModelEndpoint } from "./local-model-endpoint.mts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { assertLocalTennisDatabaseUrl, localTennisDatabaseUrl } from "../../packages/db/src/tennis/local-config.ts";
 import { migrateTennis } from "../../packages/db/src/tennis/migrate.ts";
@@ -36,11 +39,13 @@ try {
 } finally {
   client.release();
 }
+await applyLocalAIDefaults(db, key);
 const app = await buildTennisServer({
   db,
   gateway: new LocalMockPaymentGateway(secrets.paymentSigning, "local-simulation"),
   allowSimulation: true,
   aiEncryptionKey: key,
+  modelTransport: createTennisModelTransport(resolveLocalModelEndpoint),
   runExpiryWorker: true,
   logger: true,
 });

@@ -1,3 +1,4 @@
+import type { BackofficeAction } from "../../../../packages/db/src/tennis/backoffice-assistant";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, CreditCard, ReceiptText, Search, Sparkles } from "lucide-react";
 import type { RefundGroupRecord } from "../../../../packages/db/src/tennis/refunds";
@@ -12,7 +13,6 @@ import type {
   VenueRecord,
   Wallet,
 } from "./types";
-import { AssistantPanel } from "./AssistantPanel";
 import { PaymentChannelPanel } from "./PaymentChannelPanel";
 import { OrderPagination, useOrderDirectory } from "./OrderDirectory";
 import { AmendmentPanel } from "./AmendmentPanel";
@@ -22,10 +22,13 @@ import {
   cents,
   clock,
   dateTime,
+  dateValue,
   EmptyState,
   ErrorNotice,
   LoadingBlock,
   Modal,
+  readStored,
+  writeStored,
   money,
   PageHeading,
   Panel,
@@ -150,6 +153,7 @@ export function OrderDialog({
   venue,
   scope,
   orderId,
+  initialPreparation,
   onClose,
   onChanged,
 }: {
@@ -158,6 +162,7 @@ export function OrderDialog({
   venue: VenueRecord;
   scope: string;
   orderId: string;
+  initialPreparation?: BackofficeAction | undefined;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -166,8 +171,50 @@ export function OrderDialog({
   const [action, setAction] = useState<"pay" | "cancel" | "refund" | "free" | null>(null);
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
-  const [assistantOpen, setAssistantOpen] = useState(false);
   const command = useCommand(scope);
+  const [pendingPreparation, setPendingPreparation] = useState(initialPreparation ?? null);
+  const [formPreparationVersion, setFormPreparationVersion] = useState(0);
+  const [amendPrepared, setAmendPrepared] = useState(0);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("tennis-assistant-order-context", { detail: { scope, orderId } }));
+    const prepare = (event: Event) => { const data = (event as CustomEvent).detail; if (data.scope === scope && data.entry.orderId === orderId) { setPendingPreparation(data.entry); void detail.refresh(); } };
+    window.addEventListener("tennis-assistant-prepare-order", prepare);
+    return () => { window.removeEventListener("tennis-assistant-prepare-order", prepare); window.dispatchEvent(new CustomEvent("tennis-assistant-order-context", { detail: { scope, orderId: null } })); };
+  }, [scope, orderId]);
+  useEffect(() => {
+    const order = detail.data, prep = pendingPreparation?.preparation;
+    if (!order || detail.busy || detail.error || !prep || pendingPreparation?.orderId !== order.id || command.busy) return;
+    setPendingPreparation(null);
+    if (!permits(session, prep.kind === "refund" ? "refund" : "book")) return;
+    const unpaid = order.status === "HELD" && order.paymentStatus === "UNPAID";
+    const unsettled = !order.payments || order.payments.some((payment) => ["PENDING", "REFUND_REQUIRED"].includes(payment.status));
+    if (((prep.kind === "pay" || prep.kind === "cancel") && (!unpaid || unsettled)) ||
+      (prep.kind === "amend" && (!(unpaid || order.status === "CONFIRMED") || unsettled)) ||
+      (prep.kind === "refund" && !["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(order.paymentStatus))) {
+      setNotice("订单状态已变化，请核对当前详情后重新询问助手。");
+      return;
+    }
+    if (prep.kind === "amend") {
+      const key = `tennis:amend:${scope}:${order.id}`;
+      const rows = order.lines.filter((l) => !l.cancelledAt).map((l) => ({ lineId: l.id, selected: false, courtId: l.courtId,
+        date: dateValue(new Date(l.startAt), venue.timezone), time: clock(l.startAt, venue.timezone), duration: (Date.parse(l.endAt) - Date.parse(l.startAt)) / 60000 }));
+      const prior = readStored(key, { baseRevision: order.revision, reason: "", rows, preview: null, refunds: {} });
+      const target = prep.lines?.[0];
+      writeStored(key, { ...prior, baseRevision: order.revision, reason: prep.reason ?? prior.reason, preview: null, refunds: {},
+        rows: (prior.baseRevision === order.revision ? prior.rows : rows).map((r) => r.lineId === prep.lineId && target ? { ...r, selected: true, courtId: target.courtId, date: dateValue(new Date(target.startAt), venue.timezone), time: clock(target.startAt, venue.timezone), duration: (Date.parse(target.endAt) - Date.parse(target.startAt)) / 60000 } : r) });
+      setAction(null); setAmendPrepared((n) => n + 1);
+    } else if (prep.kind === "refund") {
+      const key = `tennis:refund:${scope}:${order.id}`;
+      const prior = readStored(key, { reason: "", lines: order.lines.map((l) => ({ lineId: l.id, selected: false, amount: "0.00", cancel: order.paymentStatus === "REFUNDED" })) });
+      writeStored(key, { ...prior, reason: prep.reason ?? prior.reason });
+      setFormPreparationVersion((n) => n + 1);
+      setAction("refund");
+    } else if (prep.kind === "cancel" || prep.kind === "pay") {
+      if (prep.reason) setReason(prep.reason);
+      setAction(prep.kind);
+    }
+    setNotice("助手已准备办理内容，请核对后确认；尚未提交业务操作。");
+  }, [pendingPreparation, detail.data, detail.busy, detail.error, command.busy]);
   async function changed() {
     setAction(null);
     await detail.refresh();
@@ -219,7 +266,7 @@ export function OrderDialog({
   const canBook = session.kind === "customer" || permits(session, "book");
   return (
     <>
-      <Modal title={`预订详情 · ${orderId.slice(0, 8)}`} size="wide" onClose={onClose} closeDisabled={command.busy}>
+      <Modal title={`预订详情 · ${orderId.slice(0, 8)}`} size="drawer" className="tennis-order-drawer" onClose={onClose} closeDisabled={command.busy}>
         <ErrorNotice error={detail.error ?? command.error} retry={() => void detail.refresh()} />
         {notice && (
           <div className="tennis-success" role="status">
@@ -235,6 +282,7 @@ export function OrderDialog({
                 <p className="eyebrow">{venue.name}</p>
                 <h2>{order.customerName ?? "场地预订"}</h2>
                 <p className="tennis-muted">创建于 {dateTime(order.createdAt, venue.timezone)}</p>
+                {order.origin && <p className="tennis-muted">来源：{order.origin.label} · {order.origin.creatorName}{order.origin.conversationId && ` · 业务会话 ${order.origin.conversationId}`}</p>}
               </div>
               <div className="tennis-badges">
                 <Badge value={order.status} />
@@ -288,7 +336,7 @@ export function OrderDialog({
             </div>
             <div className="tennis-actions">
               {canBook && (
-                <button type="button" className="button button-secondary" onClick={() => setAssistantOpen(true)}>
+                <button type="button" className="button button-secondary" aria-controls="ai-assistant-panel" onClick={() => window.dispatchEvent(new CustomEvent("tennis-assistant-open", { detail: { scope } }))}>
                   <Sparkles size={16} />
                   询问此订单
                 </button>
@@ -362,6 +410,7 @@ export function OrderDialog({
             )}
             {action === "refund" && (
               <RefundForm
+                key={`assistant-refund:${formPreparationVersion}`}
                 api={api}
                 scope={scope}
                 venue={venue}
@@ -391,6 +440,8 @@ export function OrderDialog({
               />
             )}
             <AmendmentPanel
+              key={`assistant-amend:${amendPrepared}`}
+              initiallyEditing={amendPrepared > 0}
               api={api}
               session={session}
               venue={venue}
@@ -524,17 +575,7 @@ export function OrderDialog({
           </div>
         )}
       </Modal>
-      {assistantOpen && canBook && (
-        <AssistantPanel
-          key={`${scope}:${session.contextVersion}:order:${orderId}`}
-          api={api}
-          session={session}
-          venue={venue}
-          scope={scope}
-          context={{ page: "orders", orderId }}
-          onClose={() => setAssistantOpen(false)}
-        />
-      )}
+
     </>
   );
 }

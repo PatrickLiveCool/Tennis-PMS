@@ -62,6 +62,22 @@ async function quote(indices = [0], start = "19:00", end = "20:00") {
 async function confirm(indices = [0], start = "19:00", end = "20:00") {
   return confirmQuote(db, first.actor, { quoteId: (await quote(indices, start, end)).id, commandKey: key() });
 }
+async function expectDatabaseDeadline<T>(
+  work: () => Promise<T>,
+  deadline: (value: T) => string | null,
+  durationMs: number,
+): Promise<T> {
+  // The deadline clock is sampled before later INSERT defaults calculate created_at.
+  // Bound that actual sample by the database clock, rather than assuming zero SQL latency.
+  const time = async () => (await db.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]!.now.getTime();
+  const before = await time();
+  const value = await work();
+  const after = await time();
+  const sampledAt = Date.parse(deadline(value) ?? "") - durationMs;
+  expect(sampledAt).toBeGreaterThanOrEqual(before);
+  expect(sampledAt).toBeLessThanOrEqual(after);
+  return value;
+}
 beforeAll(async () => {
   const tx = await db.connect();
   try {
@@ -114,9 +130,12 @@ afterAll(async () => {
 
 describe("quotes and atomic multi-line orders", () => {
   it("holds three simultaneous courts together with exact saved totals and independent payment status", async () => {
-    const preview = await quote([0, 1, 2]);
-    expect(Date.parse(preview.expiresAt) - Date.parse(preview.createdAt)).toBeCloseTo(300000, -1);
-    const order = await confirmQuote(db, first.actor, { quoteId: preview.id, commandKey: key() });
+    const preview = await expectDatabaseDeadline(() => quote([0, 1, 2]), (value) => value.expiresAt, 300000);
+    const order = await expectDatabaseDeadline(
+      () => confirmQuote(db, first.actor, { quoteId: preview.id, commandKey: key() }),
+      (value) => value.holdUntil,
+      600000,
+    );
     expect(order).toMatchObject({
       status: "HELD",
       paymentStatus: "UNPAID",
@@ -125,7 +144,6 @@ describe("quotes and atomic multi-line orders", () => {
       holdKind: "PAYMENT",
     });
     expect(order.lines.map((line) => line.amountCents)).toEqual([10000, 10000, 10000]);
-    expect(Date.parse(order.holdUntil!) - Date.parse(order.createdAt)).toBeCloseTo(600000, -1);
     expect(
       (
         await db.query(
@@ -467,30 +485,33 @@ describe("configured quote and hold deadlines", () => {
   it("snapshots each quote's hold promise and never extends an existing order on configuration changes or replay", async () => {
     const legacy = await quote([0]);
     await saveBookingPolicy(db, first.actor, { quoteMinutes: 3, paymentHoldMinutes: 7, expectedRevision: 1 });
-    const next = await quote([1]);
-    expect(Date.parse(next.expiresAt) - Date.parse(next.createdAt)).toBeCloseTo(180000, -1);
+    const next = await expectDatabaseDeadline(() => quote([1]), (value) => value.expiresAt, 180000);
     expect(next.paymentHoldMinutes).toBe(7);
     await saveBookingPolicy(db, first.actor, { quoteMinutes: 8, paymentHoldMinutes: 12, expectedRevision: 2 });
     const key1 = key();
-    const oldOrder = await confirmQuote(db, first.actor, { quoteId: legacy.id, commandKey: key() });
-    const nextOrder = await confirmQuote(db, first.actor, { quoteId: next.id, commandKey: key1 });
-    expect(Date.parse(oldOrder.holdUntil!) - Date.parse(oldOrder.createdAt)).toBeCloseTo(600000, -1);
-    expect(Date.parse(nextOrder.holdUntil!) - Date.parse(nextOrder.createdAt)).toBeCloseTo(420000, -1);
+    const oldOrder = await expectDatabaseDeadline(
+      () => confirmQuote(db, first.actor, { quoteId: legacy.id, commandKey: key() }),
+      (value) => value.holdUntil,
+      600000,
+    );
+    const nextOrder = await expectDatabaseDeadline(
+      () => confirmQuote(db, first.actor, { quoteId: next.id, commandKey: key1 }),
+      (value) => value.holdUntil,
+      420000,
+    );
     const saved = (await db.query("SELECT expires_at FROM tennis.quotes WHERE id=$1", [next.id])).rows[0]!;
     expect(saved.expires_at.toISOString()).toBe(next.expiresAt);
     expect((await confirmQuote(db, first.actor, { quoteId: next.id, commandKey: key1 })).holdUntil).toBe(nextOrder.holdUntil);
     expect((await getOrder(db, first.actor, oldOrder.id)).holdUntil).toBe(oldOrder.holdUntil);
-    const latest = await quote([2]);
+    const latest = await expectDatabaseDeadline(() => quote([2]), (value) => value.expiresAt, 480000);
     expect(latest.paymentHoldMinutes).toBe(12);
-    expect(Date.parse(latest.expiresAt) - Date.parse(latest.createdAt)).toBeCloseTo(480000, -1);
   });
   it("preserves an explicit authorized staff hold and expires configured ordinary holds normally", async () => {
     await saveBookingPolicy(db, first.actor, { quoteMinutes: 2, paymentHoldMinutes: 3, expectedRevision: 1 });
-    const until = new Date(Date.now() + 60 * 60_000).toISOString();
+    const until = (await db.query<{ until: Date }>("SELECT clock_timestamp()+interval '1 hour' AS until")).rows[0]!.until.toISOString();
     const reserved = await confirmQuote(db, first.actor, { quoteId: (await quote([0])).id, commandKey: key(), staffHold: { until, reason: "授权保留测试" } });
     expect(reserved.holdUntil).toBe(until);
-    const ordinary = await confirm([1]);
-    expect(Date.parse(ordinary.holdUntil!) - Date.parse(ordinary.createdAt)).toBeCloseTo(180000, -1);
+    const ordinary = await expectDatabaseDeadline(() => confirm([1]), (value) => value.holdUntil, 180000);
     await db.query("UPDATE tennis.orders SET hold_until=clock_timestamp()-interval '1 second' WHERE id=$1", [ordinary.id]);
     await expireDueOrders(db);
     expect((await getOrder(db, first.actor, ordinary.id)).status).toBe("EXPIRED");

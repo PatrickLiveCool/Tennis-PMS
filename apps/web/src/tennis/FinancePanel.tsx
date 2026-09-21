@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TennisApi } from "./api";
+import { WecomReconciliationPanel } from "./WecomReconciliationPanel";
 import { CashExceptionDialog } from "./CashExceptionDialog";
 import {
   Badge,
@@ -41,6 +42,7 @@ interface FinanceProps {
   venue: VenueRecord;
   session: Session;
   openOrder: (id: string) => void;
+  onChanged?: () => Promise<unknown>;
 }
 const entryNames: Record<string, string> = {
   OFFLINE_TOPUP: "线下充值实收",
@@ -73,7 +75,7 @@ export function FinancePanel(props: FinanceProps) {
     />
   );
 }
-function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
+function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProps) {
   const [date, setDate] = useState(() => dateValue(new Date(), venue.timezone));
   const [exceptionId, setExceptionId] = useState<string | null>(null);
   const scope = `${session.subjectId}:${session.kind}:${session.tenantId}:${session.customerId ?? "staff"}:${venue.id}`;
@@ -82,8 +84,12 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
     [api, venue.id, date],
   );
   const data = finance.data;
+  async function refreshBusiness() {
+    await Promise.all([finance.refresh(), onChanged?.()]);
+  }
   return (
     <>
+      <WecomReconciliationPanel api={api} session={session} venue={venue} onChanged={refreshBusiness} openOrder={openOrder} />
       <Panel
         title="资金核对"
         action={
@@ -127,7 +133,7 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
           <>
             <div className="tennis-stats">
               <div>
-                <span>现金收款（含充值）</span>
+                <span>已归账现金收款（含充值）</span>
                 <strong>{money(data.totals.cashInCents)}</strong>
               </div>
               <div>
@@ -148,7 +154,7 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
               </div>
             </div>
             <p className="tennis-note">
-              现金收款包含订单实收、充值及待核对的额外到账；余额消费单独统计，不再计入现金收入。充值赠送不属于现金收款。退款完成后才计入退款汇总。
+              已归账现金收款包含订单实收、充值及已关联业务的额外到账；上方尚未确认归属的企微收款在流水列表单列，归属确认后才进入本台账。余额消费单独统计，不再计入现金收入。充值赠送不属于现金收款。退款完成后才计入退款汇总。
             </p>
             {data.entries.length === 0 ? (
               <EmptyState title="当日暂无资金流水" detail="收款、储值消费和已完成退款会按发生时间列在这里。" />
@@ -323,9 +329,7 @@ function VenueFinance({ api, venue, session, openOrder }: FinanceProps) {
           scope={scope}
           exceptionId={exceptionId}
           onClose={() => setExceptionId(null)}
-          onChanged={async () => {
-            await finance.refresh();
-          }}
+          onChanged={refreshBusiness}
           openOrder={(id) => {
             setExceptionId(null);
             openOrder(id);

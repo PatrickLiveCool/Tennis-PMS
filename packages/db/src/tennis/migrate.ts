@@ -29,6 +29,9 @@ export async function migrateTennis(client: pg.PoolClient): Promise<void> {
       "021_operator_context.sql",
       "022_topup_directory.sql",
       "023_booking_policy.sql",
+      "024_backoffice_assistant.sql",
+      "025_wecom_reconciliation.sql",
+      "026_court_surface.sql",
     ].map(async (name) => {
       const sql = await readFile(new URL(`./migrations/${name}`, import.meta.url), "utf8");
       return {

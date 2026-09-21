@@ -193,7 +193,7 @@ export function useLoad<T>(load: () => Promise<T>, dependencies: readonly unknow
       : undefined;
   return { data, error, busy, refresh };
 }
-function readStored<T>(key: string, fallback: T): T {
+export function readStored<T>(key: string, fallback: T): T {
   try {
     return (JSON.parse(sessionStorage.getItem(key) ?? "null") as T) ?? fallback;
   } catch {
@@ -324,6 +324,12 @@ export function RecoveryNotice({
       if (!receipt) {
         setMessage("尚未查到已完成回执。请保留原输入，在原入口重试；系统会复用同一个操作编号。");
         return;
+      }
+      if (receipt.commandType === "booking.customer" && receipt.result.customer) {
+        const key = `tennis:booking:${scope}`;
+        const draft = readStored<Record<string, unknown>>(key, {});
+        writeStored(key, { ...draft, customer: receipt.result.customer, quote: null });
+        window.dispatchEvent(new CustomEvent("tennis-booking-customer-recovered", { detail: { scope, customer: receipt.result.customer } }));
       }
       if (typeof receipt.result.topupId === "string" && openTopup) {
         const payment = await api<{ id: string }>(`/topups/${encodeURIComponent(receipt.result.topupId)}`);

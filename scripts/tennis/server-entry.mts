@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
+import { tennisModelTransport } from "../../apps/api/src/tennis/model-transport.ts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
 
@@ -48,6 +49,7 @@ const app = await buildTennisServer({
   allowSimulation: process.env.TENNIS_ALLOW_SIMULATION === "true",
   ...(origins?.length ? { origins } : {}),
   ...(encryptionKey ? { aiEncryptionKey: encryptionKey } : {}),
+  modelTransport: tennisModelTransport,
   runExpiryWorker: true,
   logger: true,
 });

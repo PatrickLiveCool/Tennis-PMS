@@ -56,7 +56,7 @@ export async function accessibleCourts(db: pg.Pool, actor: BookingActor, venueId
     await requireBookingVenue(tx, actor, venueId, "read");
     return (
       await tx.query<CourtRecord>(
-        `SELECT id,tenant_id AS "tenantId",venue_id AS "venueId",name,active,indoor,
+        `SELECT id,tenant_id AS "tenantId",venue_id AS "venueId",name,active,indoor,surface,
       hourly_price_cents::float8 AS "hourlyPriceCents",revision FROM tennis.courts
       WHERE tenant_id=$1 AND venue_id=$2 AND ($3 OR active) ORDER BY name,id`,
         [actor.tenantId, venueId, !isCustomerActor(actor)],
@@ -72,7 +72,7 @@ export async function venueSchedule(db: pg.Pool, actor: BookingActor, venueId: s
     const range = venueDayRange(date, venue.timezone);
     const courts = (
       await tx.query<CourtRecord>(
-        `SELECT id,tenant_id AS "tenantId",venue_id AS "venueId",name,active,indoor,hourly_price_cents::float8 AS "hourlyPriceCents",revision
+        `SELECT id,tenant_id AS "tenantId",venue_id AS "venueId",name,active,indoor,surface,hourly_price_cents::float8 AS "hourlyPriceCents",revision
       FROM tennis.courts WHERE tenant_id=$1 AND venue_id=$2 AND ($3 OR active) ORDER BY name,id`,
         [actor.tenantId, venueId, !isCustomerActor(actor)],
       )
@@ -150,6 +150,13 @@ export async function orderDetail(db: pg.Pool, actor: BookingActor, id: string) 
       ])
     ).rows[0];
     const remaining = await refundableLines(tx, actor.tenantId, id);
+    const origin = (await tx.query<{ creatorName: string; conversationId: string | null }>(
+      `SELECT s.display_name AS "creatorName",l.conversation_id AS "conversationId"
+       FROM tennis.subjects s LEFT JOIN tennis.command_receipts r ON r.tenant_id=$1 AND r.subject_id=s.id
+         AND r.command_type='quote.confirm' AND r.result->>'orderId'=$2
+       LEFT JOIN tennis.agent_command_links l ON l.tenant_id=r.tenant_id AND l.subject_id=r.subject_id AND l.command_key=r.command_key
+       WHERE s.id=$3 ORDER BY l.linked_at NULLS LAST LIMIT 1`, [actor.tenantId, id, order.createdBy],
+    )).rows[0];
     return {
       ...order,
       lines: order.lines.map((line) => ({
@@ -160,6 +167,7 @@ export async function orderDetail(db: pg.Pool, actor: BookingActor, id: string) 
             : (remaining.get(line.id) ?? 0),
       })),
       customerName: customer?.nickname ?? "",
+      origin: { label: origin?.conversationId ? "外部智能体预订" : "直接预订", creatorName: origin?.creatorName ?? "", conversationId: isCustomerActor(actor) ? null : origin?.conversationId ?? null },
       payments,
       refunds,
     };
@@ -308,8 +316,8 @@ export async function bookingCustomers(db: pg.Pool, actor: BookingActor, venueId
     await requireBookingVenue(tx, actor, venueId, "book");
     const q = search.trim();
     return (
-      await tx.query<{ id: string; tenantId: string; nickname: string; phone: null; active: boolean }>(
-        `SELECT id,tenant_id AS "tenantId",nickname,NULL::text AS phone,active FROM tennis.customers WHERE tenant_id=$1 AND active AND ($2::text IS NULL OR id=$2) AND ($3='' OR strpos(lower(nickname),lower($3))>0 OR strpos(coalesce(phone,''),$3)>0) ORDER BY nickname,id LIMIT 100`,
+      await tx.query<{ id: string; tenantId: string; nickname: string; phone: null; hasContact: boolean; active: boolean }>(
+        `SELECT id,tenant_id AS "tenantId",nickname,NULL::text AS phone,(phone IS NOT NULL) AS "hasContact",active FROM tennis.customers WHERE tenant_id=$1 AND active AND ($2::text IS NULL OR id=$2) AND ($3='' OR strpos(lower(nickname),lower($3))>0 OR strpos(coalesce(phone,''),$3)>0) ORDER BY nickname,id LIMIT 100`,
         [actor.tenantId, isCustomerActor(actor) ? actor.customerId : null, q],
       )
     ).rows;

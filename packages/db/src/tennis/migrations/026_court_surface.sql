@@ -1,0 +1,1 @@
+ALTER TABLE tennis.courts ADD COLUMN surface text NOT NULL DEFAULT 'UNSPECIFIED' CHECK (surface IN ('UNSPECIFIED', 'CLAY'));

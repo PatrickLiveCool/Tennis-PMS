@@ -18,6 +18,7 @@ const db = new pg.Pool({
 });
 let first: TenantFixture, second: TenantFixture;
 let customer: CustomerActor;
+let activeHistoryWork: { controller: AbortController; done: Promise<void> } | null = null;
 const credit = (customerId = customer.customerId, fixture = first) =>
   recordOfflineTopup(db, fixture.actor, {
     venueId: fixture.venueId,
@@ -37,6 +38,7 @@ beforeAll(async () => {
   }
 });
 beforeEach(async () => {
+  activeHistoryWork = null;
   first = await seedTenantFixture(db);
   second = await seedTenantFixture(db);
   const profile = await createCustomer(db, first.actor, { nickname: "历史流水测试客户" });
@@ -48,44 +50,64 @@ beforeEach(async () => {
   customer = { ...first.actor, kind: "customer", customerId: profile.id };
 });
 afterEach(async () => {
+  // Vitest deadlines do not cancel an async test body. Settle the current DB call and stop
+  // its remaining loop before removing this fixture or starting the next test's fixture.
+  if (activeHistoryWork) {
+    activeHistoryWork.controller.abort();
+    await activeHistoryWork.done.catch(() => {});
+    activeHistoryWork = null;
+  }
   for (const fixture of [first, second].filter(Boolean)) await removeTenantFixture(db, fixture);
 });
 afterAll(() => db.end());
 
 describe("complete, scoped wallet history", () => {
   it("reaches every entry beyond 200 without duplicates or skips at microsecond ties and concurrent new credits", async () => {
-    for (let index = 0; index < 205; index++) await credit();
-    // PostgreSQL timestamps retain more precision than JS Date. Keep both ties and sub-ms differences.
-    await db.query(
-      `WITH ranked AS (
-      SELECT id,row_number() OVER (ORDER BY id) AS rn FROM tennis.wallet_entries WHERE tenant_id=$1
-    ) UPDATE tennis.wallet_entries e SET created_at='2020-01-01T00:00:00Z'::timestamptz + (ranked.rn % 3) * interval '1 microsecond'
-      FROM ranked WHERE e.tenant_id=$1 AND e.id=ranked.id`,
-      [first.actor.tenantId],
-    );
-    const expected = (
-      await db.query<{ id: string }>(
-        "SELECT id FROM tennis.wallet_entries WHERE tenant_id=$1 AND customer_id=$2 ORDER BY created_at DESC,id DESC",
-        [first.actor.tenantId, customer.customerId],
-      )
-    ).rows.map((entry) => entry.id);
-    let page = await getWallet(db, customer, customer.customerId);
-    expect(page.entries).toHaveLength(50);
-    const seen = page.entries.map((entry) => entry.id);
-    await credit(); // A new head entry must not shift or repeat the continuation.
-    while (page.nextCursor) {
-      page = await getWallet(db, customer, customer.customerId, { cursor: page.nextCursor });
-      seen.push(...page.entries.map((entry) => entry.id));
-    }
-    expect(seen).toEqual(expected);
-    expect(new Set(seen).size).toBe(205);
-    expect(page.entries).toHaveLength(5);
-    expect(page.balance.totalCents).toBe(206 * 120);
-    expect((await getWallet(db, first.actor, customer.customerId, { pageSize: 200 })).entries).toHaveLength(200);
-    const refreshed = await getWallet(db, customer, customer.customerId, { pageSize: 1 });
-    expect(expected).not.toContain(refreshed.entries[0]!.id);
-    expect(refreshed.balance).toEqual(page.balance);
-  });
+    const fixture = first, owner = { ...customer }, controller = new AbortController();
+    const run = async <T>(operation: () => Promise<T>): Promise<T> => {
+      controller.signal.throwIfAborted();
+      const result = await operation();
+      controller.signal.throwIfAborted();
+      return result;
+    };
+    const work = async () => {
+      for (let index = 0; index < 205; index++) await run(() => credit(owner.customerId, fixture));
+      // PostgreSQL timestamps retain more precision than JS Date. Keep both ties and sub-ms differences.
+      await run(() => db.query(
+        `WITH ranked AS (
+        SELECT id,row_number() OVER (ORDER BY id) AS rn FROM tennis.wallet_entries WHERE tenant_id=$1
+      ) UPDATE tennis.wallet_entries e SET created_at='2020-01-01T00:00:00Z'::timestamptz + (ranked.rn % 3) * interval '1 microsecond'
+        FROM ranked WHERE e.tenant_id=$1 AND e.id=ranked.id`,
+        [fixture.actor.tenantId],
+      ));
+      const expected = (
+        await run(() => db.query<{ id: string }>(
+          "SELECT id FROM tennis.wallet_entries WHERE tenant_id=$1 AND customer_id=$2 ORDER BY created_at DESC,id DESC",
+          [fixture.actor.tenantId, owner.customerId],
+        ))
+      ).rows.map((entry) => entry.id);
+      let page = await run(() => getWallet(db, owner, owner.customerId));
+      expect(page.entries).toHaveLength(50);
+      const seen = page.entries.map((entry) => entry.id);
+      await run(() => credit(owner.customerId, fixture)); // New head must not shift the continuation.
+      while (page.nextCursor) {
+        const cursor = page.nextCursor;
+        page = await run(() => getWallet(db, owner, owner.customerId, { cursor }));
+        seen.push(...page.entries.map((entry) => entry.id));
+      }
+      expect(seen).toEqual(expected);
+      expect(new Set(seen).size).toBe(205);
+      expect(page.entries).toHaveLength(5);
+      expect(page.balance.totalCents).toBe(206 * 120);
+      expect((await run(() => getWallet(db, fixture.actor, owner.customerId, { pageSize: 200 }))).entries).toHaveLength(200);
+      const refreshed = await run(() => getWallet(db, owner, owner.customerId, { pageSize: 1 }));
+      expect(expected).not.toContain(refreshed.entries[0]!.id);
+      expect(refreshed.balance).toEqual(page.balance);
+    };
+    const done = work();
+    activeHistoryWork = { controller, done };
+    await done;
+  }, 60000); // 206 real transactions have a separate budget from ordinary 15s integration cases.
 
   it("rejects another customer or tenant's cursor and enforces ownership and staff wallet grants", async () => {
     await credit();

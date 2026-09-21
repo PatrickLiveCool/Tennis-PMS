@@ -51,6 +51,7 @@ import {
 } from "../../../../packages/db/src/tennis/booking.ts";
 import {
   createCustomer,
+  registerBookingCustomer,
   isCustomerActor,
   requireCustomer,
   searchCustomers,
@@ -103,6 +104,8 @@ import {
   retryExceptionRefund,
 } from "../../../../packages/db/src/tennis/exception-refunds.ts";
 import { LocalMockPaymentGateway } from "../../../../packages/db/src/tennis/mock-payments.ts";
+import type { ModelTransport } from "../assistant-model.ts";
+import { registerWecomRoutes } from "./wecom-routes.ts";
 import { registerAssistantRoutes } from "./assistant-routes.ts";
 import { registerGatewayRoutes } from "./gateway-routes.ts";
 import type { AgentTransport } from "../../../../packages/db/src/tennis/external-agent.ts";
@@ -127,6 +130,7 @@ export interface TennisServerOptions {
   logger?: boolean;
   aiEncryptionKey?: Buffer;
   agentTransport?: AgentTransport;
+  modelTransport?: ModelTransport;
 }
 class HttpError extends Error {
   constructor(
@@ -162,13 +166,22 @@ const messages: Record<string, string> = {
   GATEWAY_SCOPE_CHANGED: "会话已接管或场馆范围已变更，请先核对原结果。",
   GATEWAY_GRANT_CLOSED: "原请求授权已结束，请查询原请求结果，不可重发交易。",
   INVALID_GATEWAY_INPUT: "请检查渠道接入参数。",
-  ASSISTANT_NOT_CONFIGURED: "AI 助手尚未连接外部服务，请联系平台运营方配置。",
+  ASSISTANT_NOT_CONFIGURED: "AI 服务尚未配置完成，请联系平台运营管理员。",
   ASSISTANT_BUSY: "上一条消息正在处理中，请稍后查看原会话结果。",
   ASSISTANT_RESULT_UNKNOWN: "AI 助手的处理结果尚未确认，请转人工核对原订单和付款后继续，避免重复交易。",
   HUMAN_HANDOFF_ACTIVE: "会话已转人工处理，请由工作人员继续办理。",
   AGENT_DELEGATION_REVOKED: "本次智能体授权已失效，请重新核对会话状态。",
   AGENT_SCOPE_DENIED: "本次智能体授权不包含该场馆。",
-  INVALID_AGENT_CONFIG: "请检查外部服务地址及配置。公网地址需要 HTTPS。",
+  INVALID_AGENT_CONFIG: "请核对模型或服务配置。模型地址使用 HTTPS；更换服务时请重新设置密钥。",
+  BACKOFFICE_MODEL_CONNECTION_NOT_ENABLED: "真实模型连接尚未启用，当前可保存配置并查看历史会话。",
+  BACKOFFICE_ASSISTANT_NOT_CONFIGURED: "后台 AI 助手尚未配置完成，请联系平台运营管理员。",
+  ASSISTANT_UNAVAILABLE: "模型暂时无法完成回答，请核对原会话或联系平台管理员。",
+  INVALID_WECOM_RECEIPT: "收款流水无效，请核对原渠道记录。",
+  WECOM_RECEIPT_CONFLICT: "同一渠道交易存在不一致的记录，请核对原流水。",
+  WECOM_REFERENCE_MISMATCH: "流水中的业务引用与所选业务不一致。",
+  WECOM_RECEIPT_ALREADY_LINKED: "该笔收款已经关联，请查看原记录，不能重复使用。",
+  WECOM_SIMULATION_DISABLED: "当前环境不允许生成模拟收款流水。",
+  WECOM_TARGET_MISMATCH: "业务与流水的租户、金额或商户不一致，请核对原付款。",
   INVALID_CREDENTIALS: "账号或密码不正确，请重新输入。",
   SESSION_EXPIRED: "登录已失效，请重新登录。",
   AUTH_CONTEXT_REVOKED: "当前身份权限已变更，请重新选择工作空间。",
@@ -469,13 +482,13 @@ export async function buildTennisServer(options: TennisServerOptions) {
     (request, input) => updateVenue(db, staff(request), { ...input, id: params(request).id! }),
   );
   get("/venues/:id/courts", (request) => accessibleCourts(db, actor(request), params(request).id!));
-  write("POST", "/venues/:id/courts", obj({ name, indoor: Type.Boolean() }), (request, input) =>
+  write("POST", "/venues/:id/courts", obj({ name, indoor: Type.Boolean(), surface: Type.Optional(Type.Union([Type.Literal("UNSPECIFIED"), Type.Literal("CLAY")])) }), (request, input) =>
     createCourt(db, staff(request), { ...input, venueId: params(request).id! }),
   );
   write(
     "PATCH",
     "/venues/:venueId/courts/:id",
-    obj({ expectedRevision: revision, name, indoor: Type.Boolean(), active: Type.Boolean() }),
+    obj({ expectedRevision: revision, name, indoor: Type.Boolean(), surface: Type.Optional(Type.Union([Type.Literal("UNSPECIFIED"), Type.Literal("CLAY")])), active: Type.Boolean() }),
     (request, input) =>
       updateCourt(db, staff(request), { ...input, id: params(request).id!, venueId: params(request).venueId! }),
   );
@@ -516,6 +529,10 @@ export async function buildTennisServer(options: TennisServerOptions) {
   );
   get("/venues/:id/booking-customers", (request) =>
     bookingCustomers(db, actor(request), params(request).id!, query(request).q ?? ""),
+  );
+  write("POST", "/venues/:id/booking-customers",
+    obj({ commandKey, nickname: name, phone: Type.Optional(Type.Union([Type.String({ maxLength: 30 }), Type.Null()])) }),
+    (request, input) => registerBookingCustomer(db, staff(request), { ...input, venueId: params(request).id! }),
   );
   get("/customers", async (request) => {
     const principal = actor(request);
@@ -809,6 +826,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
       },
     );
   });
+  registerWecomRoutes(app, { db, actor, allowSimulation: options.allowSimulation && gateway.simulation && gateway.provider === "MOCK" });
   let worker: ReturnType<typeof setInterval> | undefined;
   if (options.aiEncryptionKey)
     registerAssistantRoutes(app, {
@@ -818,6 +836,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
       actor,
       subject: (request) => session(request).subjectId,
       ...(options.agentTransport ? { transport: options.agentTransport } : {}),
+      ...(options.modelTransport ? { modelTransport: options.modelTransport } : {}),
     });
   if (options.aiEncryptionKey)
     registerGatewayRoutes(app, {

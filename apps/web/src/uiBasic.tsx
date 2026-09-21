@@ -227,6 +227,7 @@ interface ModalProps {
   footer?: ReactNode;
   size?: "default" | "wide" | "drawer" | "mobile-fullscreen";
   closeDisabled?: boolean;
+  draftPersisted?: boolean;
   modal?: boolean;
   className?: string;
 }
@@ -239,7 +240,7 @@ export function ModalNoticeProvider({ notice, children }: { notice?: ReactNode; 
 
 const useDialogVisibilityEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-export function Modal({ title, onClose, children, footer, size = "default", closeDisabled = false, modal = true, className }: ModalProps) {
+export function Modal({ title, onClose, children, footer, size = "default", closeDisabled = false, draftPersisted = false, modal = true, className }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const edited = useRef(false);
@@ -248,7 +249,7 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
 
   function dismissDrawer() {
     if (size !== "drawer" || closeDisabled) return;
-    if (edited.current && !window.confirm("有尚未提交的编辑，确定收起并放弃这些修改吗？")) return;
+    if (!draftPersisted && edited.current && !window.confirm("有尚未提交的编辑，确定收起并放弃这些修改吗？")) return;
     onClose();
   }
 
@@ -262,7 +263,7 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
       if (!outsidePress.current) return;
       outsidePress.current = false;
       if (!dialog || !(event.target instanceof Element) || dialog.contains(event.target)) return;
-      if (document.querySelector("dialog:modal") || event.target.closest("dialog, #ai-assistant-panel")) return;
+      if (document.querySelector("dialog:modal") || event.target.closest("dialog, #ai-assistant-panel, [aria-controls='ai-assistant-panel']")) return;
       dismissDrawer();
     };
     document.addEventListener("pointerdown", pointerDown, true);
@@ -310,6 +311,7 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
       if (event.defaultPrevented || event.nativeEvent.isComposing) return;
       event.preventDefault();
       event.stopPropagation();
+      if (event.target instanceof Element && event.target.closest("#ai-assistant-panel")) return;
       dismissDrawer();
       return;
     }
@@ -347,10 +349,10 @@ export function Modal({ title, onClose, children, footer, size = "default", clos
       tabIndex={-1}
       aria-labelledby={titleId}
       onKeyDown={trapFocus}
-      onChangeCapture={() => { edited.current = true; }}
+      onChangeCapture={(event) => { if (!(event.target instanceof Element && event.target.closest("#ai-assistant-panel"))) edited.current = true; }}
       onClickCapture={(event) => {
         // Some form choices (for example a room picker) are buttons, not inputs.
-        if (event.target instanceof Element && event.target.closest("form button")) edited.current = true;
+        if (event.target instanceof Element && event.target.closest("form button") && !event.target.closest("#ai-assistant-panel")) edited.current = true;
       }}
       onPointerDown={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();

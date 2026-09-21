@@ -34,6 +34,7 @@ export function AmendmentPanel({
   order,
   courts,
   onChanged,
+  initiallyEditing = false,
 }: {
   api: TennisApi;
   session: Session;
@@ -42,12 +43,13 @@ export function AmendmentPanel({
   order: OrderDetail;
   courts: CourtRecord[];
   onChanged: () => void;
+  initiallyEditing?: boolean;
 }) {
   const amendments = useLoad(
     () => api<AmendmentRecord[]>(`/orders/${order.id}/amendments`),
     [api, order.id, order.revision],
   );
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initiallyEditing);
   const [cancellingUnpaid, setCancellingUnpaid] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);

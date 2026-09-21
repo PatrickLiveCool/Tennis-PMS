@@ -509,7 +509,7 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
     );
     const found = await okay(staff, "GET", `/venues/${first.venueId}/booking-customers?q=13800000001`);
     expect(found).toEqual([
-      { id: customerId, tenantId: first.actor.tenantId, nickname: "本人客户", phone: null, active: true },
+      { id: customerId, tenantId: first.actor.tenantId, nickname: "本人客户", phone: null, hasContact: true, active: true },
     ]);
     expect((await request(staff, "GET", "/customers")).statusCode).toBe(403);
     expect((await request(staff, "GET", `/customers/${customerId}/wallet`)).statusCode).toBe(403);
@@ -537,6 +537,22 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
       first.venueId,
     ]);
     expect(await okay(staff, "GET", `/venues/${first.venueId}/booking-customers`)).toHaveLength(2);
+  });
+  it("registers and recovers a booking-only guest without customer-management authority", async () => {
+    await db.query("UPDATE tennis.tenant_memberships SET role='STAFF',all_venues=true,permissions=ARRAY['read','book'] WHERE tenant_id=$1 AND subject_id=$2", [first.actor.tenantId, staff.session.subjectId]);
+    const path = `/venues/${first.venueId}/booking-customers`;
+    const payload = { commandKey: key(), nickname: "HTTP 临时客" };
+    const registered = await okay(staff, "POST", path, payload);
+    expect(registered.customer).toMatchObject({ nickname: payload.nickname, phone: null, hasContact: false });
+    expect(await okay(staff, "POST", path, payload)).toEqual(registered);
+    expect((await okay(staff, "GET", `/receipts/${payload.commandKey}`)).result).toEqual(registered);
+    expect((await request(staff, "POST", "/customers", { nickname: "不允许" })).statusCode).toBe(403);
+    expect((await request(customer, "POST", path, payload)).statusCode).toBe(403);
+    expect((await request(foreign, "POST", path, payload)).statusCode).toBe(404);
+    expect((await request(staff, "POST", path, { ...payload, phone: "bad-phone" })).json().error.code).toBe("INVALID_CUSTOMER");
+    const quote = await okay(staff, "POST", "/quotes", selection(registered.customerId));
+    const order = await okay(staff, "POST", `/quotes/${quote.id}/confirm`, { commandKey: key() });
+    expect(order.customerId).toBe(registered.customerId);
   });
   it("completes quoted booking, balance plus simulated cash payment and authorized original-source refund", async () => {
     await okay(staff, "POST", `/customers/${customerId}/topups/offline`, {
@@ -804,8 +820,17 @@ it("authorizes tenant deadline settings and carries the configured hold into cus
   expect(await okay(staff, "PATCH", "/booking-policy", { quoteMinutes: 3, paymentHoldMinutes: 7, expectedRevision: 1 }))
     .toEqual({ quoteMinutes: 3, paymentHoldMinutes: 7, revision: 2 });
   expect(await okay(foreign, "GET", "/booking-policy")).toEqual({ quoteMinutes: 5, paymentHoldMinutes: 10, revision: 1 });
+  const dbTime = async () => (await db.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]!.now.getTime();
+  const beforeQuote = await dbTime();
   const quote = await okay(customer, "POST", "/quotes", selection());
+  const afterQuote = await dbTime();
   expect(quote.paymentHoldMinutes).toBe(7);
+  expect(Date.parse(quote.expiresAt) - 180000).toBeGreaterThanOrEqual(beforeQuote);
+  expect(Date.parse(quote.expiresAt) - 180000).toBeLessThanOrEqual(afterQuote);
+  const beforeConfirm = await dbTime();
   const order = await okay(customer, "POST", `/quotes/${quote.id}/confirm`, { commandKey: key() });
-  expect(Date.parse(order.holdUntil) - Date.parse(order.createdAt)).toBeCloseTo(420000, -1);
+  const afterConfirm = await dbTime();
+  // created_at is evaluated by a later INSERT; it is not the deadline's source timestamp.
+  expect(Date.parse(order.holdUntil) - 420000).toBeGreaterThanOrEqual(beforeConfirm);
+  expect(Date.parse(order.holdUntil) - 420000).toBeLessThanOrEqual(afterConfirm);
 });

@@ -1,3 +1,4 @@
+import type pg from "pg";
 import { createHash } from "node:crypto";
 import { TennisWalletError } from "../../../domain/src/tennis-wallet.ts";
 import type { MerchantBindingSnapshot } from "./merchant-bindings.ts";
@@ -188,4 +189,11 @@ export abstract class TrustedPaymentProvider implements PaymentProviderPort {
     trustedRefunds.add(event);
     return event as VerifiedRefundEvent;
   }
+}
+
+/** Internal adapters may persist reconciliation facts inside the same business settlement transaction.
+ * Never exposed as request data; every hook must validate and bind its authenticated observation. */
+export interface PaymentSettlementTransactionHook {
+  beforeSettlement(tx: pg.PoolClient, tenantId: string): Promise<void>;
+  beforeCommit(tx: pg.PoolClient, tenantId: string): Promise<void>;
 }

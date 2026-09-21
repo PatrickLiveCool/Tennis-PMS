@@ -1,12 +1,20 @@
 # 外部智能体与人工接管接口
 
-PMS 负责身份、库存、价格、订单和资金事实。智能体与 Runtime 在应用外部；此实现没有内置推理循环，也不会把模型 Base URL 当成聊天接口直接调用。
+> 2026-09-20：以[当前 AI Native PMS 决定](ai-native-pms.md)为准。后台助手由平台 UI 直接配置模型；外部业务 Runtime 独立使用 PMS API。当前继续本地 demo 开发与人工验收准备，未接入的外部条件只限制其对应真实验证，不阻塞 PMS 开发。历史验证记录保留。
+
+PMS 负责身份、库存、价格、订单和资金事实。客户/员工业务智能体的 Runtime 位于应用外部，经 [Gateway 接口](gateway.md) 取得受控授权并调用下列业务工具。PMS 后台另有员工自用的直连模型助手，两种会话和凭据分开。
 
 ## 平台配置与后台助手
 
-只有平台运营人员可以读取和修改 `/api/tennis/platform/ai-config`。配置包含 `enabled`、`model`、`baseUrl`、`externalAgentUrl`；可选 `apiKey` 是访问外部智能体服务的密钥。租户没有配置权限。密钥用 AES-256-GCM 加密，响应只返回 `hasApiKey`。本地加密主密钥由启动程序在忽略目录 `.local-workspace/tennis-secrets.json` 随机生成，权限为 0600；不复制住房系统凭据。
+`/api/tennis/platform/ai-config` 现专用于后台助手的 `enabled`、`model`、`baseUrl`、可选 `apiKey` 和 `expectedRevision`；新密钥保存到独立表，旧外部 Runtime 的服务密钥不迁移、不解释为模型密钥。只有平台运营人员可读写、测试配置；租户只使用助手。具体接口与只读工具见 [后台助手](backoffice-assistant.md)。
 
-只有启用且提供外部智能体 URL 后，助手才会派发请求。未接入时保留助手和人工协作入口，明确显示尚未配置，不产生模拟 AI 回答。`model` 和 `baseUrl` 作为平台配置传递给外部服务；模型访问凭据由外部 Runtime 自行管理。
+外部 Runtime 的模型配置仍在它自身管理。PMS 的接入设置负责 Gateway 凭据、身份/租户绑定和业务权限，不要求填外部 Runtime 的模型名称或 Base URL。后台助手可独立工作；它未配置时显示实情，不产生伪造 AI 回答。
+
+## 兼容旧派发模式
+
+原 `platform_ai_config` 和 `sendAssistantMessage` 派发适配保留，供已有外部业务会话兼容；它们不再对应平台 UI 的后台助手配置页。历史服务密钥保留原用途，不发送给模型。新外部 Runtime 对接优先使用 Gateway 身份、授权和受控工具契约；不依赖 PMS 内部保存它的模型参数。
+
+以下旧派发协议描述仅说明兼容代码，不代表新的后台模型调用协议。
 
 ## 外部请求协议
 
@@ -45,9 +53,9 @@ PMS 向配置的 `externalAgentUrl` POST JSON（`protocol: tennis-agent/v1`）�
 
 工具面没有退款、人工记账、资产配置、接管或模拟到账命令。退改费用须授权员工办理。外部 Runtime 必须在执行确认预订、使用余额等动作前完成用户确认，并为同一业务意图保持同一 `commandKey`；失败重试先查询原命令结果。
 
-## 助手体验与反馈
+## 业务会话体验与反馈
 
-后台助手保留页面/订单上下文、可编辑常用提问和回答反馈。`GET /assistant/conversations/:id` 的每条消息包含当前主体的 `feedback: boolean | null`；`POST /assistant/conversations/:id/messages/:messageId/feedback` 接收 `{resolved:boolean}`。仅允许对有权访问会话中的 assistant 消息反馈，同主体重复提交幂等，不同主体互不覆盖；原始聊天仍保留。
+业务会话保留页面/订单上下文、可编辑常用提问和回答反馈；员工自用后台助手使用独立 `/backoffice-assistant/` 接口。`GET /assistant/conversations/:id` 的每条消息包含当前主体的 `feedback: boolean | null`；`POST /assistant/conversations/:id/messages/:messageId/feedback` 接收 `{resolved:boolean}`。仅允许对有权访问会话中的 assistant 消息反馈，同主体重复提交幂等，不同主体互不覆盖；原始聊天仍保留。
 
 ## 接管与重复派发
 

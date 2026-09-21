@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Save } from "lucide-react";
 import { TennisApiError, type TennisApi } from "./api";
-import type { AIConfig } from "../../../../packages/db/src/tennis/external-agent";
-import type { TenantRecord } from "./types";
+import type { TenantRecord, BackofficeAIConfiguration } from "./types";
 import { PlatformGatewayPanel } from "./GatewayPanel";
 import { MerchantBindingsPanel } from "./MerchantBindingsPanel";
 import {
@@ -450,20 +449,28 @@ function TenantStatusEditor({
 }
 
 function AISettings({ api }: { api: TennisApi }) {
-  const config = useLoad(() => api<AIConfig>("/platform/ai-config"), [api]);
-  const [draft, setDraft] = useState<AIConfig | null>(null);
+  const config = useLoad(() => api<BackofficeAIConfiguration>("/platform/ai-config"), [api]);
+  const [draft, setDraft] = useState<BackofficeAIConfiguration | null>(null);
   const [keyMode, setKeyMode] = useState<"keep" | "replace" | "clear">("keep"),
     [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false),
     [needsReview, setNeedsReview] = useState(false),
-    [review, setReview] = useState<AIConfig | null>(null);
+    [review, setReview] = useState<BackofficeAIConfiguration | null>(null);
   const [error, setError] = useState<unknown>(),
     [notice, setNotice] = useState("");
+  const [testing, setTesting] = useState(false);
   const running = useRef(false);
+  const dirty = !!draft && (
+    !config.data ||
+    draft.enabled !== config.data.enabled ||
+    draft.model !== config.data.model ||
+    draft.baseUrl !== config.data.baseUrl ||
+    keyMode !== "keep"
+  );
   useEffect(() => {
     if (!draft && config.data) setDraft(config.data);
   }, [config.data, draft]);
-  function update(patch: Partial<AIConfig>) {
+  function update(patch: Partial<BackofficeAIConfiguration>) {
     if (!busy) {
       setDraft((value) => (value ? { ...value, ...patch } : value));
       setNotice("");
@@ -503,11 +510,10 @@ function AISettings({ api }: { api: TennisApi }) {
     setError(undefined);
     setNotice("");
     try {
-      const result = await api<AIConfig>("/platform/ai-config", "PUT", {
+      const result = await api<BackofficeAIConfiguration>("/platform/ai-config", "PUT", {
         enabled: draft.enabled,
         model: draft.model.trim(),
         baseUrl: draft.baseUrl.trim(),
-        externalAgentUrl: draft.externalAgentUrl.trim(),
         expectedRevision: draft.revision,
         ...(keyMode === "replace" ? { apiKey } : keyMode === "clear" ? { apiKey: "" } : {}),
       });
@@ -516,7 +522,7 @@ function AISettings({ api }: { api: TennisApi }) {
       setKeyMode("keep");
       setNeedsReview(false);
       setReview(null);
-      setNotice("统一 AI 配置已保存。服务是否可用，以实际会话结果为准。");
+      setNotice("后台 AI 助手配置已保存。可以测试模型连接。");
       await config.refresh();
     } catch (next) {
       setError(next);
@@ -529,8 +535,33 @@ function AISettings({ api }: { api: TennisApi }) {
       setBusy(false);
     }
   }
+  async function testConnection() {
+    if (!draft || running.current || dirty || needsReview) return;
+    running.current = true;
+    setBusy(true);
+    setTesting(true);
+    setError(undefined);
+    setNotice("");
+    try {
+      const result = await api<{ ok: true; message: string }>("/platform/ai-config/test", "POST", {
+        expectedRevision: draft.revision,
+      });
+      if (result.ok !== true) throw new Error("未收到有效的连接测试结果，请重试测试。");
+      setNotice(result.message || "模型连接成功。");
+    } catch (next) {
+      setError(next);
+      if (next instanceof TennisApiError && next.code === "STALE_CONFIGURATION") {
+        setNeedsReview(true);
+        setReview(null);
+      }
+    } finally {
+      running.current = false;
+      setBusy(false);
+      setTesting(false);
+    }
+  }
   return (
-    <Panel title="统一 AI 配置" action={<RefreshButton onClick={() => void reload()} busy={config.busy || busy} />}>
+    <Panel title="后台 AI 助手配置" action={<RefreshButton onClick={() => void reload()} busy={config.busy || busy} />}>
       <ErrorNotice error={error ?? config.error} retry={() => void reload()} />
       {!draft ? (
         config.busy ? (
@@ -540,12 +571,13 @@ function AISettings({ api }: { api: TennisApi }) {
         )
       ) : (
         <form className="tennis-form" onSubmit={(event) => void save(event)}>
+          {draft.connectionAvailable === false && <p className="tennis-note">当前尚未启用真实模型连接。可先保存配置和验收界面；保存不会发送模型请求。</p>}
           {notice && (
             <div className="tennis-success" role="status">
               {notice}
             </div>
           )}
-          <p className="tennis-muted">由平台运营方统一维护。后台助手连接外部智能体服务，租户不配置模型和密钥。</p>
+          <p className="tennis-muted">由平台运营管理员统一维护，供各租户工作人员查询、核对并准备业务表单。模型与密钥仅在此配置。</p>
           <label className="tennis-check">
             <input
               type="checkbox"
@@ -553,7 +585,7 @@ function AISettings({ api }: { api: TennisApi }) {
               disabled={busy}
               onChange={(event) => update({ enabled: event.target.checked })}
             />
-            启用外部 AI 助手
+            启用后台 AI 助手
           </label>
           <div className="tennis-two">
             <label>
@@ -579,18 +611,7 @@ function AISettings({ api }: { api: TennisApi }) {
             </label>
           </div>
           <label>
-            外部智能体服务地址
-            <input
-              type="url"
-              maxLength={2000}
-              value={draft.externalAgentUrl}
-              disabled={busy}
-              onChange={(event) => update({ externalAgentUrl: event.target.value })}
-              placeholder="https://…"
-            />
-          </label>
-          <label>
-            服务密钥
+            模型 API Key
             <select
               value={keyMode}
               disabled={busy}
@@ -649,8 +670,6 @@ function AISettings({ api }: { api: TennisApi }) {
                     <dd>{review.model || "未设置"}</dd>
                     <dt>Base URL</dt>
                     <dd style={{ overflowWrap: "anywhere" }}>{review.baseUrl || "未设置"}</dd>
-                    <dt>外部智能体地址</dt>
-                    <dd style={{ overflowWrap: "anywhere" }}>{review.externalAgentUrl || "未设置"}</dd>
                     <dt>密钥</dt>
                     <dd>{review.hasApiKey ? "已保存，原值不显示" : "未设置"}</dd>
                   </dl>
@@ -673,8 +692,17 @@ function AISettings({ api }: { api: TennisApi }) {
               disabled={busy || needsReview || config.busy || (keyMode === "replace" && !apiKey.trim())}
             >
               <Save size={16} />
-              {busy ? "正在保存…" : "保存统一配置"}
+              {busy && !testing ? "正在保存…" : "保存统一配置"}
             </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={busy || needsReview || config.busy || dirty || !draft.model || !draft.baseUrl}
+              onClick={() => void testConnection()}
+            >
+              {testing ? "正在测试…" : "测试模型连接"}
+            </button>
+            {dirty && <span className="tennis-muted">保存后可测试连接。</span>}
           </div>
         </form>
       )}

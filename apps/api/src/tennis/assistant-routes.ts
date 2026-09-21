@@ -5,7 +5,6 @@ import type { BookingActor } from "../../../../packages/db/src/tennis/customers.
 import {
   assistantStatus,
   createConversation,
-  getAIConfig,
   getConversation,
   getConversationRequest,
   listConversationRequests,
@@ -13,7 +12,6 @@ import {
   listConversations,
   listConversationPage,
   resolveDelegation,
-  saveAIConfig,
   sendAssistantMessage,
   setAssistantMessageFeedback,
   type AgentTransport,
@@ -43,6 +41,8 @@ import type { PaymentProviderPort } from "../../../../packages/db/src/tennis/pay
 import { getPaymentChannel, reconcilePaymentChannel } from "../../../../packages/db/src/tennis/payment-channel.ts";
 import { AgentAccessError } from "../../../../packages/db/src/tennis/agent-guard.ts";
 import { discoverAgentVenues } from "../../../../packages/db/src/tennis/agent-discovery.ts";
+import { registerBackofficeAssistantRoutes } from "./backoffice-assistant-routes.ts";
+import type { ModelTransport } from "../assistant-model.ts";
 
 export function registerAssistantRoutes(
   app: FastifyInstance,
@@ -53,10 +53,12 @@ export function registerAssistantRoutes(
     actor: (request: FastifyRequest) => BookingActor;
     subject: (request: FastifyRequest) => string;
     transport?: AgentTransport;
+    modelTransport?: ModelTransport;
   },
 ) {
   const { db, key, gateway } = input,
     base = "/api/tennis";
+  registerBackofficeAssistantRoutes(app, input);
   const id = Type.String({ minLength: 1, maxLength: 200 }),
     reason = Type.String({ minLength: 1, maxLength: 2000 }),
     cents = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
@@ -73,18 +75,6 @@ export function registerAssistantRoutes(
     app.post<{ Body: Static<S> }>(base + path, { schema: { body: schema } }, (request) => work(request, request.body));
   }
   app.get(base + "/assistant/status", () => assistantStatus(db));
-  app.get(base + "/platform/ai-config", (request) => getAIConfig(db, input.subject(request)));
-  const config = obj({
-    enabled: Type.Boolean(),
-    model: Type.String({ maxLength: 200 }),
-    baseUrl: Type.String({ maxLength: 2000 }),
-    externalAgentUrl: Type.String({ maxLength: 2000 }),
-    apiKey: Type.Optional(Type.String({ maxLength: 4096 })),
-    expectedRevision: Type.Integer({ minimum: 1 }),
-  });
-  app.put<{ Body: Static<typeof config> }>(base + "/platform/ai-config", { schema: { body: config } }, (request) =>
-    saveAIConfig(db, input.subject(request), key, request.body),
-  );
   app.get(base + "/assistant/conversations", (request) =>
     listConversations(db, input.actor(request), query(request).venueId ?? ""),
   );

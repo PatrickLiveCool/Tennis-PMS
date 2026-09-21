@@ -56,6 +56,7 @@ export interface Wallet {
   }[];
 }
 export interface OrderDetail extends OrderRecord {
+  origin?: { label: string; creatorName: string; conversationId: string | null };
   lines: (OrderLine & { remainingRefundCents?: number })[];
   customerName?: string;
   payments?: PaymentRecord[];
@@ -77,15 +78,17 @@ export interface TenantRecord {
   active: boolean;
   createdAt?: string;
 }
-export interface AiConfiguration {
+export interface BackofficeAIConfiguration {
+  connectionAvailable?: boolean;
   enabled: boolean;
   model: string;
   baseUrl: string;
-  externalAgentUrl: string;
-  hasApiKey?: boolean;
-  revision?: number;
+  hasApiKey: boolean;
+  revision: number;
 }
 export interface AssistantStatus {
+  connectionAvailable?: boolean;
+  configReady?: boolean;
   configured: boolean;
   enabled?: boolean;
   message?: string;

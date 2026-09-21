@@ -1,7 +1,9 @@
+import type { BackofficeAction, BackofficeContext } from "../../../../packages/db/src/tennis/backoffice-assistant";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageCircle, Plus, Send } from "lucide-react";
 import { TennisApiError, type TennisApi } from "./api";
 import { OrderDialog } from "./OrdersPage";
+import { BackofficeAssistantPanel } from "./BackofficeAssistantPanel";
 import type { AgentRequestDetail, AgentRequestSummary } from "../../../../packages/db/src/tennis/external-agent";
 import type { Session, VenueRecord, AssistantStatus } from "./types";
 import {
@@ -333,14 +335,20 @@ function ConversationRequests({
 }
 
 export interface AssistantPanelProps {
+  open?: boolean;
   api: TennisApi;
   session: Session;
   venue: VenueRecord;
   scope: string;
-  context: { page: string; orderId?: string };
+  context: BackofficeContext;
+  onPrepare?: (action: BackofficeAction) => void;
   onClose: () => void;
+  onNavigate?: (page: string) => void;
 }
 export function AssistantPanel(props: AssistantPanelProps) {
+  return props.session.kind === "staff" ? <BackofficeAssistantPanel {...props} /> : <BusinessConversationPanel {...props} />;
+}
+export function BusinessConversationPanel(props: AssistantPanelProps) {
   return <AssistantWorkspace key={`${props.scope}:${props.session.contextVersion}:${props.venue.id}`} {...props} />;
 }
 function AssistantWorkspace({ api, session, venue, scope, context, onClose }: AssistantPanelProps) {
@@ -601,7 +609,7 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
     contextReady;
   return (
     <>
-      <Modal title="AI 助手" size="wide" onClose={onClose} closeDisabled={busy}>
+      <Modal title="智能体业务会话" size="wide" onClose={onClose} closeDisabled={busy}>
         <div className="tennis-assistant">
           <p className="tennis-muted">
             {venue.name} · {session.kind === "customer" ? "订场咨询与工作人员协助" : "当前工作区的咨询、预订与人工协作"}
@@ -625,7 +633,7 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
           )}
           {!status.data?.configured && !status.busy && (
             <div className="tennis-note">
-              AI 助手尚未连接外部服务。可以查看会话、留言并转人工协助；平台运营方配置后即可启用。
+              外部智能体尚未连接会话回复服务。已接入 Gateway 的业务仍可通过 PMS 接口办理；这里可以查看记录和人工协作。
             </div>
           )}
           <ErrorNotice

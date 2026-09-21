@@ -413,6 +413,10 @@ export async function getCommandReceipt(
     ).rows[0];
     if (!row) return null;
     await requireBookingVenue(tx, actor, row.venue_id, "read");
+    if (row.command_type === "booking.customer") {
+      if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+      await requireBookingVenue(tx, actor, row.venue_id, "book");
+    }
     if (isCustomerActor(actor)) {
       // A subject may also have an employee role. Switching to customer context
       // must not reveal their earlier staff commands for other customers.

@@ -122,7 +122,7 @@ export function SettingsPage({
                 <div className="tennis-ledger-row" key={item.id}>
                   <div>
                     <strong>
-                      {item.name} · {item.indoor ? "室内" : "室外"}
+                      {item.name} · {item.indoor ? "室内" : "室外"}{item.surface === "CLAY" ? " · 红土场" : ""}
                     </strong>
                     <span>
                       {item.active ? "启用" : "停用"} · {money(item.hourlyPriceCents)} / 小时
@@ -406,6 +406,7 @@ function CourtEditor({
   const [current, setCurrent] = useState(court === "new" ? null : court);
   const [name, setName] = useState(current?.name ?? "");
   const [indoor, setIndoor] = useState(current?.indoor ?? false);
+  const [surface, setSurface] = useState<CourtRecord["surface"]>(current?.surface ?? "UNSPECIFIED");
   const [active, setActive] = useState(current?.active ?? true);
   const [price, setPrice] = useState(current?.hourlyPriceCents == null ? "" : String(current.hourlyPriceCents / 100));
   const [busy, setBusy] = useState(false);
@@ -426,9 +427,10 @@ function CourtEditor({
                 expectedRevision: current.revision,
                 name,
                 indoor,
+                surface,
                 active,
               })
-            : await api<CourtRecord>(`/venues/${venue.id}/courts`, "POST", { name, indoor });
+            : await api<CourtRecord>(`/venues/${venue.id}/courts`, "POST", { name, indoor, surface });
       setCurrent(result);
       setMessage(kind === "price" ? "标准小时价已保存。" : "球场资料已保存，请核对小时价格。");
       onSaved();
@@ -446,6 +448,13 @@ function CourtEditor({
         <label>
           球场名称
           <input value={name} onChange={(e) => setName(e.target.value)} disabled={!canAssets || busy} />
+        </label>
+        <label>
+          场地材质
+          <select value={surface} onChange={(e) => setSurface(e.target.value as CourtRecord["surface"])} disabled={!canAssets || busy}>
+            <option value="UNSPECIFIED">未标注材质</option>
+            <option value="CLAY">红土场</option>
+          </select>
         </label>
         <label className="tennis-check">
           <input
