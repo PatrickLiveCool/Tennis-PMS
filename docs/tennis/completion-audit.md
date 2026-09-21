@@ -1,0 +1,163 @@
+# MVP 完成审计与证据边界
+
+## F18 实际验证记录（2026-09-20）
+
+- 全量单元：74 文件、1394 项通过；类型检查、构建、PR 格式 8 项通过。
+- PostgreSQL 首轮 25 文件共 318 项：313 通过、5 失败。修复测试对数据库时间的过窄假设及超时后的清理竞态后，4 文件定点复验 51/53 通过，剩余两项超时；独立复验其所属 2 文件，19/19 通过（退款场景 3.4 秒，205 条历史分页场景 8.5 秒）。新增后台助手 12 项、企微对照 15 项通过。没有声称首轮全绿，也没有修改产品业务期限以适应测试。
+- 024/025 迁移首次、重复执行通过，旧业务摘要保持不变。首次失败留下的两个精确合成测试租户已核对并清理。
+- 浏览器：员工 AI 助手与业务会话分离；80 元合成订单确定引用自动归账；17 元合成充值无引用人工核对后归账；订单为 CONFIRMED/PAID，充值 SUCCEEDED。自动刷新回调已修复；最终重新加载页面状态一致，未再次执行新成交证明无需刷新。
+- 平台管理员页面已核对模型、Base URL、密钥、启停与测试连接入口。未配置密钥，未发送真实模型请求。窄屏检查实际 CSS 宽 468px，页面 scrollWidth 同为 468px；截图工具有裁切，不代表完整真机视觉验收。临时视口已恢复。
+- 当前构建资产 tennis-DvxLJvXz.js / tennis-ChHBwP5C.css。本地 http://127.0.0.1:4273/，支付模式 MOCK。
+- 真实模型传输被自动审批拒绝，默认 connectionAvailable:false。需明确模型服务目的地及允许发送的数据范围后接线。真实企微同步、退款 adapter 和外部 Runtime 未接通；无部署、真实扣费或远端发布。客户人工验收尚未签收。
+
+
+> 2026-09-20：以[当前 AI Native PMS 决定](ai-native-pms.md)为准。后台助手由平台 UI 直接配置模型；外部业务 Runtime 独立使用 PMS API。当前继续本地 demo 开发与人工验收准备，未接入的外部条件只限制其对应真实验证，不阻塞 PMS 开发。历史验证记录保留。
+
+更新日期：2026-09-20；F18 运行结果见本页 F18 实际验证记录，历史审计与证据日期保持原样。需求依据为 [集中决策 1–12](decisions-and-acceptance.md)、[MVP 核心约束 1–11](mvp.md)、[GreenPMS 体验清单](experience-continuity.md)；运行证据为 [本地验收记录](local-acceptance.md)、[实施状态](implementation-status.md) 及本页列出的日志。需求文档内 F0/F1 等历史实施状态保留，不作为当前实现结论。
+
+当前可以交付的是：**独立、本地可运行的 Tennis PMS，以及经自动验证和部分开发者浏览器核对的模拟交易闭环。** 真实微信对话至真实付款、退款的端到端链路尚未完成；客户人工验收尚未进行。本页不将 goal 标为完成，也不把外部 Runtime 纳入 PMS 内部开发。
+
+本页整理当前源码范围及已有运行证据；本页文档更新本身没有运行测试或操作浏览器。浏览器记录来自主代理已完成的实际操作，均使用合成数据；它们不是客户业务签收。
+
+## F18 当前交付口径
+
+本期聚焦使用本 PMS 的场馆，通过低位服务费、试用转化降低使用门槛；标准交易由客户/员工 Gateway 的外部智能体调用 PMS 接口完成。正常流程以准确库存、确定支付引用和可审计事实自动执行；人工处理归属不明、异常实收、授权退改等例外。电话接单不是标准链路。费率、自助套餐、多人付款、撮合产品及平台分账规则不作为这轮 PMS 开发门禁。
+
+| 本轮项目 | 代码范围 | 证据和限制 |
+| --- | --- | --- |
+| 后台 AI 助手 | 独立平台模型配置、本人会话、只读工具、订单上下文、反馈和恢复；租户无配置/密钥权限 | F18 自动验证及页面结果见本页 F18 实际验证记录。自动审批拒绝真实模型传输接线，默认 `connectionAvailable:false`；合成 transport 用于测试，真实问答未接通 |
+| 外部智能体协作 | 原 Gateway、业务 API、身份、库存与资金权限、事件、接管仍保留；UI 独立“业务会话” | Runtime 由体外实现；既有 F8–F17 证据保留，F18 回归见本页 F18 实际验证记录。不要求部署 Runtime 后才能验收本地 PMS |
+| 企微收款对照 | 可信确定引用自动归订单/充值，无关联进入人工例外，幂等与资金事务，合成流水 UI | 仅合成 source。F18 验证结果见本页 F18 实际验证记录；真实企微收退款同步、检查点/补查及退款适配仍有开发工作 |
+| 当前资金和库存规则 | 组合预约、钱包比例/FIFO、禁止透支、余额＋外部补差、迟付异常、原路退款保持 | 新收款切片的回归与人工体验需本轮验证；历史数量不可当作新代码的通过证明 |
+
+真实模型接线被自动审批拒绝的动作及要求见 [后台助手边界](backoffice-assistant.md#本轮可运行边界)。当前可验收配置管理、接口/权限、模拟交易、例外处理与 UI；实际模型问答、企微收款至真实入账、真实退款分别需要对应接线、adapter 和联调。部署保持未执行。
+
+## 判定口径
+
+- **本地已实现且验证**：有对应源码及已通过的自动用例；浏览器核对仅对明确列出的场景成立。支付渠道验证指本地 MOCK 与受控支付端口。
+- **实际渠道仍缺失**：真实账号、支付产品、商户或外部服务尚未接入；其中真实支付 adapter 仍有代码开发工作，不只是补配置。
+- **客户人工验收未完成**：真实运营人员和客户尚未签收业务及操作体验。此状态适用于下面所有需求，不因自动测试或开发者演示而消除。
+
+## 集中决策 1–12 对照
+
+源码路径简写以 `packages/db/src/tennis/` 为根；测试路径简写以 `tests/tennis/` 为根。可点击的实现与测试入口另列于后文。
+
+| 编号与需求 | 已实现及验证依据 | 未完成或限定范围 |
+| --- | --- | --- |
+| 1 同租户跨校区余额通用、不跨租户 | `wallet.ts`、`wallet-store.ts`、`access.ts`；`payments.integration.test.ts`、`tenant-access.integration.test.ts` 覆盖跨场馆消费和跨租户拒绝 | 本地已实现且验证；真实租户资料未导入 |
+| 2 本金/赠送分账，FIFO、比例扣款、原构成退款 | `tennis-wallet.ts` 领域算法、`wallet-store.ts`、`refunds.ts`；`wallet.test.ts`、`payments.integration.test.ts` 覆盖分摊守恒、原构成恢复及并发 | 本地已实现且验证；赠送额不作为现金。真实期初拆分待核对 |
+| 3 余额＋微信补差、禁止透支、原来源退款 | `payments.ts`、`payment-lifecycle.ts`、`channel-refunds.ts`；`payments.integration.test.ts`、`payment-channel.integration.test.ts` 验证预留、重复/伪回调、到期竞争、渠道恢复和多来源退款；浏览器验证余额100＋MOCK60及部分退款 | 本地资金规则已实现且验证；真实微信补差、原交易退款仍缺 adapter 与商户联调 |
+| 4 线上充值、真实线下收款登记、查询与明细 | `topups.ts`、`wallet.ts`、`topup-directory.ts`；`payments.integration.test.ts`、`wallet-history.integration.test.ts`、`topup-directory.integration.test.ts`。浏览器从持久目录找回23元原单、模拟成功后本金只增加23元 | 本地已实现且验证；线下登记使用合成收款事实演示，未处理真实资金。线上真实充值渠道未接入；退卡提现/转赠/过期后置 |
+| 5 同场馆多明细、全成全败、员工部分退改 | `booking.ts`、`amendments.ts`、`refunds.ts`；`booking.integration.test.ts`、`amendments.integration.test.ts` 覆盖同段多片、不同时间、单片冲突整组回滚、原单保护、部分取消/改期。浏览器实际完成双片、部分取消和连续补退差价 | 本地已实现且验证；真实资金退改仍依赖支付 adapter |
+| 6 报价5分钟、普通待付款10分钟、15分钟调度、常用1小时、租户最短时长 | `booking.ts`、`catalog.ts`、`inventory.ts`、领域 `court-interval.ts`；`interval.test.ts`、`booking.integration.test.ts`、`catalog.integration.test.ts` 覆盖时间边界、过期及营业复查 | 本地已实现且验证。F16已提供租户管理员预订期限设置，默认5/10分钟，新报价保存占位时长快照；已有期限不追溯，场馆最短可售时长独立配置 |
+| 7 人工决定退改金额与理由、AI不自行决定费用 | `amendments.ts`、`refunds.ts`、`exception-refunds.ts`、`agent-guard.ts`；对应集成测试覆盖权限、金额上限、原资金来源、迟到实收异常。浏览器核准部分退款与差价退款；F10异常120元失败→重试→成功关闭 | 本地已实现且验证；雨天/迟到/爽约使用员工判断及理由，不存在自动费用政策；真实退款待接入 |
+| 8 授权未付款保留、明确截止与原因、不假记收款 | `booking.ts`、`amendments.ts`；`booking.integration.test.ts`、`amendments.integration.test.ts` 覆盖授权、截止、理由及未付调整。既有浏览器记录验证未付双片240→取消120→改场80，原截止/原因保留 | 本地已实现且验证；普通订单的待收款状态不等于到账 |
+| 9 课程仅占场、基础流水核对 | `inventory.ts`、`views.ts`；`inventory.integration.test.ts`、`views.integration.test.ts`、`wallet-history.integration.test.ts`；后台 `OccupancyPanel.tsx`、`FinancePanel.tsx` 提供统一占用及核对 | 本地已实现且验证；无教练冲突、循环排课、优惠券、完整财务/教务。充值预收、赠送和消费不混加为营收 |
+| 10 各租户商户直收，微信产品未选定 | `gateway.ts`、`merchant-bindings.ts`、`payment-port.ts`、`payment-channel.ts`、`business-events.ts`；Gateway/商户/支付渠道/业务事件集成测试覆盖归属、绑定、版本、去重与回执 | PMS接入契约本地已验证；实际渠道仍缺失。未选定“微信客服”，真实签名/消息收发/商户支付产品未验证；WECHAT页面仅预配置 |
+| 11 平台统一AI配置、后台助手保留、Runtime体外 | F18 新增 `backoffice-assistant.ts`、独立后台路由/执行器及 `BackofficeAssistantPanel.tsx`；原 `external-agent.ts`、`agent-guard.ts` 和业务会话/接管保留 | F18 运行结果见本页 F18 实际验证记录。默认真实模型接线未启用，仅测试注入合成 transport；外部 Runtime 的模型配置归其自身。既有助手测试只证明各自历史范围 |
+| 12 模拟开发、独立环境、上线前真实导入 | `local-config.ts`、`scripts/tennis/server.mts`、本地启动/迁移/种子脚本；`local-config.test.ts`及本地演示记录。启动器限定本地模拟并拒绝production | 本地开发交付具备；服务器/域名、真实价目、全部有效占用及会员期初本金/赠送资料未提供，生产部署和真实导入尚未执行 |
+
+## MVP 核心约束 1–11 对照
+
+| 编号 | 判定与已有证据 |
+| --- | --- |
+| 1 Court区间、15分钟、相邻可共存、不同片同人可重叠 | 本地已实现且验证。领域 `court-interval.ts`、数据库库存排斥约束；`interval.test.ts`、`inventory.integration.test.ts`、`booking.integration.test.ts` 覆盖边界、并发和多片 |
+| 2 租场/课程/维护共库存；营业、最短时长和缓冲 | 共库存、营业与**场馆**最短可售时长本地已实现且验证，见 `inventory.ts`、`catalog.ts` 及对应集成测试。原文“各产品最短时长和缓冲时间”未形成已确认的具体销售政策；当前没有按产品独立配置的最短时长/缓冲字段。按用户后续集中确认，首期采用场馆最短可售时长、课程仅占场；未定义的产品政策不新增为本期开发阻塞或再次审批事项 |
+| 3 查询不占位、写入复查、并发不能重复占场 | 本地已实现且验证。`catalog.ts`、`booking.ts`、`inventory.ts`；数据库并发测试覆盖整组回滚。F11浏览器报价后新增维护，刷新撤旧报价、保留输入、显示冲突 |
+| 4 报价/占位分期限，订单/资金分状态，可信付款结果 | 本地已实现且验证。`booking.ts`、`payments.ts`、`payment-channel.ts`；付款/渠道测试覆盖未到账、伪回调和重复结果。真实微信验签、主动查单和付款操作未验证 |
+| 5 改期失败保原预约，取消/库存/退款各有结果 | 本地已实现且验证。`amendments.ts`、`refunds.ts`、`channel-refunds.ts`；集成测试覆盖冲突保护、补款前保原、独立退款失败与恢复。浏览器完成补40及核准退40 |
+| 6 客户本人、员工授权、相关主体留痕，接管重确认 | 本地身份、客户归属、操作者、服务凭据、会话授权与接管控制已验证，见 `auth.ts`、`access.ts`、`gateway.ts`、`agent-guard.ts` 及认证/Gateway/Agent命令测试。付款记录有客户、创建者及商户交易引用；**真实微信付款人身份**需由真实渠道适配明确、留存并验证，当前不能声称完成 |
+| 7 幂等、事务复核、审计、可恢复回执 | 本地已实现且验证。`receipts.ts`、`transaction-locks.ts`及业务事务；重复请求/并发用例通过。F12成功响应截断后，充值按原回执恢复唯一原单；助手重试保持原消息和context |
+| 8 HUMAN使旧Agent授权失效，确定性任务继续 | 本地已实现且验证。`external-agent.ts`、`agent-guard.ts`、`gateway-guard.ts`；助手/Agent/Gateway测试覆盖接管、撤权、原授权快照及支付/到期操作。体外Runtime真正停止工具调用仍待联调 |
+| 9 完整时段多片，不拼碎时段，整组原子 | 本地已实现且验证。`catalog.ts`、`booking.ts`；资产查询与订单集成测试验证整段所需片数、不同片碎时段不可冒充、整组并发冲突回滚 |
+| 10 全入口及异步动作验证租户归属、第二租户否定测试 | 本地已实现且验证。`access.ts`、认证、Gateway、Agent、商户版本、回调/事件/目录均有跨租户与撤权用例；`tenant-access.integration.test.ts`及HTTP集成不是只检验前端过滤。浏览器核对平台不默认拥有业务权限、第二合成租户停用与恢复 |
+| 11 租户价格/分时折扣、分段汇总、版本快照 | 本地已实现且验证。领域 `tennis-pricing.ts`、`catalog.ts`、`booking.ts`；`pricing.test.ts`、资产/订单集成测试覆盖跨价段、舍入、多明细、重叠折扣拒绝、有效报价保价和旧订单不变 |
+
+## GreenPMS 体验延续对照
+
+以下“浏览器”均指开发者本地合成数据核对，十项的客户人工验收均未完成。
+
+| 体验要求 | 实现与已有核对 | 仍需人工核对的范围 |
+| --- | --- | --- |
+| AI助手与个人风格 | `TennisApp.tsx`、`tennis.css`延续绿色/浅灰绿、侧栏/底栏；F18 分开后台个人助手与智能体业务会话，保留上下文、常用问题、反馈及业务接管。原浏览器证据只指 F18 之前的面板 | F18 配置、双入口及返回操作需本轮核对；真实后台模型回复和外部 Runtime 调用分别待联调 |
+| 排场直接办理 | `BookingPage.tsx`、`OrdersPage.tsx`默认一片一小时，按需加片/不同明细；选区进入预订、订单详情接续。浏览器验证同段双片和部分改退 | 真实运营人员按日常接单流程使用 |
+| 返回原位置 | `TennisApp.tsx`作用域、滚动保存；`OrderDirectory.tsx`和订单页保留筛选/分页。已有会话关闭订单后返回核对；F12桌面工作台滚动4817.5→预订订单→返回后，异步加载完成仍为4817.5 | 真实手机、不同断点和其余长页返回位置验收 |
+| 网络波动不白填 | `components.tsx`、`BookingPage.tsx`草稿和过期状态；身份/租户/场馆隔离。F11占用冲突刷新后保留客户与明细、撤销报价并禁止继续报旧价 | 真实网络切换及剩余故障场景；不能把已核对的一条路径推广为全部网络行为 |
+| 明确提交结果、恢复原操作 | `components.tsx`回执恢复、`MembersPage.tsx`/`TopupHistoryPanel.tsx`持久充值目录、`AssistantPanel.tsx`原消息快照；`web-api.test.ts`、回执/目录/助手集成测试。F12已实际截断成功响应、刷新或切换订单后恢复 | 真实渠道返回/断网组合，以及跨设备恢复体验 |
+| 费用与变更摘要 | `BookingPage.tsx`报价明细、`AmendmentPanel.tsx`前后对照、补退金额，底层以服务端计算为准；浏览器核对80→120补40、120→80退40及原来源拆分 | 操作人员对报价/差价/退款说明的理解与签收 |
+| 老客户少重复填 | `CustomerPicker.tsx`、`MembersPage.tsx`、`customers.ts`；客户检索预填、同单共用客户，Gateway不按电话自动跨租户合并。F11无subject新客候选和人工绑定浏览器通过 | 真实客户重名、资料质量和导入后的检索习惯 |
+| 今日任务可直接处理 | `TennisApp.tsx`、`views.ts`工作台入口和订单关联，`views.integration.test.ts`验证分类/权限；浏览器已使用相关订单入口 | 真实营业日的任务密度、优先顺序和手机使用 |
+| 中文状态与错误引导 | `components.tsx`、`api.ts`及业务页面提供冲突、过期、待核实与未配置提示；浏览器已核对折扣冲突、占用冲突、AI未连接及响应中断状态 | 运营人员遇到其他真实错误时的可理解性 |
+| 手机和键盘习惯 | 响应式导航及助手 `isComposing`/Enter/Shift+Enter 保护存在于源码；有限手机断点已核对侧栏隐藏、底栏可用、外层无显著横溢 | 真实触屏、中文输入法、全断点及焦点手感；代码检查不能代替这些人工验证 |
+
+## 自动验证与浏览器证据
+
+### 自动验证基线
+
+| 基线 | 检查结果 | 原始证据 |
+| --- | --- | --- |
+| F11完整业务基线 | typecheck通过；单元69文件/1,284项；PostgreSQL集成22文件/276项；网球构建通过；PR格式8项 | [typecheck](/private/tmp/tennis-f11-typecheck.log)、[单元](/private/tmp/tennis-f11-unit.log)、[PG](/private/tmp/tennis-f11-integration.log)、[build](/private/tmp/tennis-f11-build.log)、[PR检查](/private/tmp/tennis-f11-pr-check.log) |
+| F12助手提示修正后的基线 | typecheck通过；单元69文件/1,284项；网球build通过，资产 `tennis-PlQNya-z.js` | [typecheck](/private/tmp/tennis-f12-typecheck.log)、[单元](/private/tmp/tennis-f12-unit.log)、[build](/private/tmp/tennis-f12-build.log) |
+
+1,284项包含继承住房系统回归，不能等同于1,284项网球独立验收。F11新增客户绑定13项、订单上下文/会话目录8项、充值目录9项PG测试包含于276项内。F12仅改助手顶部显示分支，没有后端、资金、库存或迁移改动，因此沿用F11 PG结果，未声称重新运行。构建通过不代表视觉或真实业务签收。
+
+### 已有实际浏览器记录
+
+- 主业务：订单 `46e7c038` 同段两片160元；余额100＋MOCK60；取消其中一片退80，拆余额50/原渠道30。改期80→120补40，再改回80核准退40，按原两笔付款分摊。详见 [本地验收记录](local-acceptance.md)。
+- F10异常实收：订单 `d4427d89` 的120元迟到款，退款 `2776554b` 失败时保持OPEN，授权重试后成功转RESOLVED；记录现金负流水120，钱包变化为0。详见 [实施状态](implementation-status.md)。
+- F11运营补齐：加载更多找回第22条HUMAN会话 `a6a8421a`；按订单 `e4205cfa` 搜索并打开详情；无草稿找回23元充值 `4d354dab` 并模拟完成；管理员绑定无subject合成新客；报价后加入维护 `db726181`，刷新保留输入并阻止旧报价。详见同页F11记录。
+- F12充值响应截断：17元充值 `fb5aedd1` 经整页刷新按原回执恢复。DB为唯一 `topup.begin` 回执、唯一PENDING充值、第1代原渠道操作、**钱包流水0条**；这次没有执行模拟付款。见 [充值证据](/private/tmp/tennis-f12-topup-evidence.json)。
+- F12助手响应截断：从订单A `e4205cfa` 发送HUMAN消息，切到B `46e7c038` 后重试仍保持相同messageId、内容摘要及context(A)；DB一条消息、零Runtime派发。修正后顶部/底部均显示原A，成功后才恢复当前B提示。见 [原消息证据](/private/tmp/tennis-f12-message-evidence.json)、[修正复核证据](/private/tmp/tennis-f12-header-fix-evidence.json)、[代理请求证据](/private/tmp/tennis-f12-proxy-evidence.jsonl)。
+
+- F12桌面返回位置：工作台 `scrollTop=4817.5`、`scrollHeight=5717`，进入预订订单再返回，异步数据加载后位置和高度一致。见 [滚动证据](/private/tmp/tennis-f12-scroll-evidence.json)；仅证明当前桌面实例，不代替真实手机或所有断点验收。
+
+上述F12证据由主代理浏览器执行及定点数据库核对产生；本审计读取记录，没有独立复演，也没有把HUMAN零派发当成真实Runtime调用测试。演练代理已关闭。
+
+## 源码与测试入口
+
+- 库存/定价/预订：[区间领域](../../packages/domain/src/court-interval.ts)、[定价领域](../../packages/domain/src/tennis-pricing.ts)、[库存](../../packages/db/src/tennis/inventory.ts)、[资产目录](../../packages/db/src/tennis/catalog.ts)、[报价订单](../../packages/db/src/tennis/booking.ts)；[库存测试](../../tests/tennis/inventory.integration.test.ts)、[资产测试](../../tests/tennis/catalog.integration.test.ts)、[预订测试](../../tests/tennis/booking.integration.test.ts)。
+- 钱包/退改：[钱包领域](../../packages/domain/src/tennis-wallet.ts)、[支付](../../packages/db/src/tennis/payments.ts)、[充值](../../packages/db/src/tennis/topups.ts)、[退款](../../packages/db/src/tennis/refunds.ts)、[改期](../../packages/db/src/tennis/amendments.ts)、[异常退款](../../packages/db/src/tennis/exception-refunds.ts)；[支付测试](../../tests/tennis/payments.integration.test.ts)、[改期测试](../../tests/tennis/amendments.integration.test.ts)、[异常退款测试](../../tests/tennis/exception-refunds.integration.test.ts)。
+- 租户/外部协作：[权限](../../packages/db/src/tennis/access.ts)、[Gateway](../../packages/db/src/tennis/gateway.ts)、[外部助手](../../packages/db/src/tennis/external-agent.ts)、[业务事件](../../packages/db/src/tennis/business-events.ts)；[租户测试](../../tests/tennis/tenant-access.integration.test.ts)、[客户绑定测试](../../tests/tennis/gateway-customer-binding.integration.test.ts)、[上下文测试](../../tests/tennis/operator-context.integration.test.ts)、[HTTP测试](../../tests/tennis/api.integration.test.ts)。
+- 支付渠道边界：[支付端口](../../packages/db/src/tennis/payment-port.ts)、[渠道操作](../../packages/db/src/tennis/payment-channel.ts)、[商户版本](../../packages/db/src/tennis/merchant-bindings.ts)、[本地启动器](../../scripts/tennis/server.mts)；[渠道测试](../../tests/tennis/payment-channel.integration.test.ts)、[商户测试](../../tests/tennis/merchant-bindings.integration.test.ts)。
+- 后台体验：[应用](../../apps/web/src/tennis/TennisApp.tsx)、[排场](../../apps/web/src/tennis/BookingPage.tsx)、[订单](../../apps/web/src/tennis/OrdersPage.tsx)、[助手](../../apps/web/src/tennis/AssistantPanel.tsx)、[充值目录](../../apps/web/src/tennis/TopupHistoryPanel.tsx)、[恢复组件](../../apps/web/src/tennis/components.tsx)；[前端API测试](../../tests/tennis/web-api.test.ts)、[充值目录测试](../../tests/tennis/topup-directory.integration.test.ts)、[订单目录测试](../../tests/tennis/order-directory.integration.test.ts)。
+
+## 剩余事项与完成边界
+
+F13 新增 [微信 API v3 共用安全层](wechatpay-v3-security.md)：请求签名、响应验签、通知验签/解密已有实现；未发送 HTTP、未接入资金事实映射、未启用真实 provider。它推进实际支付适配的共用部分，不改变下面真实产品及商户联调尚未完成的判定。F13 验证结果以实施状态为准，F11/F12 记录仍分别保留原范围。
+
+F14 进一步实现共用 HTTP 请求层：全响应 deadline、流式限制、原始字节与签名核对、断连/超时 UNKNOWN 已有代码。验证只使用本地回环服务和合成密钥，尚未接入微信目标、真实商户或资金事实映射；不改变真实产品及渠道验收缺失的判定。结果见实施状态与 F14 日志。
+
+F12 只读配置核对显示：AI `enabled=false`，模型、Base URL、Runtime端点及密钥均未配置；商户记录只有MOCK共2个版本。见 [外部配置状态](/private/tmp/tennis-f12-external-state.json)。此证据未输出凭据。F12浏览器、DB与构建证据已汇总保存于 [总项目验证日志](</Users/feather/Documents/Codex project/Tennis/outputs/Tennis-PMS-F12-verification.log>)。
+
+1. **真实企微收退款同步及支付 adapter 仍需开发及验证。** F18 只接入合成可信流水；生产同步的身份认证、商户绑定、分页检查点、迟到补查和退款观察尚未实现。 当前 `CheckoutAction` 仅有 `LOCAL_SIMULATION`，本地启动器只实例化MOCK；WECHAT配置不是可用的微信付款。需要确定租户商户及支付产品，接入真实发起、付款人/交易事实、签名回调、主动查单、原交易退款和渠道异常核对，证明款进入正确租户账户。
+2. **真实微信入口和体外 Runtime 需要联调，后台模型接线独立处理。** 外部 Runtime 自行管理模型和 Gateway，PMS 提供受控接口、上下文、事件与接管；不在 PMS 内补造 Runtime。后台模型配置已在平台 UI 独立管理，但默认真实传输因自动审批拒绝未接线；模型问答尚未真实验证。
+3. **部署与真实导入尚未执行。** 用户已指定拟沿用 GreenPMS 服务器，达成一致前不部署；目标域名、隔离配置和回调须部署阶段核对。真实场地价目、有效预约、会员期初本金/赠送拆分待导入，当前先用模拟资料开发和人工验收。
+4. **客户人工验收未完成。** 运营人员需走实际接单、退改、储值、台账与接管流程，并核对手机、输入法及返回操作习惯；开发者合成数据证据仅作为验收准备。
+5. **旧规格措辞按后续确认收敛。** 首期场馆最短可售时长可配置，报价和普通待付款默认5/10分钟；F16已提供租户期限后台，新报价保存快照，旧期限不追溯。旧文的产品独立时长/缓冲尚无具体政策，且首期课程仅占场，因此不作为新的必做模块或审批事项。真实付款人渠道事实留待实际支付适配核对，不能将当前模拟交易说成已经验证。
+
+人人匹配、优惠券、余额提现/转赠/过期、完整财务与教务、自动循环排课、自助SaaS套餐和生产发布均不因本页自动加入本期。更完整的接入边界见 [外部接入状态](external-integration-gaps.md)，交付剩余条件见 [本地验收现状](remaining-local-acceptance.md)。
+
+
+## F15 更新：原渠道退款金额
+
+普通/异常退款新请求已携带原渠道交易总额，按可信实收精确核对；旧请求/hash不变，授权失败重试仅在新代次补缺失值，矛盾值拒绝。集中决策3/5/7的本地退款证据增加了连续部分混合退款、改期多笔付款原额，以及本金/赠送区分下的充值异常退款。
+
+本轮由主会话运行 typecheck、71文件/1,360项单元、22文件/282项PG集成、网球build及PR格式8项，全部通过。日志：总项目 `outputs/Tennis-PMS-F15-verification.log`；无新迁移、UI变动或浏览器复验。支付仍为MOCK，真实商户/营销优惠金额映射/Runtime/生产与客户签收的缺口未消除，不将Goal标为完成。
+
+
+## F16 更新：租户预订期限
+
+集中决策6此前遗漏了“时长由租户配置”的实现。现已补齐后台/API/持久配置、报价快照、改期补款期限及历史保护，详见 [期限契约](booking-policy.md)。主会话最终typecheck、71文件/1,360项单元、23文件/291项PG、build及PR格式8项通过。首轮改期测试使用两个不同机器时钟造成141毫秒差异，改为数据库时钟后定点及最终全量通过；原失败日志保留，不冒充首轮全通过。
+
+开发库023迁移前后16条旧记录的期限摘要一致、重复迁移通过。浏览器验证3/7配置保存/刷新，恢复默认后原报价仍产生7分钟待付订单；测试单已正常取消、无付款记录。真实设备与客户人工签收仍未完成，Goal保持active。
+
+
+## F17 响应式布局与导航检查（2026-09-19）
+
+修复三个有浏览器证据的布局问题：顶部工具组不再被压缩到按钮宽度以下，空间不足时换行；排场日期栏允许换行，避免“今天”按钮超出窄屏；网球移动导航的断点从760px统一到继承样式的860px，消除761–860px之间侧栏和底栏同时隐藏的导航空档。仅调整网球CSS，保留GreenPMS配色、控件与触控大小，不改变交易、权限或数据库。
+
+浏览器记录实际CSS尺寸与滚动宽度：约321px排场外层从338px溢出恢复到321px，约469px顶部从475px恢复到468px（整数测量取整）；排场表的横向滚动仍限制在自身容器。约775px原导航空档可正常进入订单；860px显示底栏，861px显示侧栏，约1281–1300px桌面排场/设置外层无横溢。窄屏检查资产、预订期限、订单详情及订单关联助手，助手消息输入可滚动到达，关闭后返回订单；桌面复核订单/助手打开返回。本轮测试输入已用键盘清空，没有发送消息、提交退改或产生资金操作。
+
+主会话typecheck、71文件/1,360项单元及PR格式8项通过；最终CSS构建通过，资产`tennis-BBTaD38K.js` / `tennis-Bm2oNfl_.css`，浏览器已reload核对。没有后端变更，沿用F16的23文件/291项PostgreSQL结果，不宣称本轮重跑集成。原始日志及几何证据存于总项目`outputs/Tennis-PMS-F17-verification.log`与`Tennis-PMS-F17-browser-evidence.json`。
+
+检查使用IAB浏览器尺寸覆盖；当时dpr约0.8，证据逐项记录innerWidth与visualViewport，不能把覆盖参数直接称为真机尺寸。截图存在工具裁切，因此仅报告已验证的DOM布局与操作，不声称完整视觉签收；真实触屏、中文输入法、手机软键盘及客户人工验收仍待完成。临时尺寸覆盖已恢复。真实微信/商户/外部Runtime与生产接入仍未完成，Goal不标完成。

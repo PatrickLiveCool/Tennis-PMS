@@ -23,7 +23,7 @@ class FetchRetryTests(unittest.TestCase):
         values = {FILES[0]: archive, "sbom.spdx.json": sbom, "manifest.json": json_bytes(current)}
         values["SHA256SUMS"] = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n"
                                          for name, data in values.items()).encode()
-        prefix = f"greenpms/releases/{VERSION}/{REVISION}/"
+        prefix = f"tennis-green-pms/releases/{VERSION}/{REVISION}/"
         fake.objects = {prefix + name: data for name, data in values.items()}
         return fake, prefix, values
 

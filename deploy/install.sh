@@ -2,33 +2,33 @@
 set -Eeuo pipefail
 umask 077
 
-INSTALL_ROOT=/opt/greenpms-release
+INSTALL_ROOT=/opt/tennis-green-pms-release
 LIB_DIR=$INSTALL_ROOT/lib
 VENV_DIR=$INSTALL_ROOT/venv
-CONFIG_DIR=/etc/greenpms
-STATE_DIR=/var/lib/greenpms-release
-HOME_DIR=/home/greenpms-deploy
-DEPLOY_USER=greenpms-deploy
+CONFIG_DIR=/etc/tennis-green-pms
+STATE_DIR=/var/lib/tennis-green-pms-release
+HOME_DIR=/home/tennis-green-pms-deploy
+DEPLOY_USER=tennis-green-pms-deploy
 KEY_DIR=$HOME_DIR/.ssh
 KEY_FILE=$KEY_DIR/authorized_keys
-SUDOERS_FILE=/etc/sudoers.d/greenpms-deploy
-SERVICE_FILE=/etc/systemd/system/greenpms-release-recovery.service
-TIMER_FILE=/etc/systemd/system/greenpms-release-recovery.timer
-LOGROTATE_FILE=/etc/logrotate.d/greenpms-release
+SUDOERS_FILE=/etc/sudoers.d/tennis-green-pms-deploy
+SERVICE_FILE=/etc/systemd/system/tennis-green-pms-release-recovery.service
+TIMER_FILE=/etc/systemd/system/tennis-green-pms-release-recovery.timer
+LOGROTATE_FILE=/etc/logrotate.d/tennis-green-pms-release
 
 DRY_RUN=0
 DEPLOY_PUBLIC_KEY=
 STAGE=
 
-die() { printf 'GreenPMS installer: %s\n' "$*" >&2; exit 1; }
-note() { printf 'GreenPMS installer: %s\n' "$*"; }
+die() { printf 'Tennis-Green-PMS installer: %s\n' "$*" >&2; exit 1; }
+note() { printf 'Tennis-Green-PMS installer: %s\n' "$*"; }
 
 usage() {
     cat <<'EOF'
 Usage: sudo bash deploy/install.sh [--dry-run] \
-  --deploy-public-key /root/greenpms-setup/deploy.pub
+  --deploy-public-key /root/tennis-green-pms-setup/deploy.pub
 
-Installs the GreenPMS release runtime and one restricted forced-command SSH key.
+Installs the Tennis-Green-PMS release runtime and one restricted forced-command SSH key.
 It does not create app/COS configuration, adopt a release, enable the recovery
 timer, or operate Docker containers or databases.
 EOF
@@ -49,10 +49,10 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 SOURCE_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
 for required in \
     "$SOURCE_ROOT/compose.server.yaml" "$SOURCE_ROOT/deploy/entry.py" \
-    "$SOURCE_ROOT/deploy/greenpms-deploy" "$SOURCE_ROOT/deploy/greenpms-deploy.sudoers" \
-    "$SOURCE_ROOT/deploy/greenpms-release-recovery.service" \
-    "$SOURCE_ROOT/deploy/greenpms-release-recovery.timer" \
-    "$SOURCE_ROOT/deploy/greenpms-release.logrotate" "$SOURCE_ROOT/deploy/ssh-entry.py" \
+    "$SOURCE_ROOT/deploy/tennis-green-pms-deploy" "$SOURCE_ROOT/deploy/tennis-green-pms-deploy.sudoers" \
+    "$SOURCE_ROOT/deploy/tennis-green-pms-release-recovery.service" \
+    "$SOURCE_ROOT/deploy/tennis-green-pms-release-recovery.timer" \
+    "$SOURCE_ROOT/deploy/tennis-green-pms-release.logrotate" "$SOURCE_ROOT/deploy/ssh-entry.py" \
     "$SOURCE_ROOT/scripts/release/requirements.txt"; do
     [[ -f "$required" && ! -L "$required" ]] || die "reviewed archive is incomplete: $required"
 done
@@ -84,11 +84,11 @@ python3 -c 'import sys, venv; raise SystemExit(0 if sys.version_info >= (3, 10) 
     || die "Python 3.10 or newer with the venv module is required"
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required"
 
-STAGE=$(mktemp -d /tmp/greenpms-install.XXXXXX)
+STAGE=$(mktemp -d /tmp/tennis-green-pms-install.XXXXXX)
 trap 'status=$?; [[ -z "${STAGE:-}" || ! -d "$STAGE" ]] || rm -rf -- "$STAGE"; exit "$status"' EXIT
 install -d -m 0700 "$STAGE"
 printf '%s\n' \
-    "restrict,command=\"/usr/local/libexec/greenpms-ssh-entry\" $DEPLOY_KEY" \
+    "restrict,command=\"/usr/local/libexec/tennis-green-pms-ssh-entry\" $DEPLOY_KEY" \
     > "$STAGE/authorized_keys"
 
 effective_sshd=$(sshd -T -C user="$DEPLOY_USER",addr=127.0.0.1,laddr=127.0.0.1,lport=22 2>/dev/null) \
@@ -98,7 +98,7 @@ printf '%s\n' "$effective_sshd" | awk '
     $1 == "forcecommand" && $2 != "none" { conflict = 1 }
     END { exit !(found && !conflict) }
 ' || die "sshd must use .ssh/authorized_keys and have no applicable ForceCommand"
-visudo -cf "$SOURCE_ROOT/deploy/greenpms-deploy.sudoers" >/dev/null \
+visudo -cf "$SOURCE_ROOT/deploy/tennis-green-pms-deploy.sudoers" >/dev/null \
     || die "sudoers validation failed"
 
 assert_root() {
@@ -144,20 +144,20 @@ if [[ -e "$VENV_DIR" || -L "$VENV_DIR" ]]; then ensure_dir "$VENV_DIR" 0755 "rel
 
 if (( ! DRY_RUN )); then
     exec 9>"$STATE_DIR/deploy.lock"
-    flock -n 9 || die "another GreenPMS install or release operation owns the lock"
+    flock -n 9 || die "another Tennis-Green-PMS install or release operation owns the lock"
 fi
 
-check_existing "$SOURCE_ROOT/deploy/greenpms-deploy.sudoers" "$SUDOERS_FILE" "sudoers file"
-check_existing "$SOURCE_ROOT/deploy/greenpms-release-recovery.service" "$SERVICE_FILE" "recovery service"
-check_existing "$SOURCE_ROOT/deploy/greenpms-release-recovery.timer" "$TIMER_FILE" "recovery timer"
-check_existing "$SOURCE_ROOT/deploy/greenpms-release.logrotate" "$LOGROTATE_FILE" "logrotate file"
+check_existing "$SOURCE_ROOT/deploy/tennis-green-pms-deploy.sudoers" "$SUDOERS_FILE" "sudoers file"
+check_existing "$SOURCE_ROOT/deploy/tennis-green-pms-release-recovery.service" "$SERVICE_FILE" "recovery service"
+check_existing "$SOURCE_ROOT/deploy/tennis-green-pms-release-recovery.timer" "$TIMER_FILE" "recovery timer"
+check_existing "$SOURCE_ROOT/deploy/tennis-green-pms-release.logrotate" "$LOGROTATE_FILE" "logrotate file"
 check_existing "$SOURCE_ROOT/compose.server.yaml" "$CONFIG_DIR/compose.server.yaml" "production compose file"
 check_existing "$STAGE/authorized_keys" "$KEY_FILE" "authorized keys"
 for source in "${RUNTIME_SOURCES[@]}"; do check_existing "$source" "$LIB_DIR/$(basename "$source")" "release runtime file"; done
 for pair in \
     "$SOURCE_ROOT/deploy/entry.py:$INSTALL_ROOT/entry.py" \
-    "$SOURCE_ROOT/deploy/greenpms-deploy:/usr/local/sbin/greenpms-deploy" \
-    "$SOURCE_ROOT/deploy/ssh-entry.py:/usr/local/libexec/greenpms-ssh-entry"; do
+    "$SOURCE_ROOT/deploy/tennis-green-pms-deploy:/usr/local/sbin/tennis-green-pms-deploy" \
+    "$SOURCE_ROOT/deploy/ssh-entry.py:/usr/local/libexec/tennis-green-pms-ssh-entry"; do
     source=${pair%%:*}; target=${pair#*:}
     check_existing "$source" "$target" "managed runtime file"
 done
@@ -193,16 +193,16 @@ install_if_absent() {
 }
 for source in "${RUNTIME_SOURCES[@]}"; do install_if_absent "$source" "$LIB_DIR/$(basename "$source")" root 0644; done
 install_if_absent "$SOURCE_ROOT/deploy/entry.py" "$INSTALL_ROOT/entry.py" root 0644
-install_if_absent "$SOURCE_ROOT/deploy/greenpms-deploy" /usr/local/sbin/greenpms-deploy root 0755
-install_if_absent "$SOURCE_ROOT/deploy/ssh-entry.py" /usr/local/libexec/greenpms-ssh-entry root 0755
-install_if_absent "$SOURCE_ROOT/deploy/greenpms-deploy.sudoers" "$SUDOERS_FILE" root 0440
-install_if_absent "$SOURCE_ROOT/deploy/greenpms-release-recovery.service" "$SERVICE_FILE" root 0644
-install_if_absent "$SOURCE_ROOT/deploy/greenpms-release-recovery.timer" "$TIMER_FILE" root 0644
-install_if_absent "$SOURCE_ROOT/deploy/greenpms-release.logrotate" "$LOGROTATE_FILE" root 0644
+install_if_absent "$SOURCE_ROOT/deploy/tennis-green-pms-deploy" /usr/local/sbin/tennis-green-pms-deploy root 0755
+install_if_absent "$SOURCE_ROOT/deploy/ssh-entry.py" /usr/local/libexec/tennis-green-pms-ssh-entry root 0755
+install_if_absent "$SOURCE_ROOT/deploy/tennis-green-pms-deploy.sudoers" "$SUDOERS_FILE" root 0440
+install_if_absent "$SOURCE_ROOT/deploy/tennis-green-pms-release-recovery.service" "$SERVICE_FILE" root 0644
+install_if_absent "$SOURCE_ROOT/deploy/tennis-green-pms-release-recovery.timer" "$TIMER_FILE" root 0644
+install_if_absent "$SOURCE_ROOT/deploy/tennis-green-pms-release.logrotate" "$LOGROTATE_FILE" root 0644
 install_if_absent "$SOURCE_ROOT/compose.server.yaml" "$CONFIG_DIR/compose.server.yaml" root 0644
 install_if_absent "$STAGE/authorized_keys" "$KEY_FILE" root 0644
 systemctl daemon-reload
 
 note "installed runtime, forced-command SSH keys, sudoers, recovery units, logrotate, and missing compose file"
-note "recovery timer remains disabled; after adoption run: sudo systemctl enable --now greenpms-release-recovery.timer"
-note "next create /etc/greenpms/app.env, deploy.json, and cos-readonly.json, then run adoption"
+note "recovery timer remains disabled; after adoption run: sudo systemctl enable --now tennis-green-pms-release-recovery.timer"
+note "next create /etc/tennis-green-pms/app.env, deploy.json, and cos-readonly.json, then run adoption"

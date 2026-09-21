@@ -1,40 +1,27 @@
-# Production deployment: API and WeCom worker use the same immutable image.
-# Database is TencentDB for PostgreSQL (private network), provided via DATABASE_URL in .env.
+# Server deployment only. Use a prebuilt immutable image and an externally
+# managed PostgreSQL database; this file never builds or migrates production data.
+# Template only: the current business payment adapter rejects production startup.
+name: tennis-green-pms
+
 services:
   app:
-    image: ${GREENPMS_IMAGE:?GREENPMS_IMAGE must name an immutable prebuilt release}
+    image: ${TENNIS_GREEN_PMS_IMAGE:?TENNIS_GREEN_PMS_IMAGE must name an immutable prebuilt release}
     pull_policy: never
-    container_name: qintopia-pms-app
+    container_name: ${TENNIS_GREEN_PMS_CONTAINER_NAME:-tennis-green-pms-app}
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      STAFF_PROFILE_MANIFEST_NAME: ${STAFF_PROFILE_MANIFEST_NAME:-unconfigured}
-      PORT: 4100
-      WEB_ORIGIN: ${WEB_ORIGIN}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
-      IMPORT_2026_REFERENCE_CATALOG: ${IMPORT_2026_REFERENCE_CATALOG:-false}
-      BEARER_AUTH_RATE_LIMIT_MAX: ${BEARER_AUTH_RATE_LIMIT_MAX:-600}
-      PREVIEW_TTL_SECONDS: ${PREVIEW_TTL_SECONDS:-600}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      AI_SETTINGS_ENCRYPTION_KEY: ${AI_SETTINGS_ENCRYPTION_KEY:-}
+      TENNIS_DATABASE_URL: ${TENNIS_DATABASE_URL:?TENNIS_DATABASE_URL is required}
+      TENNIS_ALLOW_NONLOCAL_DATABASE: "true"
+      TENNIS_ALLOW_SIMULATION: ${TENNIS_ALLOW_SIMULATION:-false}
+      TENNIS_HTTP_HOST: 0.0.0.0
+      TENNIS_HTTP_PORT: 4200
+      TENNIS_WEB_ORIGINS: ${TENNIS_WEB_ORIGINS:?TENNIS_WEB_ORIGINS is required}
+      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:-}
+      TENNIS_PAYMENT_SIGNING_KEY: ${TENNIS_PAYMENT_SIGNING_KEY:?TENNIS_PAYMENT_SIGNING_KEY is required}
     ports:
-      - "${APP_BIND:-127.0.0.1}:${APP_HOST_PORT:-4100}:4100"
+      - "${TENNIS_APP_BIND:-127.0.0.1}:${TENNIS_APP_HOST_PORT:-4200}:4200"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 5s
       timeout: 3s
       retries: 20
-
-  wecom-worker:
-    image: ${GREENPMS_IMAGE:?GREENPMS_IMAGE must name an immutable prebuilt release}
-    pull_policy: never
-    container_name: qintopia-pms-wecom-worker
-    restart: unless-stopped
-    command: ["node", "packages/db/src/wecom-worker-main.js"]
-    environment:
-      PMS_WECOM_SYNC_ENABLED: "true"
-      PMS_WECOM_SOURCE_ID: ${PMS_WECOM_SOURCE_ID:?PMS_WECOM_SOURCE_ID is required}
-      PMS_WECOM_CORP_ID: ${PMS_WECOM_CORP_ID:?PMS_WECOM_CORP_ID is required}
-      PMS_WECOM_APP_SECRET: ${PMS_WECOM_APP_SECRET:?PMS_WECOM_APP_SECRET is required}
-      PMS_WECOM_WORKER_DATABASE_URL: ${PMS_WECOM_WORKER_DATABASE_URL:?PMS_WECOM_WORKER_DATABASE_URL is required}

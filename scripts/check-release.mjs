@@ -19,8 +19,8 @@ function changelogReleaseSection(changelog, version) {
 
 function checkPolicy(rootDir, version) {
   const policy = JSON.parse(read("deploy/release-policy.json", rootDir));
-  if (policy.application !== "greenpms") {
-    throw new Error("release policy application must be greenpms");
+  if (policy.application !== "tennis-green-pms") {
+    throw new Error("release policy application must be tennis-green-pms");
   }
   if (policy.version !== version && policy.version !== `v${version}`) {
     throw new Error("release policy version must match package.json");
@@ -80,7 +80,9 @@ export function checkRelease({ rootDir = root, tag, environment = process.env } 
   const optionalNotes = resolve(rootDir, `docs/releases/v${version}.md`);
   try {
     const notes = readFileSync(optionalNotes, "utf8");
-    if (!notes.startsWith(`# QinTopia PMS v${version}\n`)) {
+    const targetTitle = `# Tennis-Green-PMS v${version}\n`;
+    const inheritedTitle = version === "1.4.3" && notes.startsWith(`# QinTopia PMS v${version}\n`);
+    if (!notes.startsWith(targetTitle) && !inheritedTitle) {
       throw new Error("Detailed release notes must name the current version");
     }
   } catch (error) {

@@ -1,4 +1,4 @@
-"""Shared validation and release bundle helpers for GreenPMS publishing."""
+"""Shared validation and release bundle helpers for Tennis-Green-PMS publishing."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-ARCHIVE = "greenpms-linux-amd64.docker.tar.zst"
+ARCHIVE = "tennis-green-pms-linux-amd64.docker.tar.zst"
 FILES = (ARCHIVE, "manifest.json", "SHA256SUMS", "sbom.spdx.json")
-SOURCE = "https://github.com/qintopia-agent-studio/GreenPMS"
+SOURCE = "https://github.com/PatrickLiveCool/Tennis-PMS"
 _VERSION_RE = re.compile(r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -43,7 +43,7 @@ def validate_identity(version: str, revision: str) -> tuple[str, str]:
 def release_prefix(root: str, version: str, revision: str) -> str:
     validate_identity(version, revision)
     _require(isinstance(root, str) and root == root.strip() and root.endswith("/"), "invalid COS release root")
-    _require(root == "greenpms/releases/", "invalid GreenPMS COS release root")
+    _require(root == "tennis-green-pms/releases/", "invalid Tennis-Green-PMS COS release root")
     return f"{root}{version}/{revision}/"
 
 
@@ -63,7 +63,7 @@ def validate_migrations(migrations: Any) -> list[dict[str, str]]:
 
 def image_tag(version: str, revision: str) -> str:
     version, revision = validate_identity(version, revision)
-    return f"greenpms:{version}-{revision}"
+    return f"tennis-green-pms:{version}-{revision}"
 
 
 def sha256_file(path: str | Path) -> str:
@@ -104,7 +104,7 @@ def validate_manifest(m: Any, version: str | None = None, revision: str | None =
     fields = {"schemaVersion", "application", "version", "gitRevision", "platform", "imageId", "imageTag", "archiveSha256", "sbomSha256", "createdAt", "source", "requiredMigrations", "rollbackCompatibility"}
     _require(set(m) == fields, "invalid manifest fields")
     _require(type(m.get("schemaVersion")) is int and m["schemaVersion"] == 1, "manifest schemaVersion must be 1")
-    _require(m.get("application") == "greenpms", "manifest application must be greenpms")
+    _require(m.get("application") == "tennis-green-pms", "manifest application must be tennis-green-pms")
     manifest_version, manifest_revision = validate_identity(m.get("version"), m.get("gitRevision"))
     if version is not None:
         validate_identity(version, manifest_revision)
@@ -119,7 +119,7 @@ def validate_manifest(m: Any, version: str | None = None, revision: str | None =
     _validate_sha(m.get("archiveSha256"), "archiveSha256")
     _validate_sha(m.get("sbomSha256"), "sbomSha256")
     _validate_timestamp(m.get("createdAt"))
-    _require(m.get("source") == SOURCE, "manifest source is not GreenPMS")
+    _require(m.get("source") == SOURCE, "manifest source is not Tennis-Green-PMS")
 
     validate_migrations(m["requiredMigrations"])
 

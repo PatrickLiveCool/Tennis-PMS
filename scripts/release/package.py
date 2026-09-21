@@ -1,4 +1,4 @@
-"""Build and validate one immutable GreenPMS Docker release bundle."""
+"""Build and validate one immutable Tennis-Green-PMS Docker release bundle."""
 
 from __future__ import annotations
 
@@ -121,7 +121,7 @@ def validate_release_identity(source_root: Path, version: str, revision: str) ->
 def validate_policy(source_root: Path, version: str) -> dict[str, str]:
     policy = read_json(source_root / "deploy" / "release-policy.json")
     require(isinstance(policy, dict), "invalid release policy")
-    require(policy.get("application") == "greenpms", "release policy application mismatch")
+    require(policy.get("application") == "tennis-green-pms", "release policy application mismatch")
     require(policy.get("version") in {version, version[1:]}, "release policy version mismatch")
     compatibility = policy.get("rollbackCompatibility")
     require(isinstance(compatibility, dict), "release policy compatibility is missing")
@@ -174,7 +174,7 @@ def validate_build_context(source_root: Path) -> None:
 
 
 def migration_manifest(source_root: Path) -> list[dict[str, str]]:
-    migration_root = source_root / "packages" / "db" / "src" / "migrations"
+    migration_root = source_root / "packages" / "db" / "src" / "tennis" / "migrations"
     try:
         paths = sorted(path for path in migration_root.iterdir() if path.is_file() and path.suffix == ".sql")
     except OSError:
@@ -269,7 +269,7 @@ def indexed_archive_path(path: Path):
         magic = stream.read(4)
     if magic != b"(\xb5/\xfd":
         return None, path
-    temporary = tempfile.TemporaryDirectory(prefix="greenpms-archive-")
+    temporary = tempfile.TemporaryDirectory(prefix="tennis-green-pms-archive-")
     raw = Path(temporary.name) / "image.tar"
     command(["zstd", "--quiet", "--decompress", "--force", "-o", str(raw), str(path)])
     return temporary, raw
@@ -402,7 +402,7 @@ def build_bundle(source_root: Path, version: str, revision: str, output: Path) -
     image_id = image.get("Id")
     provisional = {
         "schemaVersion": 1,
-        "application": "greenpms",
+        "application": "tennis-green-pms",
         "version": version,
         "gitRevision": revision,
         "platform": "linux/amd64",
@@ -417,7 +417,7 @@ def build_bundle(source_root: Path, version: str, revision: str, output: Path) -
     }
     validate_image_labels(image, provisional)
 
-    with tempfile.TemporaryDirectory(prefix="greenpms-package-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="tennis-green-pms-package-") as temporary:
         raw_archive = Path(temporary) / "image.tar"
         command(["docker", "save", "--output", str(raw_archive), tag])
         inspect_archive(raw_archive, provisional)

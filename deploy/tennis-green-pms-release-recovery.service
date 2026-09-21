@@ -1,0 +1,12 @@
+[Unit]
+Description=Recover interrupted Tennis-Green-PMS release and remove abandoned downloads
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/tennis-green-pms-deploy recover
+TimeoutStartSec=5min
+UMask=0077

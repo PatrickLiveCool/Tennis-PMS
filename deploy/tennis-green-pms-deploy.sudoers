@@ -1,0 +1,3 @@
+# Validate with visudo -cf; install as root:root 0440 after explicit approval.
+Defaults:tennis-green-pms-deploy !setenv
+tennis-green-pms-deploy ALL=(root) NOPASSWD: /usr/local/sbin/tennis-green-pms-deploy deploy *, /usr/local/sbin/tennis-green-pms-deploy rollback *, /usr/local/sbin/tennis-green-pms-deploy maintenance

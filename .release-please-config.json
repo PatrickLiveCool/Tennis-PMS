@@ -3,14 +3,14 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "qintopia-pms",
+      "package-name": "tennis-green-pms",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "draft": true,
       "force-tag-creation": true,
       "pull-request-title-pattern": "chore(release): release ${version}",
-      "pull-request-header": "This PR was generated with [Release Please].\n\n## 改动说明\n\nRelease Please 自动更新应用版本、锁文件、CHANGELOG 和回退策略版本字段。\n\n## 验证结果\n\nGreenPMS CI 会在此版本 PR 上运行 release check、类型检查、测试和构建。\n\n## 风险与回退\n\n合并版本 PR 只创建 Draft GitHub Release；只有人工 Publish 正式 Release 才会触发生产部署。",
+      "pull-request-header": "This PR was generated with [Release Please].\n\n## 改动说明\n\nRelease Please 自动更新 Tennis-Green-PMS 版本、锁文件、CHANGELOG 和回退策略版本字段。\n\n## 验证结果\n\n目标仓库 CI 会运行 release check、类型检查、测试和构建。\n\n## 风险与回退\n\n合并版本 PR 只创建 Draft GitHub Release；生产发布仍需完成环境配置和人工验收。",
       "extra-files": [
         {
           "type": "json",

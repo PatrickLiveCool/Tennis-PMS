@@ -146,8 +146,8 @@ def validate_receipt(receipt: Any, *, expected_prefix: str | None = None,
     allowed = required | {"localImagePlan"}
     if not required.issubset(receipt) or not set(receipt).issubset(allowed):
         raise ReleaseError("server receipt has an unexpected schema")
-    if receipt.get("application") != "greenpms" or receipt.get("status") != "healthy":
-        raise ReleaseError("server did not report a healthy GreenPMS release")
+    if receipt.get("application") != "tennis-green-pms" or receipt.get("status") != "healthy":
+        raise ReleaseError("server did not report a healthy Tennis-Green-PMS release")
     _timestamp(receipt.get("deployedAt"))
     _validate_local_image_plan(receipt.get("localImagePlan"))
     current = receipt.get("current")
@@ -167,7 +167,7 @@ def validate_receipt(receipt: Any, *, expected_prefix: str | None = None,
 
 
 def _read_manifest(store: CosStore, prefix: str) -> tuple[dict[str, Any], str]:
-    with tempfile.TemporaryDirectory(prefix="greenpms-manifest-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="tennis-green-pms-manifest-") as temporary:
         path = Path(temporary) / "manifest.json"
         store.download(prefix + "manifest.json", path)
         digest = sha256_file(path)
@@ -180,7 +180,7 @@ def _read_manifest(store: CosStore, prefix: str) -> tuple[dict[str, Any], str]:
 
 
 def _download_bytes(store: CosStore, key: str, limit: int | None = None) -> bytes:
-    with tempfile.TemporaryDirectory(prefix="greenpms-cos-object-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="tennis-green-pms-cos-object-") as temporary:
         path = Path(temporary) / "object"
         store.download(key, path)
         if limit is not None and path.stat().st_size > limit:
@@ -191,7 +191,7 @@ def _download_bytes(store: CosStore, key: str, limit: int | None = None) -> byte
 def _marker(manifest: dict[str, Any], manifest_sha: str, deployed_at: str) -> dict[str, Any]:
     validate_manifest(manifest)
     _timestamp(deployed_at)
-    return {"schemaVersion": 1, "application": "greenpms", "version": manifest["version"],
+    return {"schemaVersion": 1, "application": "tennis-green-pms", "version": manifest["version"],
             "gitRevision": manifest["gitRevision"], "imageId": manifest["imageId"],
             "manifestSha256": manifest_sha, "deployedAt": deployed_at}
 
@@ -207,7 +207,7 @@ def _ensure_marker(store: CosStore, prefix: str, manifest: dict[str, Any], manif
             raise
         existing = None
     if existing is not None:
-        if set(existing) != set(expected) or existing.get("schemaVersion") != 1 or existing.get("application") != "greenpms":
+        if set(existing) != set(expected) or existing.get("schemaVersion") != 1 or existing.get("application") != "tennis-green-pms":
             raise ReleaseError("existing deployed marker is invalid")
         for field in ("version", "gitRevision", "imageId", "manifestSha256"):
             if existing.get(field) != expected[field]:
@@ -290,7 +290,7 @@ def _valid_partial_marker(store: CosStore, prefix: str, files: dict[str, dict[st
     parts = prefix.removeprefix(store.prefix).split("/")
     if set(marker) != {"schemaVersion", "application", "version", "gitRevision", "imageId", "manifestSha256", "deployedAt"}:
         raise ReleaseError("partial release marker has an unexpected schema")
-    if marker["schemaVersion"] != 1 or marker["application"] != "greenpms":
+    if marker["schemaVersion"] != 1 or marker["application"] != "tennis-green-pms":
         raise ReleaseError("partial release marker is invalid")
     validate_identity(parts[0], parts[1])
     if marker["version"] != parts[0] or marker["gitRevision"] != parts[1]:
@@ -494,7 +494,7 @@ class LockedSSH:
             if self.process.stderr is not None:
                 remote_error = self.process.stderr.readline(513)
                 if (remote_error.endswith("\n") and len(remote_error) <= 512
-                        and remote_error.startswith("GreenPMS: ")
+                        and remote_error.startswith("Tennis-Green-PMS: ")
                         and all(character.isprintable() for character in remote_error.rstrip("\n"))):
                     raise ReleaseError(remote_error.rstrip("\n"))
             raise ReleaseError("server did not return one JSON receipt line")
@@ -640,7 +640,7 @@ def _deploy_or_rollback(operation: str, version: str, revision: str, key: str, m
             else:
                 validate_receipt(receipt)
             plan = retention_plan(retention_client, _protected(receipt), dry_run=True, now=now)
-            return "dry-run", {"application": "greenpms", "status": "dry-run", "manifest": manifest,
+            return "dry-run", {"application": "tennis-green-pms", "status": "dry-run", "manifest": manifest,
                                "manifestSha256": manifest_sha, "snapshot": receipt, "localImagePlan": receipt.get("localImagePlan"),
                                "retention": plan}
         return _session("maintenance", snapshot, ssh_factory=ssh_factory)
@@ -651,7 +651,7 @@ def _deploy_or_rollback(operation: str, version: str, revision: str, key: str, m
         plan = retention_plan(retention_client, _protected(receipt), now=now)
         if plan["deleteFailures"]:
             raise ReleaseError("COS retention deletion failed; healthy version retained; retry required")
-        return "complete", {"application": "greenpms", "status": "healthy", "receipt": receipt,
+        return "complete", {"application": "tennis-green-pms", "status": "healthy", "receipt": receipt,
                             "marker": marker, "retention": plan}
     return _session(operation, finalize, version=version, revision=revision, key=key,
                     manifest_sha=manifest_sha, ssh_factory=ssh_factory)
@@ -675,14 +675,14 @@ def maintenance(*, dry_run: bool = False, store: CosStore | None = None,
         plan = retention_plan(retention_client, _protected(receipt), dry_run=dry_run, now=now)
         if not dry_run and plan["deleteFailures"]:
             raise ReleaseError("COS retention deletion failed; retry required")
-        return ("dry-run" if dry_run else "complete"), {"application": "greenpms", "status": "dry-run" if dry_run else "healthy",
+        return ("dry-run" if dry_run else "complete"), {"application": "tennis-green-pms", "status": "dry-run" if dry_run else "healthy",
                                                         "snapshot": receipt, "localImagePlan": receipt.get("localImagePlan"),
                                                         "retention": plan}
     return _session("maintenance", finalize, ssh_factory=ssh_factory)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="GreenPMS locked production orchestration")
+    parser = argparse.ArgumentParser(description="Tennis-Green-PMS locked production orchestration")
     subparsers = parser.add_subparsers(dest="operation", required=True)
     for name in ("deploy", "rollback"):
         command = subparsers.add_parser(name)
@@ -714,5 +714,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except ReleaseError as error:
-        print(f"GreenPMS: {error}", file=sys.stderr)
+        print(f"Tennis-Green-PMS: {error}", file=sys.stderr)
         raise SystemExit(1)

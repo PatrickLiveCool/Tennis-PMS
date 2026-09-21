@@ -7,10 +7,11 @@ const runtimeTrees = [
   ["apps/api/src", "apps/api/src"],
   ["packages/contracts/src", "packages/contracts/src"],
   ["packages/domain/src", "packages/domain/src"],
-  ["packages/db/src", "packages/db/src"]
+  ["packages/db/src", "packages/db/src"],
+  ["scripts/tennis", "scripts/tennis"]
 ];
 const excludedRuntimeFiles = new Set(["migrate.ts", "ready.ts", "reset.ts", "seed.ts"]);
-const sourceFilePattern = /\.(?:ts|tsx)$/u;
+const sourceFilePattern = /\.(?:ts|tsx|mts)$/u;
 const testFilePattern = /(?:\.test|\.spec)\.(?:ts|tsx)$/u;
 
 function parseOptions() {
@@ -40,7 +41,8 @@ function runtimePackageJson(packageJson, relativePath) {
   delete value.devDependencies;
 
   if (relativePath === "package.json") {
-    value.scripts = { start: "node apps/api/src/main.js" };
+    value.type = "module";
+    value.scripts = { start: "node scripts/tennis/server-entry.mjs" };
   } else if (relativePath === "apps/api/package.json") {
     value.scripts = { start: "node src/main.js" };
   } else {
@@ -87,6 +89,7 @@ async function transformTree(root, output, sourceRelative, outputRelative, packa
         continue;
       }
       if (!entry.isFile() || !sourceFilePattern.test(entry.name) || testFilePattern.test(entry.name)) continue;
+      if (sourceRelative === "scripts/tennis" && entry.name !== "server-entry.mts") continue;
       if (sourceRelative === "packages/db/src" && excludedRuntimeFiles.has(entry.name)) continue;
 
       const extension = extname(entry.name);
@@ -98,7 +101,7 @@ async function transformTree(root, output, sourceRelative, outputRelative, packa
         target: "node22",
         sourcemap: false
       });
-      await writeFile(outputPath.replace(/\.tsx?$/u, ".js"), rewriteTypeScriptSpecifiers(transformed.code));
+      await writeFile(outputPath.replace(/\.(?:tsx?|mts)$/u, extension === ".mts" ? ".mjs" : ".js"), rewriteTypeScriptSpecifiers(transformed.code));
     }
   }
 
@@ -116,9 +119,9 @@ async function main() {
     await transformTree(root, output, sourceRelative, outputRelative, packageJson.version);
   }
 
-  await cp(resolve(root, "packages/db/src/migrations"), resolve(output, "packages/db/src/migrations"), { recursive: true });
+  await cp(resolve(root, "packages/db/src/tennis/migrations"), resolve(output, "packages/db/src/tennis/migrations"), { recursive: true });
   await cp(resolve(root, "packages/db/catalog"), resolve(output, "packages/db/catalog"), { recursive: true });
-  await cp(resolve(root, "apps/web/dist"), resolve(output, "apps/web/dist"), { recursive: true });
+  await cp(resolve(root, "apps/web/dist-tennis"), resolve(output, "apps/web/dist-tennis"), { recursive: true });
   await cp(resolve(root, "package-lock.json"), resolve(output, "package-lock.json"));
 
   for (const relativePath of [

@@ -33,6 +33,7 @@ class InstallerTests(unittest.TestCase):
             else:
                 body += "exit 0\n"
             self.write_executable(directory, name, body)
+        self.write_executable(directory, "python3", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
         python_dir = str(Path(sys.executable).parent)
         return os.pathsep.join((str(directory), python_dir, "/usr/bin", "/bin"))
 
@@ -114,7 +115,7 @@ class InstallerTests(unittest.TestCase):
     def test_help_and_source_boundary_are_explicit(self) -> None:
         result = subprocess.run(["bash", str(INSTALLER), "--help"], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0)
-        self.assertIn("/root/greenpms-setup/deploy.pub", result.stdout)
+        self.assertIn("/root/tennis-green-pms-setup/deploy.pub", result.stdout)
         self.assertNotIn("maintenance-public-key", result.stdout)
 
         source = INSTALLER.read_text(encoding="utf-8")
@@ -122,7 +123,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('"$SOURCE_ROOT/deploy/entry.py"', source)
         self.assertIn('docker compose version', source)
         self.assertIn('printf \'%s\\n\' \\', source)
-        self.assertIn('restrict,command=\\"/usr/local/libexec/greenpms-ssh-entry\\" $DEPLOY_KEY', source)
+        self.assertIn('restrict,command=\\"/usr/local/libexec/tennis-green-pms-ssh-entry\\" $DEPLOY_KEY', source)
         for forbidden in ("docker ps", "docker load", "docker compose up", "docker system prune", "apt-get"):
             self.assertNotIn(forbidden, source)
         self.assertNotIn('"$SOURCE_ROOT/apps', source)
@@ -136,13 +137,13 @@ class InstallerTests(unittest.TestCase):
             "sshd -T -C",
             "authorizedkeysfile",
             "forcecommand",
-            "HOME_DIR=/home/greenpms-deploy",
+            "HOME_DIR=/home/tennis-green-pms-deploy",
             "KEY_DIR=$HOME_DIR/.ssh",
             "chmod 0755 \"$HOME_DIR\" \"$KEY_DIR\"",
             "install_if_absent \"$STAGE/authorized_keys\" \"$KEY_FILE\" root 0644",
             "--shell /bin/sh",
             "usermod --password '*'",
-            "systemctl enable --now greenpms-release-recovery.timer",
+            "systemctl enable --now tennis-green-pms-release-recovery.timer",
         ):
             self.assertIn(fragment, source)
         for fragment in (

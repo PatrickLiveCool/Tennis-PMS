@@ -7,6 +7,7 @@
 node_modules
 **/node_modules
 apps/web/dist
+apps/web/dist-tennis
 # Repository-only design, audit, and planning material. Release notes remain
 # available because the image build validates the tagged version against them.
 diagrams
@@ -49,3 +50,9 @@ database-dumps
 **/*.pfx
 qintopia-agent-os
 green-pms-build-*
+.local-workspace
+.worktrees
+.codex
+.agents
+runtime
+tennis-green-pms-build-*

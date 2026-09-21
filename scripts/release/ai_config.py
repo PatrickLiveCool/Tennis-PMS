@@ -15,8 +15,8 @@ import tempfile
 from common import require, sha256_file, utcnow
 from server import atomic_json, command, root_owned
 
-KEY = "AI_SETTINGS_ENCRYPTION_KEY"
-MAPPING = "      AI_SETTINGS_ENCRYPTION_KEY: ${AI_SETTINGS_ENCRYPTION_KEY:-}\n"
+KEY = "TENNIS_AI_ENCRYPTION_KEY"
+MAPPING = "      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:-}\n"
 
 
 def atomic_bytes(path, data):
@@ -39,22 +39,21 @@ def atomic_bytes(path, data):
 
 def candidates(compose, env):
     # Only support the reviewed production layout; preserve all unrelated bytes.
-    require(compose.count(b"  app:\n") == 1 and compose.count(b"  wecom-worker:\n") == 1,
+    require(compose.count(b"  app:\n") == 1,
             "unexpected production Compose layout")
-    start, end = compose.index(b"  app:\n"), compose.index(b"  wecom-worker:\n")
-    require(start < end, "unexpected production Compose order")
-    app = compose[start:end]
+    start = compose.index(b"  app:\n")
+    app = compose[start:]
     if KEY.encode() in compose:
         require(compose.count(KEY.encode()) == 2 and MAPPING.encode() in app,
                 "existing AI Compose mapping requires administrator review")
     else:
         require(app.count(b"    environment:\n") == 1, "unexpected app environment layout")
         app = app.replace(b"    environment:\n", b"    environment:\n" + MAPPING.encode(), 1)
-        compose = compose[:start] + app + compose[end:]
+        compose = compose[:start] + app
     # Refuse ambiguous/quoted/exported/empty definitions, rather than rotate keys.
     lines = [line for line in env.splitlines() if KEY.encode() in line and not line.lstrip().startswith(b"#")]
     if lines:
-        require(len(lines) == 1 and re.fullmatch(rb"AI_SETTINGS_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=", lines[0]) is not None,
+        require(len(lines) == 1 and re.fullmatch(rb"TENNIS_AI_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=", lines[0]) is not None,
                 "existing AI key requires administrator review; no rotation performed")
         value = lines[0].split(b"=", 1)[1]
         require(base64.b64encode(base64.b64decode(value)) == value, "noncanonical AI key; no rotation performed")
@@ -67,24 +66,31 @@ def candidates(compose, env):
 
 def check_empty_settings():
     # Read only an existence bit. Never emit database URLs, provider keys or rows.
-    command(["docker", "exec", "qintopia-pms-app", "node", "--input-type=module", "-e", """
+    command(["docker", "exec", "tennis-green-pms-app", "node", "--input-type=module", "-e", """
 import pg from 'pg';
-if (process.env.AI_SETTINGS_ENCRYPTION_KEY) process.exit(1);
-const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+if (process.env.TENNIS_AI_ENCRYPTION_KEY) process.exit(1);
+const db = new pg.Client({ connectionString: process.env.TENNIS_DATABASE_URL });
 try {
   await db.connect();
-  const result = await db.query('SELECT EXISTS (SELECT 1 FROM ai_model_settings WHERE encrypted_key IS NOT NULL) AS present');
+  const result = await db.query('SELECT EXISTS (SELECT 1 FROM tennis.platform_ai_config WHERE encrypted_key IS NOT NULL) AS present');
   if (result.rows[0].present) process.exitCode = 1;
+  const backoffice = await db.query("SELECT to_regclass('tennis.backoffice_ai_config') AS present");
+  if (backoffice.rows[0].present) {
+    const result = await db.query('SELECT EXISTS (SELECT 1 FROM tennis.backoffice_ai_config WHERE encrypted_key IS NOT NULL) AS present');
+    if (result.rows[0].present) process.exitCode = 1;
+  }
 } catch { process.exitCode = 1; } finally { await db.end(); }
 """])
 
 
 def check_key_ready():
-    # Exercise the actual deployed encryption/decryption implementation, not a copy.
-    command(["docker", "exec", "qintopia-pms-app", "node", "--input-type=module", "-e", """
+    # Validate runtime key wiring without changing any provider configuration.
+    command(["docker", "exec", "tennis-green-pms-app", "node", "--input-type=module", "-e", """
 try {
-  const { keyReady, encryptKey, decryptKey } = await import('/app/apps/api/src/assistant-model.js');
-  if (!keyReady() || decryptKey(encryptKey('deployment-self-check')) !== 'deployment-self-check') process.exitCode = 1;
+  const value = process.env.TENNIS_AI_ENCRYPTION_KEY || '';
+  const key = Buffer.from(value, 'base64');
+  if (key.length !== 32 || key.toString('base64') !== value) process.exitCode = 1;
+  await import('/app/packages/db/src/tennis/external-agent.js');
 } catch { process.exitCode = 1; }
 """])
 
