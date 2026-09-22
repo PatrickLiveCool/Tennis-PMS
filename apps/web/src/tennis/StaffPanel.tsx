@@ -11,7 +11,7 @@ const permissionNames: Record<string, string> = {
   manage_prices: "定价",
   refund: "退款",
   hold_unpaid: "保留未付款",
-  manage_members: "会员储值",
+  manage_members: "会员管理",
 };
 export function StaffPanel({ api }: { api: TennisApi }) {
   const staff = useLoad(() => api<StaffView[]>("/staff"), [api]);
