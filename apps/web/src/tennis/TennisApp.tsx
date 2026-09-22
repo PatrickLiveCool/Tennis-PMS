@@ -419,7 +419,7 @@ function Workspace({
             </Panel>
           ) : (
             <BusinessWorkspace
-              key={`${identityScope}:${session.contextVersion}:${venue.id}`}
+              key={`workspace:${identityScope}:${session.contextVersion}:${venue.id}`}
               api={api}
               session={session}
               venue={venue}
@@ -433,7 +433,7 @@ function Workspace({
             session.contextValid !== false &&
             (session.kind === "customer" || permits(session, "read")) && (
               <AssistantPanel
-                key={`${identityScope}:${session.contextVersion}:${venue.id}`}
+                key={`assistant:${identityScope}:${session.contextVersion}:${venue.id}`}
                 api={api}
                 session={session}
                 venue={venue}
