@@ -396,35 +396,35 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
       reason: draft.reason.trim(),
     };
     const result = await mutation.run<GatewayBinding>(
-      `绑定渠道身份 ${payload.externalSubjectId} 至${draft.target.name}`,
+      `绑定渠道账号 ${payload.externalSubjectId} 至${draft.target.name}`,
       "/gateway-bindings",
       payload,
     );
     if (result) {
       setDraft({ integrationId: draft.integrationId, externalSubjectId: "", target: null, reason: "" });
-      setNotice("渠道身份已绑定。");
+      setNotice("渠道账号已绑定。");
       await list.refresh();
     }
   }
   async function revokeItem(reason: string) {
     if (!revoke) return false;
     const result = await mutation.run<GatewayBinding>(
-      `撤销渠道身份 ${revoke.externalSubjectId}（${revoke.id}）`,
+      `撤销渠道账号 ${revoke.externalSubjectId}（${revoke.id}）`,
       `/gateway-bindings/${revoke.id}/revoke`,
       { reason },
     );
     setRevoke(null);
     if (result) {
-      setNotice("渠道身份绑定已撤销。");
+      setNotice("渠道账号绑定已撤销。");
       await list.refresh();
     }
     return Boolean(result);
   }
   return (
     <Panel
-      title="渠道身份绑定"
+      title="渠道账号绑定"
       action={<div className="tennis-actions">
-        <InfoHint label="身份绑定说明">把渠道账号关联到已有客户或员工。新客户请先在客户页面建档；手机号相同不会自动绑定。</InfoHint>
+        <InfoHint label="渠道账号绑定说明">把微信等渠道账号关联到已有客户或员工。此处填写渠道账号编号，不填写 API Key；系统接入凭据由平台运营管理。新客户请先建档，手机号相同不会自动绑定。</InfoHint>
         <RefreshButton busy={list.busy || mutation.busy} onClick={() => void list.refresh()} />
       </div>}
     >
@@ -465,7 +465,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
             </select>
           </label>
           <label>
-            渠道身份编号
+            渠道账号编号
             <input
               required
               maxLength={200}

@@ -4,7 +4,7 @@
 
 ## 配置与权限
 
-租户 ADMIN 在“场地与定价 → 预订期限”设置全部场馆共用的 `quoteMinutes` 和 `paymentHoldMinutes`。GET/PATCH `/api/tennis/booking-policy` 使用当前可信会话租户，不接受调用方指定 tenantId；客户、普通员工（即使具有资产权限）、只读员工及无租户成员身份的平台运营员不能使用该配置入口。停用租户/成员照常拒绝。
+租户 ADMIN 在“场地设置 → 预订期限”设置全部场馆共用的 `quoteMinutes` 和 `paymentHoldMinutes`。GET/PATCH `/api/tennis/booking-policy` 使用当前可信会话租户，不接受调用方指定 tenantId；客户、普通员工（即使具有资产权限）、只读员工及无租户成员身份的平台运营员不能使用该配置入口。停用租户/成员照常拒绝。
 
 两个字段接受1–1440整分钟，服务及数据库均校验。读取未配置租户返回默认5/10和revision=1，不隐式写入。保存必须匹配expectedRevision；使用与交易相同的租户锁，两个并发保存只有一个成功，另一个返回STALE_CONFIGURATION；配置前后值和操作者同事务审计。后台失败保留输入，可以“重新读取当前设置”核对数据库当前值。
 

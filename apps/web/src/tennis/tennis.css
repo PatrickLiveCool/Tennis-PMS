@@ -105,6 +105,8 @@
 .tennis-bottom-nav {
   display: none;
 }
+.tennis-mobile-management { display: none; }
+.tennis-mobile-management.is-active { color: var(--brand); background: var(--brand-soft); }
 .tennis-panel {
   padding: 20px;
   background: var(--surface);
@@ -935,6 +937,7 @@
     padding: 5px 5px calc(5px + env(safe-area-inset-bottom));
     justify-content: space-around;
   }
+  .tennis-mobile-management { display: inline-flex; }
   .tennis-app .tennis-bottom-nav button.nav-link {
     width: auto;
     flex: 1;

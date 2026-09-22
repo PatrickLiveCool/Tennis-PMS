@@ -21,8 +21,6 @@ import {
 } from "./components";
 import { PricingPanel } from "./PricingPanel";
 import { BookingPolicyPanel } from "./BookingPolicyPanel";
-import { StaffPanel } from "./StaffPanel";
-import { TenantGatewayPanel } from "./GatewayPanel";
 
 export const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 export function MinuteSelect({
@@ -64,7 +62,7 @@ export function SettingsPage({
   const admin = session.tenants.some((t) => t.id === session.tenantId && t.kind === "staff" && t.role === "ADMIN");
   return (
     <>
-      <PageHeading title="场地与定价">
+      <PageHeading title="场地设置">
         {canAssets && (
           <button className="button button-secondary" onClick={() => setNewVenue(true)}>
             <Plus size={16} />
@@ -86,12 +84,6 @@ export function SettingsPage({
             </button>
             <button className={tab === "topups" ? "active" : ""} onClick={() => setTab("topups")}>
               充值方案
-            </button>
-            <button className={tab === "staff" ? "active" : ""} onClick={() => setTab("staff")}>
-              员工权限
-            </button>
-            <button className={tab === "gateway" ? "active" : ""} onClick={() => setTab("gateway")}>
-              渠道身份
             </button>
           </>
         )}
@@ -145,13 +137,6 @@ export function SettingsPage({
         </div>
       ) : tab === "policy" && admin ? (
         <BookingPolicyPanel key={`${session.subjectId}:${session.tenantId}:${session.contextVersion}`} api={api} />
-      ) : tab === "gateway" && admin ? (
-        <TenantGatewayPanel
-          api={api}
-          scope={`${session.subjectId}:${session.kind}:${session.tenantId}:${session.contextVersion}`}
-        />
-      ) : tab === "staff" ? (
-        <StaffPanel api={api} />
       ) : (
         <PricingPanel
           api={api}

@@ -151,7 +151,7 @@ export function BookingPage({
       if (court.hourlyPriceCents === null)
         return "球场尚未配置价格，请先核对价目。";
       if (!draft.quote && !isCourtReadyForBooking(court))
-        return "球场必填资料尚未补齐，请先到场地与定价中完善。";
+        return "球场必填资料尚未补齐，请先到场地设置中完善。";
       if (Date.parse(line.startAt) <= now) return "开始时间已到，请调整时段。";
       if (
         selectedSchedules.some((item) =>
@@ -590,7 +590,7 @@ export function BookingPage({
               ) : !courts.some((court) => court.active) ? (
                 <EmptyState
                   title={session.kind === "customer" ? "暂无可预订球场" : "暂无启用球场"}
-                  detail={session.kind === "customer" ? "请稍后再来查看。" : "请先在场地与定价中添加或启用球场。"}
+                  detail={session.kind === "customer" ? "请稍后再来查看。" : "请先在场地设置中添加或启用球场。"}
                 />
               ) : undefined
             }

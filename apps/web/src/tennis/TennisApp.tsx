@@ -7,6 +7,7 @@ import {
   LogOut,
   MessagesSquare,
   Settings,
+  ShieldCheck,
   Sparkles,
   UserRound,
   Users,
@@ -21,6 +22,7 @@ import { OrdersPage, OrderDialog } from "./OrdersPage";
 import { OverviewPage } from "./OverviewPage";
 import { PlatformPage } from "./PlatformPage";
 import { SettingsPage, NewVenue } from "./SettingsPage";
+import { canManageTenant, ManagementPage } from "./ManagementPage";
 import { AssistantPanel, BusinessConversationPanel } from "./AssistantPanel";
 import { MembersPage } from "./MembersPage";
 import { TopupRecordDialog } from "./TopupHistoryPanel";
@@ -132,7 +134,8 @@ const navigation = [
   { id: "today", name: "经营概览", icon: LayoutDashboard },
   { id: "orders", name: "预订订单", icon: ClipboardList },
   { id: "members", name: "会员管理", icon: Users },
-  { id: "settings", name: "场地与定价", icon: Settings },
+  { id: "settings", name: "场地设置", icon: Settings },
+  { id: "management", name: "系统管理", icon: ShieldCheck },
 ];
 function Workspace({
   session,
@@ -215,11 +218,12 @@ function Workspace({
   }
   const entries = navigation
     .filter((item) => item.id !== "members" || session.kind === "customer" || permits(session, "manage_members"))
-    .filter((item) => item.id !== "settings" || session.kind === "staff");
+    .filter((item) => item.id !== "settings" || session.kind === "staff")
+    .filter((item) => item.id !== "management" || canManageTenant(session));
   const currentPage = entries.some((e) => e.id === page) ? page : "booking";
   const nav = (mobile = false) => (
     <nav className={mobile ? "tennis-bottom-nav" : "primary-navigation"} aria-label={mobile ? "手机导航" : "主导航"}>
-      {entries.map((item) => (
+      {entries.filter((item) => !mobile || item.id !== "management").map((item) => (
         <button
           key={item.id}
           type="button"
@@ -350,6 +354,12 @@ function Workspace({
           </div>
           <div className="tennis-header-tools">
             {session.localSimulation && <span className="tennis-demo-badge">本地模拟</span>}
+            {canManageTenant(session) && <button
+              className={`icon-button tennis-mobile-management${currentPage === "management" ? " is-active" : ""}`}
+              aria-label="系统管理" title="系统管理" aria-current={currentPage === "management" ? "page" : undefined}
+              onClick={() => setPage("management")}>
+              <ShieldCheck size={19} aria-hidden="true" />
+            </button>}
             {session.kind === "staff" && permits(session, "book") && (
               <button className="icon-button" aria-label="打开咨询与协助" title="咨询与协助" onClick={() => setBusinessConversationsOpen(true)}>
                 <MessagesSquare size={19} />
@@ -391,6 +401,8 @@ function Workspace({
               )}
               <PlatformPage api={api} scope={session.subjectId} />
             </>
+          ) : currentPage === "management" && canManageTenant(session) ? (
+            <ManagementPage api={api} session={session} />
           ) : !venue ? (
             <Panel>
               <ErrorNotice error={venues.error} retry={() => void venues.refresh()} />
@@ -407,7 +419,7 @@ function Workspace({
             </Panel>
           ) : (
             <BusinessWorkspace
-              key={`${identityScope}:${session.contextVersion}:${venue.id}`}
+              key={`workspace:${identityScope}:${session.contextVersion}:${venue.id}`}
               api={api}
               session={session}
               venue={venue}
@@ -421,7 +433,7 @@ function Workspace({
             session.contextValid !== false &&
             (session.kind === "customer" || permits(session, "read")) && (
               <AssistantPanel
-                key={`${identityScope}:${session.contextVersion}:${venue.id}`}
+                key={`assistant:${identityScope}:${session.contextVersion}:${venue.id}`}
                 api={api}
                 session={session}
                 venue={venue}
