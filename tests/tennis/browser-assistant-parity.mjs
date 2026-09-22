@@ -1,5 +1,6 @@
 import { chromium, expect } from "@playwright/test";
 import fs from "node:fs/promises";
+import { reserveSyntheticPhone } from "./browser-fixtures.mjs";
 
 // Explicit real-model acceptance: uses the local saved test provider. Never run
 // from npm test. Only local synthetic courts/orders and non-sensitive prompts.
@@ -29,17 +30,17 @@ try {
     await p.getByRole("button", { name: "添加球场", exact: true }).click();
     await p.getByLabel("球场名称", { exact: true }).fill(courtName);
     await p.getByLabel("场地材质").selectOption("CLAY");
-    await p.getByLabel("室内球场", { exact: true }).check();
-    await p.getByRole("button", { name: "创建球场", exact: true }).click();
+    await p.getByLabel("场地环境", { exact: true }).selectOption("INDOOR");
   } else {
     await p.locator(".tennis-ledger-row").filter({ hasText: courtName }).getByRole("button", { name: "编辑", exact: true }).click();
   }
   await expect(p.getByLabel("场地材质")).toHaveValue("CLAY");
-  await expect(p.getByLabel("室内球场", { exact: true })).toBeChecked();
+  await expect(p.getByLabel("场地环境", { exact: true })).toHaveValue("INDOOR");
+  await p.getByLabel("规格类型", { exact: true }).selectOption("STANDARD");
   await p.getByLabel("标准小时价（元 / 小时）").fill("100");
-  await p.getByRole("button", { name: "保存小时价格", exact: true }).click();
-  await expect(p.getByText("标准小时价已保存。", { exact: true })).toBeVisible();
-  await p.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
+  const save = p.getByRole("dialog").getByRole("button", { name: "保存", exact: true });
+  if (await save.isEnabled()) await save.click();
+  else await p.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
   await expect(p.locator(".tennis-ledger-row").filter({ hasText: courtName })).toContainText("室内 · 红土场");
   await p.screenshot({ path: `${out}/clay-editor.png`, fullPage: true });
   await admin.context.close();
@@ -53,7 +54,8 @@ try {
   const day = page.locator(`[data-schedule-date="${testDate}"]`);
   await expect(day.locator(".tennis-grid-court")).toHaveCount(1);
   await day.getByRole("button", { name: `${courtName} 10:00 添加预订`, exact: true }).click();
-  await page.getByLabel("称呼", { exact: true }).fill("红土预订合成客");
+  await page.getByLabel("姓名", { exact: true }).fill("红土预订合成客");
+  await page.getByLabel("手机号", { exact: true }).fill(reserveSyntheticPhone());
   await page.getByRole("button", { name: "核对场地与报价", exact: true }).click();
   await page.getByRole("button", { name: "确认预订", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: /预订详情/ });

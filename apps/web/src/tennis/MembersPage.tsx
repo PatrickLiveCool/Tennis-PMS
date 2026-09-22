@@ -1,3 +1,4 @@
+import { InfoHint } from "./InfoHint";
 import { TopupHistoryPanel } from "./TopupHistoryPanel";
 import { useRef, useState } from "react";
 import { Plus, Wallet as WalletIcon } from "lucide-react";
@@ -61,7 +62,7 @@ export function MembersPage({
   const [topup, setTopup] = useState(false);
   return (
     <>
-      <PageHeading title="客户与余额" description="同一租户各校区通用，本金与赠送分别记账。">
+      <PageHeading title="客户与余额">
         <RefreshButton onClick={refreshWallet} busy={wallet.busy} />
       </PageHeading>
       <div className="tennis-members-layout">
@@ -97,7 +98,7 @@ export function MembersPage({
                 <div className="tennis-balance">
                   <WalletIcon size={22} />
                   <div>
-                    <span>可用消费余额</span>
+                    <span>可用余额 <InfoHint label="余额使用说明">同一商家的各场馆通用。先使用较早充值的余额，每次按该笔充值的本金和赠送比例扣除。会员身份不额外打折。</InfoHint></span>
                     <strong>{money(wallet.data.balance.availableCents)}</strong>
                   </div>
                 </div>
@@ -119,7 +120,6 @@ export function MembersPage({
                     <strong>{money(wallet.data.balance.giftCents)}</strong>
                   </div>
                 </div>
-                <p className="tennis-muted">按充值先后消费，每批按本金 / 赠送比例扣款；会员身份不另加折扣。</p>
               </Panel>
               <TopupHistoryPanel
                 api={api}
@@ -130,7 +130,7 @@ export function MembersPage({
                 revision={topupRevision}
                 onChanged={refreshWallet}
               />
-              <Panel title="资金明细">
+              <Panel title="资金明细" action={<InfoHint label="资金明细说明">每笔金额分为本金和赠送。付款预留期间，这部分余额暂时不能使用；释放后恢复可用。</InfoHint>}>
                 {wallet.data.entries.length === 0 ? (
                   <EmptyState title="暂无资金明细" detail="充值、付款预留、扣款和退款会在这里记录。" />
                 ) : (
@@ -162,9 +162,6 @@ export function MembersPage({
                     </table>
                   </div>
                 )}
-                <p className="tennis-muted">
-                  金额展示该笔涉及的本金 / 赠送构成。预留与释放只改变可用额度，请结合事项和账户余额核对。
-                </p>
                 <div className="tennis-actions">
                   <button
                     className="button button-secondary"
@@ -173,7 +170,7 @@ export function MembersPage({
                   >
                     上一页
                   </button>
-                  <span className="tennis-muted">第 {historyCursors.length + 1} 页 · 每页最多 50 条</span>
+                  <span className="tennis-muted">第 {historyCursors.length + 1} 页</span>
                   <button
                     className="button button-secondary"
                     disabled={wallet.busy || !wallet.data.nextCursor}
@@ -269,7 +266,7 @@ function TopupDialog({
   }
   async function getQuote() {
     if (pendingCommands(scope).some((p) => p.intent.startsWith("topup.confirm:"))) {
-      setError(new Error("已有充值提交等待结果核实，请先查询原操作。"));
+      setError(new Error("上一笔充值结果还未确认，请先核对。"));
       return;
     }
     const started = version.current;
@@ -352,7 +349,7 @@ function TopupDialog({
             <p className="tennis-note">
               {draft.payment.provider === "MOCK"
                 ? "本地模拟充值，不会发生真实扣费。"
-                : "等待支付渠道回执，成功后才入账。"}
+                : "付款成功后，充值金额才会到账。"}
             </p>
             <div className="tennis-actions">
               <RefreshButton busy={command.busy} onClick={() => void refreshPayment()} />
@@ -472,7 +469,7 @@ function TopupDialog({
             ) : (
               <>
                 <label>
-                  真实收款本金（元）
+                  已收金额（元）
                   <input
                     type="number"
                     min="0"
@@ -501,7 +498,7 @@ function TopupDialog({
                   />
                 </label>
                 <label>
-                  登记原因 / 收款说明
+                  收款说明
                   <textarea
                     value={draft.reason}
                     onChange={(e) => update({ reason: e.target.value })}
@@ -509,7 +506,7 @@ function TopupDialog({
                   />
                 </label>
                 <p className="tennis-note">
-                  仅登记已经收到的款项；提交后记录本金、赠送和凭证，不允许直接修改账户余额。
+                  请确认款项已经收到。提交后，本金和赠送金额会计入客户余额。
                 </p>
                 <button
                   className="button button-primary"

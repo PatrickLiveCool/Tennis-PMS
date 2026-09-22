@@ -1,3 +1,4 @@
+import { InfoHint } from "./InfoHint";
 import { useRef, useState } from "react";
 import type { TennisApi } from "./api";
 import type { TopupPayment, Session, VenueRecord } from "./types";
@@ -54,7 +55,7 @@ function TopupHistory({
   return (
     <>
       <Panel title="线上充值记录" action={<RefreshButton busy={page.busy} onClick={() => void page.refresh()} />}>
-        <p className="tennis-muted">{venue.name} 的充值付款记录。换设备也可从这里核对原单；渠道成功后才计入余额。</p>
+        <p className="tennis-muted">{venue.name}</p>
         <label>
           充值状态{" "}
           <select
@@ -73,9 +74,9 @@ function TopupHistory({
           <LoadingBlock />
         ) : page.data ? (
           <>
-            {!!page.error && <p className="tennis-note">刷新未完成，以下为上次读取结果。</p>}
+            {!!page.error && <p className="tennis-note">刷新失败，以下为上次结果。</p>}
             {!page.data.items.length ? (
-              <EmptyState title="暂无符合条件的充值" detail="新建线上充值后会保留付款记录。" />
+              <EmptyState title="暂无符合条件的充值" detail="可调整筛选条件，或新建充值。" />
             ) : (
               <div className="tennis-table-scroll">
                 <table className="tennis-table">
@@ -172,7 +173,7 @@ function TopupRecord({
   const payment = useLoad(async () => {
     const row = await api<TopupPayment>(`/topups/${encodeURIComponent(topupId)}`);
     if (row.id !== topupId || row.venueId !== venue.id)
-      throw new Error("充值记录不属于当前工作空间，请重新打开原记录。");
+      throw new Error("当前场馆无法查看这笔充值，请重新打开记录。");
     return row;
   }, [api, topupId, venue.id]);
   const command = useCommand(scope);
@@ -220,7 +221,7 @@ function TopupRecord({
         ) : (
           <>
             <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-              充值编号：{current.id}
+              充值 {current.id.slice(0, 8)} <InfoHint label="充值编号">{current.id}</InfoHint>
             </p>
             <Badge value={current.status} />
             <div className="tennis-money-row">
@@ -236,10 +237,10 @@ function TopupRecord({
               {current.settledAt ? ` · 入账于 ${dateTime(current.settledAt, venue.timezone)}` : ""}
             </p>
             {current.status === "SUCCEEDED" && (
-              <p className="tennis-success">此笔充值已入账，不会因刷新而再次增加余额。</p>
+              <p className="tennis-success">这笔充值已入账。</p>
             )}
             {unknown && current.status === "PENDING" && (
-              <p className="tennis-note">模拟提交结果尚未确认，请查询原渠道结果后再继续。</p>
+              <p className="tennis-note">模拟充值结果尚未确认，请先查询结果。</p>
             )}
             <PaymentChannelPanel
               api={api}

@@ -1,3 +1,4 @@
+import { courtSurfaces, courtEnvironments, emptyCourtProfile, validateCourtProfile, missingCourtPurchaseFields, isCourtReadyForBooking, type CourtProfile, type CourtSurface, type CourtEnvironment } from "../../../domain/src/tennis-court-profile.ts";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import {
@@ -32,7 +33,7 @@ import {
 
 export class TennisCatalogError extends Error {
   constructor(
-    readonly code: "STALE_CONFIGURATION" | "AFFECTED_OCCUPANCIES" | "INVALID_CONFIGURATION" | "INVALID_SELECTION",
+    readonly code: "STALE_CONFIGURATION" | "AFFECTED_OCCUPANCIES" | "INVALID_CONFIGURATION" | "INVALID_SELECTION" | "COURT_DETAILS_INCOMPLETE",
     readonly details: Record<string, unknown> = {},
   ) {
     super(code);
@@ -57,7 +58,9 @@ export interface CourtRecord {
   name: string;
   active: boolean;
   indoor: boolean;
-  surface: "UNSPECIFIED" | "CLAY";
+  surface: CourtSurface;
+  environment: CourtEnvironment;
+  profile: CourtProfile;
   hourlyPriceCents: number | null;
   revision: number;
 }
@@ -67,7 +70,9 @@ export interface SavedDiscount extends DiscountRule {
 }
 const venueColumns = `id, tenant_id AS "tenantId", name, address, timezone, active, opening_hours AS "openingHours",
   minimum_booking_minutes AS "minimumBookingMinutes", catalog_revision AS "catalogRevision"`;
-const courtColumns = `id, tenant_id AS "tenantId", venue_id AS "venueId", name, active, indoor, surface,
+export const courtColumns = `id, tenant_id AS "tenantId", venue_id AS "venueId", name, active, indoor, surface,
+  CASE WHEN indoor THEN 'INDOOR' WHEN covered THEN 'COVERED' ELSE 'OUTDOOR' END AS environment,
+  '${JSON.stringify(emptyCourtProfile)}'::jsonb || profile AS profile,
   hourly_price_cents::float8 AS "hourlyPriceCents", revision`;
 
 function requiredName(name: string): void {
@@ -206,28 +211,63 @@ export async function updateVenue(
   });
 }
 
-export async function createCourt(
-  db: pg.Pool,
-  actor: TenantActor,
-  input: { venueId: string; name: string; indoor: boolean; surface?: CourtRecord["surface"] },
-): Promise<CourtRecord> {
-  requiredName(input.name);
-  if (input.surface !== undefined && !["UNSPECIFIED", "CLAY"].includes(input.surface)) throw new TennisCatalogError("INVALID_CONFIGURATION", { field: "surface" });
+export interface CourtAssets {
+  name: string;
+  indoor?: boolean;
+  environment?: CourtEnvironment;
+  surface?: CourtSurface;
+  profile?: Partial<CourtProfile>;
+  active?: boolean;
+}
+/** One locked transaction and revision for the whole form, with separate permissions. */
+export async function saveCourt(db: pg.Pool, actor: TenantActor, input: {
+  venueId: string; id?: string; expectedRevision?: number; assets?: CourtAssets; hourlyPriceCents?: number | null;
+}): Promise<CourtRecord> {
+  if ((!input.id && !input.assets) || (!input.assets && input.hourlyPriceCents === undefined)) throw new TennisCatalogError("INVALID_CONFIGURATION");
+  if (input.assets) requiredName(input.assets.name);
+  if (input.hourlyPriceCents !== undefined && input.hourlyPriceCents !== null) assertCents(input.hourlyPriceCents);
   return withTenantTransaction(db, actor, async (tx) => {
-    await requireVenuePermission(tx, actor, input.venueId, "manage_assets", "update");
-    const id = randomUUID();
-    await tx.query("INSERT INTO tennis.courts (id, tenant_id, venue_id, name, indoor, surface) VALUES ($1,$2,$3,$4,$5,$6)", [
-      id,
-      actor.tenantId,
-      input.venueId,
-      input.name.trim(),
-      input.indoor,
-      input.surface ?? "UNSPECIFIED",
-    ]);
+    await requireVenuePermission(tx, actor, input.venueId, input.assets ? "manage_assets" : "manage_prices", "update");
+    if (input.assets && input.hourlyPriceCents !== undefined) await requireVenuePermission(tx, actor, input.venueId, "manage_prices");
+    const current = input.id ? await courtInTransaction(tx, actor, input.venueId, input.id) : null;
+    if (current && current.revision !== input.expectedRevision) throw new TennisCatalogError("STALE_CONFIGURATION");
+    const assets = input.assets;
+    if (!current && assets?.environment === undefined && assets?.indoor === undefined) {
+      throw new TennisCatalogError("INVALID_CONFIGURATION", { field: "environment" });
+    }
+    const surface = assets?.surface ?? current?.surface ?? "UNSPECIFIED";
+    const environment = assets?.environment ?? (assets?.indoor !== undefined && assets.indoor !== current?.indoor
+      ? (assets.indoor ? "INDOOR" : "OUTDOOR") : current?.environment ?? "OUTDOOR");
+    const profile = { ...emptyCourtProfile, ...current?.profile, ...assets?.profile };
+    if (!Object.hasOwn(courtSurfaces, surface) || !Object.hasOwn(courtEnvironments, environment) || !validateCourtProfile(profile) ||
+      (assets?.environment !== undefined && assets.indoor !== undefined && assets.indoor !== (environment === "INDOOR"))) throw new TennisCatalogError("INVALID_CONFIGURATION");
+    const name = assets?.name.trim() ?? current!.name;
+    const price = input.hourlyPriceCents === undefined ? current?.hourlyPriceCents ?? null : input.hourlyPriceCents;
+    const missing = missingCourtPurchaseFields({ name, environment, surface, profile, hourlyPriceCents: price });
+    if (missing.length) throw new TennisCatalogError("COURT_DETAILS_INCOMPLETE", { fields: missing });
+    const active = assets?.active ?? current?.active ?? true;
+    if (current && !active) {
+      const affected = await tx.query<{ id: string }>(`SELECT id FROM tennis.occupancies WHERE tenant_id=$1 AND court_id=$2
+        AND released_at IS NULL AND end_at > now() AND kind != 'MAINTENANCE'`, [actor.tenantId, current.id]);
+      if (affected.rowCount) throw new TennisCatalogError("AFFECTED_OCCUPANCIES", { occupancyIds: affected.rows.map((row) => row.id) });
+    }
+    const id = current?.id ?? randomUUID();
+    const values = [name, environment === "INDOOR", environment === "COVERED", surface,
+      JSON.stringify(profile), active, price, actor.tenantId, input.venueId, id];
+    if (current) await tx.query(`UPDATE tennis.courts SET name=$1,indoor=$2,covered=$3,surface=$4,profile=$5::jsonb,
+      active=$6,hourly_price_cents=$7,revision=revision+1 WHERE tenant_id=$8 AND venue_id=$9 AND id=$10`, values);
+    else await tx.query(`INSERT INTO tennis.courts(name,indoor,covered,surface,profile,active,hourly_price_cents,tenant_id,venue_id,id)
+      VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)`, values);
     await bumpCatalog(tx, actor, input.venueId);
-    await recordTenantAudit(tx, actor, "court.create", id, input);
+    if (assets) await recordTenantAudit(tx, actor, current ? "court.update" : "court.create", id, { before: current, after: assets });
+    if (input.hourlyPriceCents !== undefined) await recordTenantAudit(tx, actor, "court.price", id, { beforeCents: current?.hourlyPriceCents ?? null, afterCents: price });
     return courtInTransaction(tx, actor, input.venueId, id);
   });
+}
+export async function createCourt(db: pg.Pool, actor: TenantActor,
+  input: CourtAssets & { venueId: string; hourlyPriceCents?: number | null }): Promise<CourtRecord> {
+  const { venueId, hourlyPriceCents, ...assets } = input;
+  return saveCourt(db, actor, { venueId, assets, ...(hourlyPriceCents === undefined ? {} : { hourlyPriceCents }) });
 }
 export async function listCourts(db: pg.Pool, actor: TenantActor, venueId: string): Promise<CourtRecord[]> {
   return withTenantTransaction(db, actor, async (tx) => {
@@ -240,70 +280,18 @@ export async function listCourts(db: pg.Pool, actor: TenantActor, venueId: strin
     ).rows;
   });
 }
-export async function updateCourt(
-  db: pg.Pool,
-  actor: TenantActor,
-  input: {
-    id: string;
-    venueId: string;
-    expectedRevision: number;
-    name: string;
-    indoor: boolean;
-    surface?: CourtRecord["surface"];
-    active: boolean;
-  },
-): Promise<CourtRecord> {
-  requiredName(input.name);
-  if (input.surface !== undefined && !["UNSPECIFIED", "CLAY"].includes(input.surface)) throw new TennisCatalogError("INVALID_CONFIGURATION", { field: "surface" });
-  return withTenantTransaction(db, actor, async (tx) => {
-    await requireVenuePermission(tx, actor, input.venueId, "manage_assets", "update");
-    const current = await courtInTransaction(tx, actor, input.venueId, input.id);
-    if (current.revision !== input.expectedRevision) throw new TennisCatalogError("STALE_CONFIGURATION");
-    if (!input.active) {
-      const affected = await tx.query<{ id: string }>(
-        `SELECT id FROM tennis.occupancies WHERE tenant_id=$1 AND court_id=$2
-        AND released_at IS NULL AND end_at > now() AND kind != 'MAINTENANCE'`,
-        [actor.tenantId, input.id],
-      );
-      if (affected.rowCount)
-        throw new TennisCatalogError("AFFECTED_OCCUPANCIES", { occupancyIds: affected.rows.map((row) => row.id) });
-    }
-    await tx.query(
-      "UPDATE tennis.courts SET name=$1, indoor=$2, active=$3, surface=$6, revision=revision+1 WHERE tenant_id=$4 AND id=$5",
-      [input.name.trim(), input.indoor, input.active, actor.tenantId, input.id, input.surface ?? current.surface],
-    );
-    await bumpCatalog(tx, actor, input.venueId);
-    await recordTenantAudit(tx, actor, "court.update", input.id, { before: current, after: input });
-    return courtInTransaction(tx, actor, input.venueId, input.id);
-  });
+export async function updateCourt(db: pg.Pool, actor: TenantActor,
+  input: CourtAssets & { id: string; venueId: string; expectedRevision: number }): Promise<CourtRecord> {
+  const { id, venueId, expectedRevision, ...assets } = input;
+  // Legacy callers often spread a returned CourtRecord then change indoor.
+  const { environment, ...legacyAssets } = assets;
+  return saveCourt(db, actor, { id, venueId, expectedRevision, assets: {
+    ...legacyAssets, ...(assets.indoor === undefined && environment !== undefined ? { environment } : {}),
+  } });
 }
-export async function setCourtPrice(
-  db: pg.Pool,
-  actor: TenantActor,
-  input: {
-    courtId: string;
-    venueId: string;
-    expectedRevision: number;
-    hourlyPriceCents: number;
-  },
-): Promise<CourtRecord> {
-  assertCents(input.hourlyPriceCents);
-  return withTenantTransaction(db, actor, async (tx) => {
-    await requireVenuePermission(tx, actor, input.venueId, "manage_prices", "update");
-    const current = await courtInTransaction(tx, actor, input.venueId, input.courtId);
-    if (current.revision !== input.expectedRevision) throw new TennisCatalogError("STALE_CONFIGURATION");
-    await tx.query("UPDATE tennis.courts SET hourly_price_cents=$1, revision=revision+1 WHERE tenant_id=$2 AND id=$3", [
-      input.hourlyPriceCents,
-      actor.tenantId,
-      input.courtId,
-    ]);
-    await bumpCatalog(tx, actor, input.venueId);
-    await recordTenantAudit(tx, actor, "court.price", input.courtId, {
-      beforeCents: current.hourlyPriceCents,
-      afterCents: input.hourlyPriceCents,
-    });
-    return courtInTransaction(tx, actor, input.venueId, input.courtId);
-  });
+export async function setCourtPrice(db: pg.Pool, actor: TenantActor,
+  input: { courtId: string; venueId: string; expectedRevision: number; hourlyPriceCents: number }): Promise<CourtRecord> {
+  return saveCourt(db, actor, { id: input.courtId, venueId: input.venueId, expectedRevision: input.expectedRevision, hourlyPriceCents: input.hourlyPriceCents });
 }
 
 async function discountsInTransaction(
@@ -435,7 +423,7 @@ export async function findAvailableCourts(
     );
     return {
       venue,
-      courts: courts.map((court) => ({
+      courts: courts.filter(isCourtReadyForBooking).map((court) => ({
         court,
         intervals: openings
           .flatMap((opening) =>
@@ -496,6 +484,7 @@ export async function priceSelectionInTransaction(
   actor: TenantActor,
   venueId: string,
   lines: readonly (CourtInterval & { courtId: string })[],
+  options: { existingQuote?: boolean } = {},
 ): Promise<PricedSelection> {
   if (lines.length === 0 || lines.length > 100) throw new TennisCatalogError("INVALID_SELECTION", { field: "lines" });
   lines.forEach(parseCourtInterval);
@@ -512,18 +501,21 @@ export async function priceSelectionInTransaction(
   for (const line of lines) {
     const court = await courtInTransaction(tx, actor, venueId, line.courtId);
     if (!court.active) throw new TenantAccessError("RESOURCE_UNAVAILABLE");
-    priced.push(
-      priceCourtInterval({
-        courtId: court.id,
-        venueId,
-        timezone: venue.timezone,
-        hourlyPriceCents: court.hourlyPriceCents,
-        minimumBookingMinutes: venue.minimumBookingMinutes,
-        openingHours: venue.openingHours,
-        interval: line,
-        discounts,
-      }),
-    );
+    const price = priceCourtInterval({
+      courtId: court.id,
+      venueId,
+      timezone: venue.timezone,
+      hourlyPriceCents: court.hourlyPriceCents,
+      minimumBookingMinutes: venue.minimumBookingMinutes,
+      openingHours: venue.openingHours,
+      interval: line,
+      discounts,
+    });
+    // Already issued quotes keep their original purchase terms. Current active,
+    // opening and pricing rules above are still checked before confirmation.
+    const missing = missingCourtPurchaseFields(court);
+    if (!options.existingQuote && missing.length) throw new TennisCatalogError("COURT_DETAILS_INCOMPLETE", { courtId: court.id, fields: missing });
+    priced.push(price);
   }
   const totalCents = priced.reduce((sum, line) => sum + line.totalCents, 0);
   assertCents(totalCents);

@@ -26,7 +26,7 @@ import {
 } from "../../packages/db/src/tennis/external-agent.ts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(localTennisTestDatabaseUrl, "test"),
@@ -63,7 +63,7 @@ beforeEach(async () => {
     minimumBookingMinutes: 15,
     openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })),
   });
-  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "assistant court", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "assistant court", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
   courtId = court.id;
   await setCourtPrice(db, first.actor, {
     venueId: first.venueId,
@@ -71,7 +71,7 @@ beforeEach(async () => {
     expectedRevision: court.revision,
     hourlyPriceCents: 12000,
   });
-  const profile = await createCustomer(db, first.actor, { nickname: "synthetic assistant customer" });
+  const profile = await createCustomer(db, first.actor, { nickname: "synthetic assistant customer", phone: syntheticPhone() });
   const subjectId = randomUUID();
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'synthetic assistant customer')", [subjectId]);
   await db.query("UPDATE tennis.customers SET subject_id=$1 WHERE tenant_id=$2 AND id=$3", [
@@ -393,7 +393,7 @@ describe("external assistant adapter and human handoff", () => {
       const headers = { authorization: `Bearer ${delegation.token}` };
       const found = await app.inject({ url: "/api/tennis/agent/booking-customers?q=synthetic", headers });
       expect(found.statusCode).toBe(200);
-      expect(found.json()).toEqual([expect.objectContaining({ id: customer.customerId, phone: null })]);
+      expect(found.json()).toEqual([expect.objectContaining({ id: customer.customerId, phone: null, hasContact: true })]);
       expect(JSON.stringify(found.json())).not.toContain(other.id);
       expect(
         (await app.inject({ url: `/api/tennis/agent/customers/${customer.customerId}/wallet`, headers })).statusCode,

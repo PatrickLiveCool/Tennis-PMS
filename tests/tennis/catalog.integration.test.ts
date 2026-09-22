@@ -13,6 +13,7 @@ import {
   listVenues,
   priceSelection,
   saveDiscount,
+  saveCourt,
   setCourtPrice,
   updateCourt,
   updateVenue,
@@ -46,7 +47,7 @@ async function setupCourt(fixture = first, price = 10000): Promise<CourtRecord> 
     openingHours: hours,
     minimumBookingMinutes: 15,
   });
-  const court = await createCourt(db, fixture.actor, { venueId: fixture.venueId, name: "1 号场", indoor: false });
+  const court = await createCourt(db, fixture.actor, { venueId: fixture.venueId, name: "1 号场", indoor: false, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: price });
   return setCourtPrice(db, fixture.actor, {
     courtId: court.id,
     venueId: fixture.venueId,
@@ -92,8 +93,55 @@ afterAll(async () => {
 });
 
 describe("tenant catalog and pricing", () => {
-  it("persists clay independently of indoor status and preserves it for older update clients", async () => {
+  it("saves all selling attributes and price in one revision and preserves them for legacy callers", async () => {
+    const original = await setupCourt(first, 12000);
+    const beforeVenue = (await listVenues(db, first.actor))[0]!;
+    const saved = await saveCourt(db, first.actor, { id: original.id, venueId: first.venueId, expectedRevision: original.revision,
+      assets: { name: "顶棚橡胶练习场", environment: "COVERED", surface: "RUBBER", profile: {
+        specification: "PRACTICE", lighting: "AVAILABLE", climate: "VENTILATED", surfaceNote: "合成橡胶卷材",
+        playingLengthM: 18, playingWidthM: 8, totalLengthM: 24, totalWidthM: 12, description: "有练习墙，自带球拍。",
+      } }, hourlyPriceCents: 9600 });
+    expect(saved).toMatchObject({ indoor: false, environment: "COVERED", surface: "RUBBER", hourlyPriceCents: 9600, revision: original.revision + 1,
+      profile: { specification: "PRACTICE", lighting: "AVAILABLE", playingLengthM: 18, description: "有练习墙，自带球拍。" } });
+    expect((await listVenues(db, first.actor))[0]!.catalogRevision).toBe(beforeVenue.catalogRevision + 1);
+    const legacy = await updateCourt(db, first.actor, { id: saved.id, venueId: saved.venueId, expectedRevision: saved.revision, name: "改名后", indoor: false, active: true });
+    expect(legacy.profile).toEqual(saved.profile);
+    expect(legacy.environment).toBe("COVERED");
+    expect(legacy.hourlyPriceCents).toBe(9600);
+    expect((await priceSelection(db, first.actor, first.venueId, [{ courtId: saved.id, ...interval() }])).totalCents).toBe(9600);
+  });
+  it("rejects invalid, stale and unauthorized combined saves without saving either half", async () => {
     const original = await setupCourt();
+    const input = { id: original.id, venueId: first.venueId, expectedRevision: original.revision, assets: { name: "不应保存", environment: "COVERED" as const }, hourlyPriceCents: 8800 };
+    await expect(saveCourt(db, first.actor, { ...input, hourlyPriceCents: -1 })).rejects.toMatchObject({ code: "INVALID_CONFIGURATION" });
+    await expect(saveCourt(db, first.actor, { ...input, assets: { ...input.assets, profile: { playingLengthM: 24, totalLengthM: 20 } } })).rejects.toMatchObject({ code: "INVALID_CONFIGURATION" });
+    await expect(saveCourt(db, first.actor, { ...input, expectedRevision: original.revision - 1 })).rejects.toMatchObject({ code: "STALE_CONFIGURATION" });
+    await expect(saveCourt(db, second.actor, input)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
+    await db.query("UPDATE tennis.tenant_memberships SET role='STAFF',all_venues=true,permissions=ARRAY['read','manage_assets'] WHERE tenant_id=$1", [first.actor.tenantId]);
+    await expect(saveCourt(db, first.actor, input)).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    await expect(createCourt(db, first.actor, { venueId: first.venueId, name: "不应创建", environment: "INDOOR", hourlyPriceCents: 10000 })).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    expect(await listCourts(db, first.actor, first.venueId)).toEqual([original]);
+    const onlyAssets = await saveCourt(db, first.actor, { id: original.id, venueId: first.venueId, expectedRevision: original.revision, assets: { name: "可修改资料", surface: "ACRYLIC" } });
+    expect(onlyAssets.hourlyPriceCents).toBe(original.hourlyPriceCents);
+    await db.query("UPDATE tennis.tenant_memberships SET permissions=ARRAY['read','manage_prices'] WHERE tenant_id=$1", [first.actor.tenantId]);
+    const price = await saveCourt(db, first.actor, { id: original.id, venueId: first.venueId, expectedRevision: onlyAssets.revision, hourlyPriceCents: 7500 });
+    expect(price).toMatchObject({ name: "可修改资料", surface: "ACRYLIC", hourlyPriceCents: 7500 });
+    await expect(saveCourt(db, first.actor, { ...input, expectedRevision: price.revision })).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    expect((await listCourts(db, first.actor, first.venueId))[0]).toEqual(price);
+  });
+  it("creates a priced court atomically and rejects clearing its required price without changing the record", async () => {
+    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "完整新球场", environment: "INDOOR", surface: "CLAY", profile: { specification: "STANDARD" }, hourlyPriceCents: 15000 });
+    expect(court).toMatchObject({ indoor: true, environment: "INDOOR", surface: "CLAY", hourlyPriceCents: 15000, profile: { specification: "STANDARD", lighting: "UNSPECIFIED" } });
+    const beforeVenue = (await listVenues(db, first.actor))[0]!;
+    await expect(saveCourt(db, first.actor, { id: court.id, venueId: first.venueId, expectedRevision: court.revision, hourlyPriceCents: null })).rejects.toMatchObject({ code: "COURT_DETAILS_INCOMPLETE", details: { fields: ["hourlyPriceCents"] } });
+    expect(await listCourts(db, first.actor, first.venueId)).toEqual([court]);
+    expect((await listVenues(db, first.actor))[0]!.catalogRevision).toBe(beforeVenue.catalogRevision);
+  });
+  it("persists clay independently of indoor status and preserves it for older update clients", async () => {
+    const configured = await setupCourt();
+    // This test tenant deliberately represents a legacy record with unknown material.
+    await db.query("UPDATE tennis.courts SET surface='UNSPECIFIED' WHERE tenant_id=$1 AND id=$2", [first.actor.tenantId, configured.id]);
+    const original = (await listCourts(db, first.actor, first.venueId))[0]!;
     expect(original.surface).toBe("UNSPECIFIED");
     const clay = await updateCourt(db, first.actor, { ...original, expectedRevision: original.revision, indoor: true, surface: "CLAY" });
     expect(clay).toMatchObject({ indoor: true, surface: "CLAY", hourlyPriceCents: 10000 });
@@ -105,7 +153,7 @@ describe("tenant catalog and pricing", () => {
     await expect(updateCourt(db, second.actor, { ...renamed, expectedRevision: renamed.revision, surface: "UNSPECIFIED" })).rejects.toBeTruthy();
     await expect(updateCourt(db, first.actor, { ...renamed, expectedRevision: renamed.revision, surface: "unsafe" as never })).rejects.toMatchObject({ code: "INVALID_CONFIGURATION" });
   });
-  it("starts new assets unconfigured instead of inventing sale hours or prices", async () => {
+  it("requires complete new courts while preserving unconfigured venues and legacy records", async () => {
     const venue = await createVenue(db, first.actor, {
       name: "新校区",
       address: "模拟地址",
@@ -113,7 +161,13 @@ describe("tenant catalog and pricing", () => {
     });
     expect(venue.openingHours).toEqual([]);
     expect(venue.minimumBookingMinutes).toBeNull();
-    const court = await createCourt(db, first.actor, { venueId: venue.id, name: "1 号场", indoor: true });
+    await expect(createCourt(db, first.actor, { venueId: venue.id, name: "1 号场", indoor: true })).rejects.toMatchObject({ code: "COURT_DETAILS_INCOMPLETE" });
+    expect(await listCourts(db, first.actor, venue.id)).toEqual([]);
+    expect((await listVenues(db, first.actor)).find((item) => item.id === venue.id)!.catalogRevision).toBe(venue.catalogRevision);
+    // Seed historical missing data directly, rather than using the strict create API.
+    const courtId = randomUUID();
+    await db.query("INSERT INTO tennis.courts (id, tenant_id, venue_id, name, indoor) VALUES ($1,$2,$3,'历史缺资料场',true)", [courtId, first.actor.tenantId, venue.id]);
+    const court = (await listCourts(db, first.actor, venue.id))[0]!;
     expect(court.hourlyPriceCents).toBeNull();
     expect((await findAvailableCourts(db, first.actor, venue.id, interval())).courts).toEqual([]);
     await expect(

@@ -1,3 +1,4 @@
+import { InfoHint } from "./InfoHint";
 import { useState } from "react";
 import type { TennisApi } from "./api";
 import { WecomReconciliationPanel } from "./WecomReconciliationPanel";
@@ -48,7 +49,7 @@ const entryNames: Record<string, string> = {
   OFFLINE_TOPUP: "线下充值实收",
   ONLINE_TOPUP: "线上充值实收",
   EXTRA_TOPUP_RECEIPT: "充值额外实收",
-  ORDER_RECEIPT: "订单外部实收",
+  ORDER_RECEIPT: "订单现金实收",
   WALLET_CONSUMPTION: "储值消费",
   REFUND: "已完成退款",
   EXCEPTION_REFUND: "异常实收原路退款",
@@ -116,7 +117,7 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
         }
       >
         <p className="tennis-muted">
-          {venue.name} · 按场馆时区 {venue.timezone} 核对所选日期的收款和余额变动。
+          {venue.name} <InfoHint label="统计日期说明">按场馆所在时区（{venue.timezone}）统计当天的收款和余额变动。</InfoHint>
         </p>
         {session.localSimulation && (
           <p className="tennis-note is-warning">当前为本地模拟资金记录，不代表真实到账或退款。</p>
@@ -124,7 +125,7 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
         <ErrorNotice error={finance.error} retry={() => void finance.refresh()} />
         {Boolean(finance.error) && data && (
           <p className="tennis-muted" role="status">
-            刷新未完成，仍显示本次页面上次读取的结果。
+            刷新失败，以下为上次结果。
           </p>
         )}
         {!data && finance.busy ? (
@@ -133,11 +134,11 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
           <>
             <div className="tennis-stats">
               <div>
-                <span>已归账现金收款（含充值）</span>
+                <span>已入账收款（含充值） <InfoHint label="收款统计说明">包含订单收款、充值和已确认归属的额外到账。待核对的企微收款暂不计入，余额消费与充值赠送也不计入。</InfoHint></span>
                 <strong>{money(data.totals.cashInCents)}</strong>
               </div>
               <div>
-                <span>现金退款</span>
+                <span>已退现金 <InfoHint label="退款统计说明">只统计已经退回的款项，正在处理或失败的退款请看下方待退明细。</InfoHint></span>
                 <strong>{money(data.totals.cashRefundCents)}</strong>
               </div>
               <div>
@@ -153,9 +154,6 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
                 <strong>{money(data.totals.giftCents)}</strong>
               </div>
             </div>
-            <p className="tennis-note">
-              已归账现金收款包含订单实收、充值及已关联业务的额外到账；上方尚未确认归属的企微收款在流水列表单列，归属确认后才进入本台账。余额消费单独统计，不再计入现金收入。充值赠送不属于现金收款。退款完成后才计入退款汇总。
-            </p>
             {data.entries.length === 0 ? (
               <EmptyState title="当日暂无资金流水" detail="收款、储值消费和已完成退款会按发生时间列在这里。" />
             ) : (
@@ -165,8 +163,8 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
                     <tr>
                       <th scope="col">时间</th>
                       <th scope="col">事项</th>
-                      <th scope="col">现金变动</th>
-                      <th scope="col">余额消费 / 退回</th>
+                      <th scope="col">现金变动 <InfoHint label="现金变动说明">正数是收款，负数是退款。</InfoHint></th>
+                      <th scope="col">余额消费 / 退回 <InfoHint label="余额变动说明">正数是消费扣款，负数是退款退回。余额消费已在充值时收过款，不再计作现金收入。</InfoHint></th>
                       <th scope="col">充值赠送</th>
                       <th scope="col">关联记录</th>
                     </tr>
@@ -209,9 +207,6 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
                 </table>
               </div>
             )}
-            <p className="tennis-muted">
-              现金正数为收款、负数为退款；余额正数为消费扣款、负数为退款退回。各列分别核对，不相加作为营业收入。
-            </p>
           </>
         ) : !finance.error ? (
           <p className="tennis-muted">尚未读取资金记录，请刷新。</p>
@@ -219,9 +214,9 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
       </Panel>
       {data && (
         <>
-          <Panel title={`待退付款明细 · ${data.pendingRefunds.length} 项`}>
+          <Panel title={`待退付款明细 · ${data.pendingRefunds.length} 项`} action={<InfoHint label="退款明细说明">一笔订单分多次付款时，退款也可能分为多笔。</InfoHint>}>
             <p className="tennis-muted">
-              当前场馆全部未完成退款，不受上方日期筛选影响。一笔订单按原付款拆分时，可能有多条退款明细。
+              全部日期 · 当前场馆尚未完成的退款
             </p>
             {data.pendingRefunds.length === 0 ? (
               <EmptyState title="暂无待处理退款" detail="退款申请、处理中或失败的明细会在这里列出。" />
@@ -264,7 +259,7 @@ function VenueFinance({ api, venue, session, openOrder, onChanged }: FinanceProp
           </Panel>
           <Panel title={`实收待核对 · ${data.exceptions.length} 项`}>
             <p className="tennis-muted">
-              当前场馆全部未结实收异常，不受日期筛选影响。核对后可按原额申请原路退款，退款完成后才算已处理。
+              全部日期 · 待核对收款，退款到账后才算处理完成。
             </p>
             {data.exceptions.length === 0 ? (
               <EmptyState title="暂无实收异常" detail="迟到付款、重复到账等需要人工核对的款项会在这里列出。" />

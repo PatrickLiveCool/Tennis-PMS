@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Plus } from "lucide-react";
+import { InfoHint } from "./InfoHint";
 import { TennisApiError, type TennisApi } from "./api";
 import type { TenantRecord } from "./types";
 import {
@@ -39,6 +40,7 @@ type BindingTarget =
 const targetKey = (target: BindingTarget) =>
   target.actorKind === "customer" ? `customer:${target.customerId}` : `staff:${target.subjectId}`;
 const targetId = (target: BindingTarget) => (target.actorKind === "customer" ? target.customerId : target.subjectId);
+const shortAccountId = (value: string) => value.length > 16 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 interface BindingList {
   integrations: GatewayIntegration[];
   bindings: GatewayBinding[];
@@ -90,8 +92,8 @@ function PendingGateway({
   if (!mutation.pending || mutation.busy) return null;
   return (
     <div className="tennis-note is-warning" role="status">
-      <p>「{mutation.pending}」的结果尚未确认。先刷新原列表，核对是否已经完成；不要直接重复创建。</p>
-      <p>若接入已经创建但凭据未取得，请核对后撤销该接入，再创建新凭据。</p>
+      <p>「{mutation.pending}」的结果还未确认。请先刷新列表，查看是否已完成。</p>
+      <p>如果接入已创建，但没有拿到凭据，请撤销该接入后重新创建。</p>
       <div className="tennis-actions">
         <button
           type="button"
@@ -102,7 +104,7 @@ function PendingGateway({
             })
           }
         >
-          刷新原列表
+          刷新列表
         </button>
         <button
           type="button"
@@ -110,7 +112,7 @@ function PendingGateway({
           disabled={!mutation.checked}
           onClick={mutation.doneChecking}
         >
-          已人工核对列表，结束本次操作
+          已核对，结束本次操作
         </button>
       </div>
     </div>
@@ -141,7 +143,7 @@ function GatewayRevokeDialog({
           });
         }}
       >
-        <p>撤销后，此接入或身份绑定不能继续取得业务授权。已有订单和资金记录保留。</p>
+        <p>撤销后，该渠道将无法继续代办业务。已有订单和账目保留。</p>
         <label>
           撤销原因
           <textarea
@@ -172,14 +174,13 @@ export function PlatformGatewayPanel({
   const [tenantId, setTenantId] = useState("");
   const selected = tenants.find((tenant) => tenant.id === tenantId) ?? tenants[0];
   return (
-    <Panel title="渠道接入">
-      <p className="tennis-muted">平台为每个租户独立创建 Gateway 接入凭据；租户管理员再核验并绑定客户或员工身份。</p>
+    <Panel title="渠道接入" action={<InfoHint label="渠道接入说明">为商家连接微信等外部渠道。创建接入后，商家管理员还需核对并绑定客户或员工账号。</InfoHint>}>
       {selected ? (
         <>
           <label className="tennis-form">
-            接入所属租户
+            接入所属商家
             <select
-              aria-label="渠道接入所属租户"
+              aria-label="渠道接入所属商家"
               value={selected.id}
               onChange={(event) => setTenantId(event.target.value)}
             >
@@ -199,7 +200,7 @@ export function PlatformGatewayPanel({
           />
         </>
       ) : (
-        <EmptyState title="先开通租户" detail="每项渠道接入固定归属一个租户。" />
+        <EmptyState title="请先开通商家" detail="开通后即可为商家添加渠道接入。" />
       )}
     </Panel>
   );
@@ -254,11 +255,11 @@ function GatewayIntegrations({ api, tenant, scope }: { api: TennisApi; tenant: T
       {secret && (
         <div className="tennis-note">
           <h3>保存「{secret.name}」的接入凭据</h3>
-          <p>凭据只在本次创建后显示。复制保存后再切换租户或离开本页；关闭后无法再次查看。</p>
+          <p>凭据只显示一次，请复制保存后再离开本页。</p>
           <label className="tennis-form">
-            Gateway 凭据
+            接入凭据
             <input
-              aria-label="一次性 Gateway 凭据"
+              aria-label="一次性接入凭据"
               readOnly
               value={secret.token}
               autoComplete="off"
@@ -284,7 +285,7 @@ function GatewayIntegrations({ api, tenant, scope }: { api: TennisApi; tenant: T
               className="button button-secondary"
               onClick={() => {
                 setSecret(null);
-                setNotice("凭据已隐藏。列表只显示接入状态。");
+                setNotice("凭据已隐藏。");
               }}
             >
               已保存，隐藏凭据
@@ -324,7 +325,7 @@ function GatewayIntegrations({ api, tenant, scope }: { api: TennisApi; tenant: T
       {!list.data && list.busy ? (
         <LoadingBlock />
       ) : !list.data?.length ? (
-        <EmptyState title="暂无渠道接入" detail="创建接入后，由租户管理员完成渠道身份绑定。" />
+        <EmptyState title="暂无渠道接入" detail="创建接入后，由商家管理员绑定客户或员工账号。" />
       ) : (
         list.data.map((item) => (
           <div className="tennis-ledger-row" key={item.id}>
@@ -333,7 +334,7 @@ function GatewayIntegrations({ api, tenant, scope }: { api: TennisApi; tenant: T
               <span>
                 {item.active ? "启用" : "已撤销"} · {dateTime(item.createdAt)}
               </span>
-              <small>接入编号 {item.id}</small>
+              <InfoHint label={`${item.name}接入编号`}>{item.id}</InfoHint>
             </div>
             {item.active && (
               <button
@@ -422,11 +423,12 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
   return (
     <Panel
       title="渠道身份绑定"
-      action={<RefreshButton busy={list.busy || mutation.busy} onClick={() => void list.refresh()} />}
+      action={<div className="tennis-actions">
+        <InfoHint label="身份绑定说明">把渠道账号关联到已有客户或员工。新客户请先在客户页面建档；手机号相同不会自动绑定。</InfoHint>
+        <RefreshButton busy={list.busy || mutation.busy} onClick={() => void list.refresh()} />
+      </div>}
     >
-      <p className="tennis-muted">
-        仅租户管理员办理。先人工核对渠道账号与本人身份，再选择已有客户档案或员工身份；新客户可先在会员页面建档，手机号不会自动建立绑定。
-      </p>
+      <p className="tennis-muted">绑定前，请确认渠道账号属于所选本人。</p>
       <ErrorNotice error={list.error ?? mutation.error} retry={() => void list.refresh()} />
       <PendingGateway mutation={mutation} refresh={list.refresh} />
       {notice && (
@@ -435,7 +437,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
         </p>
       )}
       {!integrations.some((item) => item.active) ? (
-        <EmptyState title="暂无启用的渠道接入" detail="请平台运营方先为当前租户创建接入。" />
+        <EmptyState title="暂无启用的渠道接入" detail="请联系平台开通渠道接入。" />
       ) : (
         <form
           className="tennis-form"
@@ -474,11 +476,11 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
             />
           </label>
           <label>
-            查找客户档案或员工身份
+            查找客户或员工
             <input
               value={search}
               disabled={disabled}
-              placeholder="输入姓名查询已有档案或员工"
+              placeholder="输入姓名查找"
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
@@ -486,10 +488,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
           {draft.target && (
             <p className="tennis-note">
               已选：{draft.target.name} · {draft.target.actorKind === "staff" ? "员工" : "客户"}
-              <small>
-                {" "}
-                {draft.target.actorKind === "customer" ? "客户档案编号" : "员工身份编号"} {targetId(draft.target)}
-              </small>
+              <InfoHint label="所选账号编号">{draft.target.actorKind === "customer" ? "客户编号" : "员工编号"}：{targetId(draft.target)}</InfoHint>
             </p>
           )}
           <div className="tennis-customer-results">
@@ -508,17 +507,17 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
             ))}
             {targets.data?.length === 0 && (
               <p className="tennis-muted">
-                未找到匹配的客户档案或员工。新客户可先在会员页面建档，再核验本人身份并绑定。
+                未找到客户或员工。新客户请先到客户页面建档。
               </p>
             )}
           </div>
           <label>
-            人工核验依据
+            核验说明
             <textarea
               required
               maxLength={2000}
               disabled={disabled}
-              placeholder="记录如何核对该渠道账号确属所选本人"
+              placeholder="如：已当面核对本人和微信账号"
               value={draft.reason}
               onChange={(event) => setDraft({ ...draft, reason: event.target.value })}
             />
@@ -533,7 +532,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
               !integrations.some((item) => item.id === draft.integrationId && item.active)
             }
           >
-            {mutation.busy ? "正在处理…" : "确认身份并建立绑定"}
+            {mutation.busy ? "正在处理…" : "确认绑定"}
           </button>
         </form>
       )}
@@ -541,7 +540,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
       {!list.data && list.busy ? (
         <LoadingBlock />
       ) : !list.data?.bindings.length ? (
-        <EmptyState title="暂无身份绑定" detail="绑定生效后，渠道才能以该客户或员工的实际权限办理业务。" />
+        <EmptyState title="暂无身份绑定" detail="选择渠道账号和对应客户或员工，即可添加绑定。" />
       ) : (
         list.data.bindings.map((binding) => {
           const integration = integrations.find((item) => item.id === binding.integrationId);
@@ -552,17 +551,24 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
                 ? item.customerId === binding.customerId
                 : item.subjectId === binding.subjectId),
           );
+          const actorLabel = binding.actorKind === "staff" ? "员工" : "客户";
+          const accountId = binding.customerId ?? binding.subjectId;
           return (
             <div className="tennis-ledger-row" key={binding.id}>
               <div>
-                <strong>
-                  {binding.externalSubjectId} → {target?.name ?? binding.subjectId}
-                </strong>
+                <div className="tennis-heading-with-help">
+                  <strong>{target?.name ?? `${actorLabel} ${accountId.slice(0, 8)}`}</strong>
+                  <InfoHint label="查看绑定详情">
+                    渠道账号：{binding.externalSubjectId}<br />
+                    {actorLabel}编号：{accountId}<br />
+                    核验说明：{binding.reason}
+                  </InfoHint>
+                </div>
                 <span>
-                  {integration?.name ?? "渠道接入"} · {binding.actorKind === "staff" ? "员工" : "客户"} ·{" "}
+                  {integration?.name ?? "渠道接入"} · {actorLabel} ·{" "}
                   {binding.active ? (integration?.active ? "启用" : "接入已撤销") : "已撤销绑定"}
                 </span>
-                <small>核验依据：{binding.reason}</small>
+                <small>渠道账号：{shortAccountId(binding.externalSubjectId)}</small>
               </div>
               {binding.active && (
                 <button
@@ -580,7 +586,7 @@ export function TenantGatewayPanel({ api, scope }: { api: TennisApi; scope: stri
       )}
       {revoke && (
         <GatewayRevokeDialog
-          title={`绑定 · ${revoke.externalSubjectId}`}
+          title={`绑定 · ${shortAccountId(revoke.externalSubjectId)}`}
           scope={`binding:${scope}:${revoke.id}`}
           busy={mutation.busy}
           onClose={() => setRevoke(null)}

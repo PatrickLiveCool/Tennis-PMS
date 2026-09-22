@@ -55,7 +55,7 @@ export function CustomerPicker({
   }
   return (
     <div className="tennis-customer-picker">
-      <label className="tennis-label">预订人</label>
+      <div className="tennis-label">客户</div>
       {value && (
         <div className="tennis-selected-customer">
           <div>
@@ -99,7 +99,7 @@ export function CustomerPicker({
                 }}
               >
                 <strong>{customer.nickname}</strong>
-                <span>{customer.phone ?? "无电话"}</span>
+                <span>{customer.phone ?? "未登记电话"}</span>
               </button>
             ))}
             {customers.data?.length === 0 && <p className="tennis-muted">没有找到客户，可登记后继续。</p>}
@@ -128,7 +128,7 @@ export function CustomerPicker({
           >
             <ErrorNotice error={error} />
             <label>
-              称呼
+              姓名
               <input autoFocus required value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
             </label>
             <label>
@@ -139,10 +139,9 @@ export function CustomerPicker({
                 required
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="用于识别本租户内的客户"
+                placeholder="填写手机号"
               />
             </label>
-            <p className="tennis-muted">客户资料仅在当前租户内使用；相同手机号不会合并其他租户的档案。</p>
             <button className="button button-primary" disabled={busy} type="submit">
               {busy ? "正在登记…" : "登记并选择"}
             </button>

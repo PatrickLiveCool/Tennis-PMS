@@ -1,3 +1,4 @@
+import { InfoHint } from "./InfoHint";
 import type { BackofficeAction } from "../../../../packages/db/src/tennis/backoffice-assistant";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, CreditCard, ReceiptText, Search, Sparkles } from "lucide-react";
@@ -62,7 +63,7 @@ export function OrdersPage({
   });
   return (
     <>
-      <PageHeading title="预订订单" description="查看组合预订、付款与退款进度。">
+      <PageHeading title="预订订单">
         <RefreshButton onClick={() => void orders.refresh()} busy={orders.busy} />
       </PageHeading>
       <ErrorNotice error={orders.error} retry={() => void orders.refresh()} />
@@ -94,7 +95,7 @@ export function OrdersPage({
         {searching || (!orders.data && orders.busy) ? (
           <LoadingBlock />
         ) : !orders.data ? null : !orders.data.orders.length ? (
-          <EmptyState title="暂无符合条件的订单" detail="从场地排期选择球场和时间，即可建立第一笔预订。" />
+          <EmptyState title="暂无符合条件的订单" detail="可调整筛选条件，或去排期新建预订。" />
         ) : (
           <div className="tennis-table-scroll">
             <table className="tennis-table">
@@ -191,7 +192,7 @@ export function OrderDialog({
     if (((prep.kind === "pay" || prep.kind === "cancel") && (!unpaid || unsettled)) ||
       (prep.kind === "amend" && (!(unpaid || order.status === "CONFIRMED") || unsettled)) ||
       (prep.kind === "refund" && !["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(order.paymentStatus))) {
-      setNotice("订单状态已变化，请核对当前详情后重新询问助手。");
+      setNotice("订单有更新，请核对后再让助手帮你办理。");
       return;
     }
     if (prep.kind === "amend") {
@@ -213,7 +214,7 @@ export function OrderDialog({
       if (prep.reason) setReason(prep.reason);
       setAction(prep.kind);
     }
-    setNotice("助手已准备办理内容，请核对后确认；尚未提交业务操作。");
+    setNotice("助手已填好，尚未提交。请核对后确认。");
   }, [pendingPreparation, detail.data, detail.busy, detail.error, command.busy]);
   async function changed() {
     setAction(null);
@@ -249,7 +250,7 @@ export function OrderDialog({
       api<RefundRecord>(`/refunds/${refund.id}/retry`, "POST", { commandKey: key }),
     );
     if (result) {
-      setNotice("已重新发起原退款，请等待渠道回执。");
+      setNotice("已重试这笔退款，请继续核对到账进度。");
       await changed();
     }
   }
@@ -258,7 +259,7 @@ export function OrderDialog({
       api<RefundRecord>(`/refunds/${refund.id}/simulate`, "POST", { status }),
     );
     if (result) {
-      setNotice("本地模拟退款回执已处理。");
+      setNotice("模拟退款结果已更新。");
       await changed();
     }
   }
@@ -282,7 +283,7 @@ export function OrderDialog({
                 <p className="eyebrow">{venue.name}</p>
                 <h2>{order.customerName ?? "场地预订"}</h2>
                 <p className="tennis-muted">创建于 {dateTime(order.createdAt, venue.timezone)}</p>
-                {order.origin && <p className="tennis-muted">来源：{order.origin.label} · {order.origin.creatorName}{order.origin.conversationId && ` · 业务会话 ${order.origin.conversationId}`}</p>}
+                {order.origin && <p className="tennis-muted">来源：{order.origin.label} · {order.origin.creatorName}{order.origin.conversationId && <InfoHint label="来源详情">会话编号：{order.origin.conversationId}</InfoHint>}</p>}
               </div>
               <div className="tennis-badges">
                 <Badge value={order.status} />
@@ -375,7 +376,7 @@ export function OrderDialog({
                     取消原因
                     <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} />
                   </label>
-                  <p className="tennis-muted">整单未付款预约将释放全部时段。已经有付款事实的订单须办理退款。</p>
+                  <p className="tennis-muted">取消后，整单球场时段将重新开放预订。已付款的订单请办理退款。</p>
                   <div className="tennis-actions">
                     <button className="button button-secondary" onClick={() => setAction(null)}>
                       返回
@@ -401,7 +402,7 @@ export function OrderDialog({
                   setNotice(
                     payment.status === "SUCCEEDED"
                       ? "付款成功，订单已确认。"
-                      : "付款单已建立，等待渠道回执。余额部分已预留。",
+                      : "正在等待付款结果，所用余额已预留。",
                   );
                   void changed();
                 }}
@@ -418,7 +419,7 @@ export function OrderDialog({
                 order={order}
                 onDone={(refund) => {
                   setNotice(
-                    refund.status === "SUCCEEDED" ? "退款已按原支付来源退回。" : "退款已登记，正在等待渠道回执。",
+                    refund.status === "SUCCEEDED" ? "退款已按原支付来源退回。" : "退款已申请，正在等待到账结果。",
                   );
                   void changed();
                 }}
@@ -629,7 +630,7 @@ export function PaymentForm({
     if (result) onDone(result);
   }
   return (
-    <Panel title="核对付款">
+    <Panel title="核对付款" action={<InfoHint label="余额付款说明">余额最多抵扣本次应付金额，不可透支。余额和微信补款合为一笔付款。</InfoHint>}>
       <div className="tennis-form">
         <ErrorNotice error={command.error ?? wallet.error} />
         <div className="tennis-money-row">
@@ -664,11 +665,11 @@ export function PaymentForm({
             </label>
             {session.kind === "staff" && walletCents > 0 && (
               <label>
-                代扣授权 / 办理原因
+                客户授权说明
                 <textarea
                   value={draft.reason}
                   onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
-                  placeholder="填写客户授权使用余额的原因"
+                  placeholder="请记录客户同意使用余额的情况"
                   maxLength={2000}
                 />
               </label>
@@ -680,7 +681,7 @@ export function PaymentForm({
           <strong>{money(Number.isFinite(walletCents) ? Math.max(0, payable - walletCents) : payable)}</strong>
         </div>
         <p className="tennis-note">
-          余额不允许透支。余额与微信补差作为同一笔付款处理；渠道成功回执后才确认收款。
+          付款成功后才确认收款。
           {session.localSimulation ? "当前为本地演示，不会真实扣费。" : ""}
         </p>
         <div className="tennis-actions">
@@ -761,11 +762,11 @@ function RefundForm({
     }
   }
   return (
-    <Panel title="按明细确认退款">
+    <Panel title="按明细确认退款" action={<InfoHint label="退款去向说明">余额退回时会恢复原来的本金和赠送金额，微信付款原路退回。</InfoHint>}>
       <div className="tennis-form">
         <ErrorNotice error={command.error} />
         <p className="tennis-note">
-          请由授权员工确认退款金额和原因。余额按原本金 / 赠送构成恢复，微信部分退回原支付来源。
+          请与客户确认退款金额；勾选取消的时段会重新开放预订。退款原路退回。
         </p>
         {draft.lines.map((line, i) => {
           const original = order.lines.find((l) => l.id === line.lineId);
@@ -820,7 +821,6 @@ function RefundForm({
             maxLength={2000}
           />
         </label>
-        <p className="tennis-muted">默认金额为 0，请按双方确认的金额填写；系统会核对剩余可退额度。</p>
         <div className="tennis-actions">
           <button className="button button-secondary" disabled={command.busy} onClick={onClose}>
             返回
@@ -901,7 +901,7 @@ function FreeCancelForm({
             maxLength={2000}
           />
         </label>
-        <p className="tennis-muted">只释放所选免费时段；此操作不产生收付款记录。</p>
+        <p className="tennis-muted">取消后，所选时段会重新开放预订，无需退款。</p>
         <div className="tennis-actions">
           <button className="button button-secondary" disabled={command.busy} onClick={onClose}>
             返回

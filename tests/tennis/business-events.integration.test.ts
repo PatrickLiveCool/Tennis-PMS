@@ -41,7 +41,7 @@ import {
 } from "../../packages/db/src/tennis/external-agent.ts";
 import { pollBusinessEvents } from "../../packages/db/src/tennis/business-events.ts";
 import { LocalMockPaymentGateway, type MockPaymentPayload } from "../../packages/db/src/tennis/mock-payments.ts";
-import { seedTenantFixture, removeTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { seedTenantFixture, removeTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(
@@ -65,7 +65,7 @@ async function configureCourt(venueId: string, fixture = first) {
     minimumBookingMinutes: 15,
     openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })),
   });
-  const court = await createCourt(db, fixture.actor, { venueId, name: "事件合成球场", indoor: true });
+  const court = await createCourt(db, fixture.actor, { venueId, name: "事件合成球场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
   await setCourtPrice(db, fixture.actor, {
     venueId,
     courtId: court.id,
@@ -75,7 +75,7 @@ async function configureCourt(venueId: string, fixture = first) {
   return court.id;
 }
 async function profile(fixture = first): Promise<CustomerActor> {
-  const record = await createCustomer(db, fixture.actor, { nickname: "事件合成客户" });
+  const record = await createCustomer(db, fixture.actor, { nickname: "事件合成客户", phone: syntheticPhone() });
   const subjectId = key();
   subjects.push(subjectId);
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'synthetic event customer')", [subjectId]);

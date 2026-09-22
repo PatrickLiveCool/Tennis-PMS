@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { isCourtReadyForBooking } from "../../../../packages/domain/src/tennis-court-profile.ts";
 import { accessibleCourts, orderDetail, venueSchedule } from "../../../../packages/db/src/tennis/views.ts";
 import { withBookingTransaction, type BookingActor } from "../../../../packages/db/src/tennis/customers.ts";
 import { requireBookingVenue } from "../../../../packages/db/src/tennis/booking.ts";
@@ -35,7 +36,7 @@ export async function prepareAssistantAction(db: pg.Pool, actor: BookingActor, r
       if (interval.start <= Date.now() || interval.end - interval.start > 86400000) throw new AssistantPreparationError("请选择未来一天以内的使用时段。");
       const snapshot = await venueSchedule(db, actor, run.venue.id, dateAt(line.startAt, run.venue.timezone));
       const court = snapshot.courts.find((c) => c.id === line.courtId);
-      if (!court?.active || !snapshot.venue.active || court.hourlyPriceCents === null ||
+      if (!court?.active || !snapshot.venue.active || !isCourtReadyForBooking(court) ||
         interval.end - interval.start < (snapshot.venue.minimumBookingMinutes ?? 60) * 60000 ||
         !isWithinOpeningHours(line, run.venue.timezone, snapshot.venue.openingHours)) throw new AssistantPreparationError("所选时段不符合营业时间、最短时长或球场可售条件。");
       // Check both venue-local dates for intervals ending after midnight.

@@ -1,5 +1,6 @@
 import { bookingPolicyInTransaction } from "./booking-policy.ts";
 import { randomUUID } from "node:crypto";
+import { parseBookingPhone } from "../../../domain/src/customer-contact.ts";
 import type pg from "pg";
 import { assertDelegation } from "./agent-guard.ts";
 import type { CourtInterval } from "../../../domain/src/court-interval.ts";
@@ -18,6 +19,7 @@ export class TennisBookingError extends Error {
     readonly code:
       | "QUOTE_EXPIRED"
       | "QUOTE_ALREADY_USED"
+      | "BOOKING_PHONE_REQUIRED"
       | "PAST_INTERVAL"
       | "INVALID_HOLD"
       | "INVALID_REASON"
@@ -238,7 +240,8 @@ export async function createQuote(
 ): Promise<QuoteRecord> {
   return withBookingTransaction(db, actor, async (tx) => {
     await requireBookingVenue(tx, actor, input.venueId, "book");
-    await requireCustomer(tx, actor, input.customerId);
+    const customer = await requireCustomer(tx, actor, input.customerId);
+    if (!parseBookingPhone(customer.phone)) throw new TennisBookingError("BOOKING_PHONE_REQUIRED");
     await expireVenueHolds(tx, actor.tenantId, input.venueId);
     const policy = await bookingPolicyInTransaction(tx, actor.tenantId);
     const price = await priceSelectionInTransaction(tx, actor, input.venueId, input.lines);
@@ -304,7 +307,7 @@ export async function confirmQuote(
           }
           if (quote.expiresAt.getTime() <= (await databaseTime(tx))) throw new TennisBookingError("QUOTE_EXPIRED");
           // Current opening/asset rules must still permit sale. Keep the saved quote's prices.
-          await priceSelectionInTransaction(tx, actor, quote.venueId, quote.price.lines);
+          await priceSelectionInTransaction(tx, actor, quote.venueId, quote.price.lines, { existingQuote: true });
           await available(tx, actor, quote.price.lines);
           const now = await databaseTime(tx);
           if (quote.expiresAt.getTime() <= now) throw new TennisBookingError("QUOTE_EXPIRED");

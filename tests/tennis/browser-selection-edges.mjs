@@ -1,5 +1,6 @@
 import { chromium, expect } from "@playwright/test";
 import fs from "node:fs/promises";
+import { reserveSyntheticPhone } from "./browser-fixtures.mjs";
 
 // Local synthetic booking only; no remote channels, payment or database reset.
 const out = ".local-workspace/workbench-continuation-20260921";
@@ -30,7 +31,7 @@ try {
   const { context, page } = await login();
   const slot = (time) => page.getByRole("button", { name: `1 号场 ${time} 添加预订`, exact: true });
   await slot("09:00").click();
-  await page.getByLabel("称呼", { exact: true }).fill("取消边界草稿");
+  await page.getByLabel("姓名", { exact: true }).fill("取消边界草稿");
   await page.getByRole("button", { name: "取消草稿 1 号场 09:00", exact: true }).focus();
   await slot("11:00").focus();
   await page.keyboard.press("Escape");
@@ -41,7 +42,7 @@ try {
   await page.getByRole("button", { name: "取消草稿 1 号场 09:00", exact: true }).focus();
   await page.keyboard.press("Escape");
   await expect(page.locator(".tennis-selection")).toHaveCount(0);
-  await expect(page.getByLabel("称呼", { exact: true })).toHaveValue("取消边界草稿");
+  await expect(page.getByLabel("姓名", { exact: true })).toHaveValue("取消边界草稿");
   console.log("PASS Escape on the focused draft removes only that selection");
   // An invalid manual time remains editable in the side panel and must not
   // paint across the fixed court labels or beyond the time axis.
@@ -68,13 +69,14 @@ try {
   const mobile = await login({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const m = mobile.page;
   await m.getByRole("button", { name: "1 号场 10:00 选场", exact: true }).tap();
-  await m.getByLabel("称呼", { exact: true }).fill("手机冲突草稿保留");
+  await m.getByLabel("姓名", { exact: true }).fill("手机冲突草稿保留");
   const session = await (await m.request.get("/api/tennis/session")).json();
   const venueId = await m.getByLabel("切换场馆", { exact: true }).inputValue();
   const headers = { origin: "http://127.0.0.1:4273", "x-csrf-token": session.csrfToken, "x-workspace-version": String(session.contextVersion) };
   const lines = await m.evaluate(() => JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find((k) => k.startsWith("tennis:booking:")))).lines);
+  const competingCustomer = { commandKey: crypto.randomUUID(), nickname: "手机竞争占用合成客", phone: reserveSyntheticPhone() };
   const customerResponse = await m.request.post(`/api/tennis/venues/${venueId}/booking-customers`, {
-    headers, data: { commandKey: crypto.randomUUID(), nickname: "手机竞争占用合成客" },
+    headers, data: competingCustomer,
   });
   expect(customerResponse.status()).toBe(200);
   const customer = (await customerResponse.json()).customer;
@@ -97,7 +99,7 @@ try {
     expect(current.lines).toHaveLength(1);
     expect(current.lines[0].cancelledAt).toBeNull();
     await m.getByRole("button", { name: "预订", exact: true }).tap();
-    await expect(m.getByLabel("称呼", { exact: true })).toHaveValue("手机冲突草稿保留");
+    await expect(m.getByLabel("姓名", { exact: true })).toHaveValue("手机冲突草稿保留");
     await expect(m.locator(".tennis-selection")).toHaveCount(0);
     await m.getByRole("button", { name: "收起", exact: true }).tap();
     await m.getByRole("button", { name: "1 号场 10:00 查看占用", exact: true }).tap();

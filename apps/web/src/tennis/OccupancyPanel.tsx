@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { CalendarClock, Plus, Wrench } from "lucide-react";
+import { InfoHint } from "./InfoHint";
 import { TennisApiError, type TennisApi } from "./api";
 import {
   atVenueTime,
@@ -74,7 +75,7 @@ function occupancyError(error: unknown): unknown {
   if (!(error instanceof TennisApiError)) return error;
   if (error.code === "STALE_OCCUPANCY") return new Error("这条占场已更新或释放，请刷新排场后核对。");
   if (error.code === "ORDER_MANAGED_OCCUPANCY") return new Error("这条占用属于预订或改期，请从订单详情办理。");
-  if (error.code === "DUPLICATE_OCCUPANCY") return new Error("这条占场已登记，请先查询原登记结果。");
+  if (error.code === "DUPLICATE_OCCUPANCY") return new Error("这条占场已登记，请先查看登记结果。");
   return error;
 }
 export function OccupancyPanel(props: OccupancyPanelProps) {
@@ -181,14 +182,14 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
     const wanted = value.pending;
     if (value.action === "release") {
       if (!row) {
-        await completed("原日期已无这条占场，排场已刷新。若其他人员调整过日期，可到对应日期核对。");
+        await completed("原日期已找不到这条占场，请确认是否已被其他人改期。");
         return "completed";
       }
       if (row.revision !== value.original?.revision) {
-        await completed("这条占场已被更新，本次没有再次释放。请核对最新记录后办理。");
+        await completed("这条占场已被其他人更新，请核对最新记录后再释放。");
         return "completed";
       }
-      setNotice("原占场仍在，尚未确认释放。可重试原操作，或暂存后再核对。");
+      setNotice("占场尚未释放，可以重试，或暂存后再核对。");
       return "retry";
     }
     if (
@@ -200,19 +201,19 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
       (value.action !== "create" || row.sourceId === wanted.sourceId)
     ) {
       await completed(
-        value.action === "create" ? "已查到原占场登记，未重复创建。" : "已查到目标场地和时段，改期结果已恢复。",
+        value.action === "create" ? "已确认占场登记成功。" : "已确认占场改期成功。",
       );
       return "completed";
     }
     if (row && (value.action === "create" || row.revision !== value.original?.revision)) {
-      await completed("原记录已有其他更新，未覆盖最新排场。请从列表重新核对。");
+      await completed("这条占场已被其他人更新，请在列表中核对。");
       return "completed";
     }
     if (value.action === "reschedule" && !row) {
-      setNotice("未在原日期或目标日期找到这条占场。已保留输入，请核对其他日期的排场后再处理。");
+      setNotice("原日期和目标日期都找不到这条占场，请核对其他日期后再处理。填写的内容已保留。");
       return "unknown";
     }
-    setNotice("尚未查到原操作完成，可以使用原记录编号重试；不会另建一条占场。");
+    setNotice("尚未查到完成结果，可以重试上次操作。");
     return "retry";
   }
   async function send(value: OccupancyDraft) {
@@ -239,13 +240,13 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
             expectedRevision: value.original!.revision,
           })
         )?.ok === true;
-    if (!confirmed) throw new Error("尚未收到明确的办理结果，已保留输入，请先查询原操作。");
+    if (!confirmed) throw new Error("尚未确认办理结果。填写的内容已保留，请先查询结果。");
     await completed(
       value.action === "create"
-        ? "占场已登记，可售排场已更新。"
+        ? "占场已登记。"
         : value.action === "reschedule"
           ? "占场已调整，原时段已释放。"
-          : "占场已释放，可售排场已更新。",
+          : "占场已释放。",
     );
   }
   async function submit() {
@@ -316,6 +317,7 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
       title="课程与维护占场"
       action={
         <div className="tennis-actions">
+          <InfoHint label="课程与维护占场说明">登记课程或维护使用的时段，每 15 分钟为一档。这里只安排场地，不办理客户收款。</InfoHint>
           <RefreshButton onClick={() => void schedule.refresh()} busy={schedule.busy || busy} />
           {draft ? (
             <button type="button" className="button button-secondary" onClick={() => setOpen(true)}>
@@ -357,12 +359,12 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
         </p>
       )}
       {waiting && !open && (
-        <p className="tennis-note">上次操作的结果待核对，输入和记录编号已保留。请先查询，再继续办理。</p>
+        <p className="tennis-note">上次操作的结果还未确认，请先核对。</p>
       )}
       {!schedule.data && schedule.busy ? (
         <LoadingBlock />
       ) : !rows.length ? (
-        <EmptyState title="当日没有课程或维护占场" detail="登记课程使用或维护时间后，相应场地会从可售空档中扣除。" />
+        <EmptyState title="当日没有课程或维护占场" detail="登记后，这些时段将不再接受预订。" />
       ) : (
         <div className="tennis-table-scroll">
           <table className="tennis-table">
@@ -416,7 +418,6 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
           </table>
         </div>
       )}
-      <p className="tennis-muted">每次登记一段场地使用时间，支持 15 分钟间隔。课程排课与维护不会登记客户付款。</p>
       {open && draft && (
         <Modal
           title={
@@ -457,7 +458,7 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
             ) : (
               <>
                 <label>
-                  {draft.kind === "COURSE" ? "课程名称 / 排课标识" : "维护事项"}
+                  {draft.kind === "COURSE" ? "课程名称" : "维护事项"}
                   <input
                     required
                     maxLength={200}
@@ -484,6 +485,7 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
                     ))}
                   </select>
                 </label>
+                <div className="tennis-field-heading">占场时段 <InfoHint label="占场时间说明">使用场馆当地时间（{venue.timezone}）。改期遇到冲突时，原占场会保留。</InfoHint></div>
                 <div className="tennis-two">
                   <label>
                     开始日期
@@ -530,11 +532,10 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
                     />
                   </label>
                 </div>
-                <p className="tennis-muted">时间使用场馆时区 {venue.timezone}。改期发生冲突时，原占场会保留。</p>
               </>
             )}
-            {waiting && <p className="tennis-note">正在核对上次提交，期间保留原输入。先查询结果，再按原编号重试。</p>}
-            {!canOperate(draft.kind) && <p className="tennis-note">当前账号没有办理这类占场的权限，已保留原输入。</p>}
+            {waiting && <p className="tennis-note">上次提交的结果还未确认，请先查询结果。填写的内容已保留。</p>}
+            {!canOperate(draft.kind) && <p className="tennis-note">当前账号不能办理这类占场，填写的内容已保留。</p>}
             <div className="tennis-actions">
               <button type="button" className="button button-secondary" disabled={busy} onClick={() => setOpen(false)}>
                 暂存并关闭
@@ -557,12 +558,12 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
                       saveDraft(null);
                       setOpen(false);
                       setError(undefined);
-                      setNotice("已结束本次人工核对，请以最新排场为准。");
+                      setNotice("核对已结束，排场已刷新。");
                       void schedule.refresh();
                       onChanged();
                     }}
                   >
-                    已人工核对，结束本次操作
+                    已核对，结束本次操作
                   </button>
                 </>
               ) : (
@@ -583,7 +584,7 @@ function StaffOccupancyPanel({ session, api, venue, courts, date, onChanged }: O
                 {busy ? (
                   "正在处理…"
                 ) : waiting ? (
-                  "核对并重试原操作"
+                  "核对并重试"
                 ) : draft.action === "release" ? (
                   "确认释放"
                 ) : draft.action === "reschedule" ? (

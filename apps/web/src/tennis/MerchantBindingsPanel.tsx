@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Save } from "lucide-react";
+import { InfoHint } from "./InfoHint";
 import type { MerchantBinding, MerchantProvider } from "../../../../packages/db/src/tennis/merchant-bindings";
 import { TennisApiError, type TennisApi } from "./api";
 import type { TenantRecord } from "./types";
@@ -31,7 +32,7 @@ type SaveIntent = {
 };
 type PendingIntent = SaveIntent | { kind: "disable"; bindingId: string; expectedVersion: number };
 const emptyDraft: MerchantDraft = { provider: "MOCK", merchantId: "", appId: "", credentialRef: "" };
-const providerName = (provider: MerchantProvider) => (provider === "MOCK" ? "MOCK · 本地模拟" : "WECHAT · 仅预配置");
+const providerName = (provider: MerchantProvider) => (provider === "MOCK" ? "本地模拟" : "微信支付 · 未接通");
 const matches = (binding: MerchantBinding, intent: SaveIntent) =>
   binding.provider === intent.provider &&
   binding.version === intent.expectedVersion + 1 &&
@@ -51,15 +52,13 @@ export function MerchantBindingsPanel({
   const [tenantId, setTenantId] = useState("");
   const tenant = tenants.find((item) => item.id === tenantId) ?? tenants[0];
   return (
-    <Panel title="收款商户">
-      <p className="tennis-muted">
-        平台为每个租户配置收款商户。场地款与充值款归入各租户的商户账户；当前仅本地模拟渠道可用。
-      </p>
+    <Panel title="收款商户" action={<InfoHint label="收款商户说明">预订和充值款收至所选商家自己的商户账户。</InfoHint>}>
+      <p className="tennis-note">当前仅支持模拟收款，微信支付尚未接通。</p>
       {tenant ? (
         <>
           <label className="tennis-form">
-            商户所属租户
-            <select aria-label="商户所属租户" value={tenant.id} onChange={(event) => setTenantId(event.target.value)}>
+            商户所属商家
+            <select aria-label="商户所属商家" value={tenant.id} onChange={(event) => setTenantId(event.target.value)}>
               {tenants.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -71,7 +70,7 @@ export function MerchantBindingsPanel({
           <TenantMerchants key={`${scope}:${tenant.id}`} api={api} tenant={tenant} scope={`${scope}:${tenant.id}`} />
         </>
       ) : (
-        <EmptyState title="先开通租户" detail="每个商户配置固定归属一个租户。" />
+        <EmptyState title="请先开通商家" detail="开通后即可设置收款商户。" />
       )}
     </Panel>
   );
@@ -115,7 +114,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
         return true;
       }
       if (rows.some((row) => row.provider === intent.provider && row.version > intent.expectedVersion)) {
-        complete("商户配置已有更新，本次原版本不能再次提交。请核对下方历史后重新填写。");
+        complete("商户配置已被更新。请查看下方最新配置后重新填写。");
         return true;
       }
     }
@@ -145,7 +144,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
           ? !matches(result, intent)
           : result.id !== intent.bindingId || result.version !== intent.expectedVersion || result.active)
       )
-        throw new Error("返回结果尚未核实，请先重新读取商户列表。");
+        throw new Error("尚未确认保存结果，请先刷新商户列表。");
       complete(
         kind === "save"
           ? `第 ${result.version} 版商户已保存。${result.provider === "WECHAT" ? "微信支付尚未接通。" : "仅用于本地模拟收款。"}`
@@ -175,7 +174,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
       /-----BEGIN|-----END/.test(credentialRef)
     ) {
       setError(
-        new Error("请填写完整商户信息。凭据引用只填写服务端保存位置或引用编号，不能粘贴密钥、证书内容或含空白的文本。"),
+        new Error("请填写完整商户信息。凭据位置只填保存路径或编号，不要粘贴密钥、证书或带空格的内容。"),
       );
       return;
     }
@@ -210,7 +209,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
             {pending.kind === "save"
               ? `保存${providerName(pending.provider)}商户 ${pending.merchantId}（第 ${pending.expectedVersion + 1} 版）`
               : `停用商户第 ${pending.expectedVersion} 版`}
-            的结果需要核对。先重新读取列表；原操作保留原版本号，避免重复创建版本。
+            的结果还未确认，请先刷新列表核对。
           </p>
           <div className="tennis-actions">
             <button
@@ -219,7 +218,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
               disabled={busy || list.busy}
               onClick={() => void refresh()}
             >
-              重新读取并核对
+              刷新并核对
             </button>
             <button
               type="button"
@@ -227,7 +226,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
               disabled={busy || list.busy || !checked}
               onClick={() => void mutate(pending)}
             >
-              按原版本重试
+              重试上次操作
             </button>
           </div>
         </div>
@@ -242,8 +241,8 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
               disabled={locked}
               onChange={(event) => setDraft({ ...emptyDraft, provider: event.target.value as MerchantProvider })}
             >
-              <option value="MOCK">MOCK · 本地模拟</option>
-              <option value="WECHAT">WECHAT · 仅预配置，尚未接通</option>
+              <option value="MOCK">本地模拟</option>
+              <option value="WECHAT">微信支付（尚未接通）</option>
             </select>
           </label>
           <label>
@@ -255,7 +254,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
               value={draft.merchantId}
               disabled={locked}
               autoComplete="off"
-              placeholder={draft.provider === "MOCK" ? `mock:${tenant.id}` : "租户自己的微信支付商户号"}
+              placeholder={draft.provider === "MOCK" ? `mock:${tenant.id}` : "商家的微信支付商户号"}
               onChange={(event) => setDraft({ ...draft, merchantId: event.target.value })}
             />
           </label>
@@ -272,7 +271,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
             />
           </label>
           <label>
-            服务端凭据引用{draft.provider === "MOCK" ? "（选填）" : ""}
+            凭据保存位置{draft.provider === "MOCK" ? "（选填）" : ""}
             <input
               aria-label="商户凭据引用"
               required={draft.provider === "WECHAT"}
@@ -285,23 +284,24 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
             />
           </label>
         </div>
-        <p className="tennis-muted">
-          仅填写凭据引用，不收集密钥、私钥或证书正文。WECHAT 保存后只是预配置；真实支付接入完成前不能收款。
-        </p>
-        <p className="tennis-muted">保存会创建新版本并停用同渠道旧版本。历史版本只读，已有交易继续保留原商户信息。</p>
-        <button
-          type="submit"
-          className="button button-primary"
-          disabled={locked || list.busy || !list.data || !!list.error}
-        >
-          <Save size={16} />
-          {busy ? "处理中…" : "保存新版本"}
-        </button>
+        <p className="tennis-muted">只填凭据保存路径，不要粘贴密钥或证书。</p>
+        <p className="tennis-muted">{draft.provider === "WECHAT" ? "保存后仅保留微信支付配置，暂不能收款。" : "保存后，新的模拟收款使用这份配置。"}</p>
+        <div className="tennis-actions">
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={locked || list.busy || !list.data || !!list.error}
+          >
+            <Save size={16} />
+            {busy ? "处理中…" : "保存商户配置"}
+          </button>
+          <InfoHint label="商户配置保存说明">旧配置会保留，已有交易仍使用原商户信息核对和退款。</InfoHint>
+        </div>
       </form>
       {!list.data && list.busy ? (
         <LoadingBlock />
       ) : !list.data?.length ? (
-        <EmptyState title="尚无商户配置" detail="请先配置租户商户；本地模拟交易也会保留独立的模拟商户记录。" />
+        <EmptyState title="尚无商户配置" detail="填写商户信息后保存即可。" />
       ) : (
         <div className="tennis-table-scroll">
           <table className="tennis-table">
@@ -309,7 +309,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
               <tr>
                 <th>渠道 / 版本</th>
                 <th>商户号</th>
-                <th>App ID / 凭据引用</th>
+                <th>App ID / 凭据位置</th>
                 <th>状态</th>
                 <th>保存时间</th>
                 <th>操作</th>
@@ -326,7 +326,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
                   <td style={{ overflowWrap: "anywhere" }}>
                     {binding.appId ?? "未设置 App ID"}
                     <br />
-                    <small>{binding.credentialRef ?? "未设置凭据引用"}</small>
+                    <small>{binding.credentialRef ?? "未设置凭据位置"}</small>
                   </td>
                   <td>
                     <span
@@ -334,9 +334,9 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
                     >
                       {binding.active
                         ? binding.provider === "WECHAT"
-                          ? "预配置，未接通"
+                          ? "尚未接通"
                           : "模拟收款启用"
-                        : "已停用 / 历史"}
+                        : "已停用"}
                     </span>
                   </td>
                   <td>{dateTime(binding.createdAt)}</td>
@@ -353,7 +353,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
                         停用新收款
                       </button>
                     ) : (
-                      <span className="tennis-muted">历史只读</span>
+                      <span className="tennis-muted">仅查看</span>
                     )}
                   </td>
                 </tr>
@@ -362,7 +362,7 @@ function TenantMerchants({ api, tenant, scope }: { api: TennisApi; tenant: Tenan
           </table>
         </div>
       )}
-      <p className="tennis-muted">停用仅阻止新收款，原商户信息继续用于既有交易核对和退款。</p>
+      <p className="tennis-muted">停用后不再接受新收款，已有交易仍可核对和退款。</p>
     </>
   );
 }

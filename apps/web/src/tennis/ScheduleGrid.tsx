@@ -1,3 +1,6 @@
+import { ScheduleCourt } from "./ScheduleCourt";
+import { SCHEDULE_COURT_WIDTH } from "./schedule-layout";
+import { courtDescription, isCourtReadyForBooking } from "../../../../packages/domain/src/tennis-court-profile";
 import {
   useEffect,
   useMemo,
@@ -70,9 +73,9 @@ export function ScheduleGrid({
   );
   // Percentages keep overlays aligned with fractional CSS tracks through any resize.
   const slotWidth = (count: number) =>
-    `calc((100% - 104px) * ${count / ticks.length})`;
+    `calc((100% - ${SCHEDULE_COURT_WIDTH}px) * ${count / ticks.length})`;
   const slotLeft = (index: number) =>
-    `calc(104px + (100% - 104px) * ${index / ticks.length})`;
+    `calc(${SCHEDULE_COURT_WIDTH}px + (100% - ${SCHEDULE_COURT_WIDTH}px) * ${index / ticks.length})`;
   function point(x: number, y: number): GridPoint {
     const bounds = grid.current!.getBoundingClientRect();
     return {
@@ -81,13 +84,13 @@ export function ScheduleGrid({
         Math.min(
           ticks.length - 1,
           Math.floor(
-            (x - bounds.left - 104) / ((bounds.width - 104) / ticks.length),
+            (x - bounds.left - SCHEDULE_COURT_WIDTH) / ((bounds.width - SCHEDULE_COURT_WIDTH) / ticks.length),
           ),
         ),
       ),
       row: Math.max(
         0,
-        Math.min(courts.length - 1, Math.floor((y - bounds.top) / 56)),
+        Math.min(courts.length - 1, Array.from(grid.current!.querySelectorAll(".tennis-schedule-row")).filter((row) => y >= row.getBoundingClientRect().bottom).length),
       ),
     };
   }
@@ -217,10 +220,11 @@ export function ScheduleGrid({
         scroll = scrollRef.current;
       if (g && scroll) {
         const bounds = scroll.getBoundingClientRect();
+        const headerHeight = scroll.querySelector(".tennis-schedule-header")?.getBoundingClientRect().height ?? 38;
         const dx =
           g.x > bounds.right - 36 ? 12 : g.x < bounds.left + 120 ? -12 : 0;
         const dy =
-          g.y > bounds.bottom - 24 ? 9 : g.y < bounds.top + 76 ? -9 : 0;
+          g.y > bounds.bottom - 24 ? 9 : g.y < bounds.top + headerHeight + 38 ? -9 : 0;
         if (dx || dy) {
           scroll.scrollLeft += dx;
           scroll.scrollTop += dy;
@@ -276,17 +280,18 @@ export function ScheduleGrid({
     preview && (preview.moved || preview.resize) ? projected(preview) : [];
   function blocked(item: SelectionLine) {
     const court = courts.find((c) => c.id === item.courtId);
+    const selectedIndex = lines.indexOf(item);
     const unavailable =
       !court?.active ||
       !venue.active ||
-      court.hourlyPriceCents === null ||
+      (selectedIndex < 0 && !isCourtReadyForBooking(court)) ||
       Date.parse(item.startAt) <= Date.now() ||
       (Date.parse(item.endAt) - Date.parse(item.startAt)) / 60000 <
         (venue.minimumBookingMinutes ?? 15) ||
       !isWithinOpeningHours(item, venue.timezone, venue.openingHours);
     return (
       unavailable ||
-      issues[lines.indexOf(item)] ||
+      issues[selectedIndex] ||
       schedule.occupancies.some(
         (o) =>
           o.courtId === item.courtId &&
@@ -313,16 +318,10 @@ export function ScheduleGrid({
               className="tennis-schedule-row"
               key={court.id}
               style={{
-                gridTemplateColumns: `104px repeat(${ticks.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `${SCHEDULE_COURT_WIDTH}px repeat(${ticks.length}, minmax(0, 1fr))`,
               }}
             >
-              <div className="tennis-grid-court">
-                <strong>{court.name}</strong>
-                <span>
-                  {court.indoor ? "室内" : "室外"}{court.surface === "CLAY" ? " · 红土" : ""} ·{" "}
-                  {money(court.hourlyPriceCents)}/时
-                </span>
-              </div>
+              <ScheduleCourt court={court} />
               {ticks.map((t, slot) => {
                 const current = line(row, slot, slot + 1);
                 const occupancy = schedule.occupancies.find(
@@ -334,7 +333,7 @@ export function ScheduleGrid({
                 const open =
                   court.active &&
                   venue.active &&
-                  court.hourlyPriceCents !== null &&
+                  isCourtReadyForBooking(court) &&
                   Date.parse(current.startAt) > Date.now() &&
                   venue.openingHours.some(
                     (w) =>
@@ -509,7 +508,8 @@ export function ScheduleGrid({
         {courts.map((court, row) => (
           <details key={court.id} open={row === 0}>
             <summary>
-              {court.name}{court.surface === "CLAY" ? " · 红土场" : ""} · {money(court.hourlyPriceCents)}/时
+              {court.name} · {courtDescription(court)}
+              {court.hourlyPriceCents !== null && <> · {money(court.hourlyPriceCents)}/时</>}
             </summary>
             <div className="tennis-mobile-times">
               {ticks
@@ -531,7 +531,7 @@ export function ScheduleGrid({
                   const open =
                     court.active &&
                     venue.active &&
-                    court.hourlyPriceCents !== null &&
+                    isCourtReadyForBooking(court) &&
                     Date.parse(item.startAt) > Date.now() &&
                     venue.openingHours.some(
                       (w) =>

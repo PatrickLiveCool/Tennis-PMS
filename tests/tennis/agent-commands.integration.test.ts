@@ -18,7 +18,7 @@ import {
 import { idempotentCommand } from "../../packages/db/src/tennis/receipts.ts";
 import { beginTopupPayment, createTopupQuote } from "../../packages/db/src/tennis/topups.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(localTennisTestDatabaseUrl, "test"),
@@ -36,7 +36,7 @@ const selection = () => ({
   lines: [{ courtId, startAt: "2099-09-18T19:00:00+08:00", endAt: "2099-09-18T20:00:00+08:00" }],
 });
 async function addCustomer(nickname: string): Promise<CustomerActor> {
-  const profile = await createCustomer(db, first.actor, { nickname });
+  const profile = await createCustomer(db, first.actor, { nickname, phone: syntheticPhone() });
   const subjectId = randomUUID();
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,$2)", [subjectId, nickname]);
   extraSubjects.push(subjectId);
@@ -84,7 +84,7 @@ beforeEach(async () => {
     minimumBookingMinutes: 15,
     openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })),
   });
-  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "request history court", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "request history court", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 10000 });
   courtId = court.id;
   await setCourtPrice(db, first.actor, {
     venueId: first.venueId, courtId, expectedRevision: court.revision, hourlyPriceCents: 10000,

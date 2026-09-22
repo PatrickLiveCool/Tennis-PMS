@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { InfoHint } from "./InfoHint";
 import type { TennisApi } from "./api";
 import type { CourtRecord, SavedDiscount, TopupOffer, VenueRecord } from "./types";
 import {
@@ -50,19 +51,19 @@ function Discounts({
     <Panel
       title="分时折扣"
       action={
-        canEdit && (
-          <button className="button button-primary" onClick={() => setEditing("new")}>
+        <div className="tennis-actions">
+          <InfoHint label="时段折扣说明">同一球场、同一时段只能设置一条折扣；其他时段按标准小时价计费。</InfoHint>
+          {canEdit && <button className="button button-primary" onClick={() => setEditing("new")}>
             新增折扣
-          </button>
-        )
+          </button>}
+        </div>
       }
     >
-      <p className="tennis-muted">同片球场同一时段只应用一条有效折扣；重叠规则需调整后才能生效。</p>
       <ErrorNotice error={rules.error} retry={() => void rules.refresh()} />
       {!rules.data ? (
         <LoadingBlock />
       ) : !rules.data.length ? (
-        <EmptyState title="尚未设置时段折扣" detail="未命中折扣时，按球场标准小时价计算。" />
+        <EmptyState title="尚未设置时段折扣" detail="未设置折扣的时段按标准小时价计费。" />
       ) : (
         rules.data.map((rule) => (
           <div className="tennis-ledger-row" key={rule.id}>
@@ -208,7 +209,7 @@ function DiscountEditor({
         </div>
         <div className="tennis-two">
           <label>
-            使用开始
+            开始时间
             <MinuteSelect
               label="折扣开始时间"
               value={draft.startMinute}
@@ -216,7 +217,7 @@ function DiscountEditor({
             />
           </label>
           <label>
-            使用结束
+            结束时间
             <MinuteSelect
               label="折扣结束时间"
               value={draft.endMinute}
@@ -247,7 +248,7 @@ function DiscountEditor({
           </div>
         </fieldset>
         <label>
-          折扣（例如 8 表示八折）
+          折扣（折）
           <input
             type="number"
             step="0.001"
@@ -300,7 +301,7 @@ function Offers({ api }: { api: TennisApi }) {
         </div>
       ))}
       {data.data?.length === 0 && (
-        <EmptyState title="暂无充值方案" detail="客户仍可按人民币自定义金额充值；新增方案可设置赠送金额。" />
+        <EmptyState title="暂无充值方案" detail="添加方案可设置充值赠送；客户也可以自行填写充值金额。" />
       )}
       {edit && (
         <OfferEditor
@@ -362,7 +363,7 @@ function OfferEditor({
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
         <label>
-          实付本金（元）
+          充值金额（元）
           <input
             type="number"
             min="0.01"

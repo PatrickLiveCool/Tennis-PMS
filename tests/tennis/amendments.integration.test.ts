@@ -39,7 +39,7 @@ import {
 import { LocalMockPaymentGateway, type MockPaymentPayload } from "../../packages/db/src/tennis/mock-payments.ts";
 import { getWallet, recordOfflineTopup } from "../../packages/db/src/tennis/wallet.ts";
 import { occupyCourt, releaseCourtOccupancy } from "../../packages/db/src/tennis/inventory.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(
     process.env.TENNIS_TEST_DATABASE_URL ?? localTennisTestDatabaseUrl,
@@ -187,6 +187,9 @@ beforeEach(async () => {
       venueId: first.venueId,
       name: `合成球场${i}`,
       indoor: true,
+      surface: "ACRYLIC",
+      profile: { specification: "STANDARD" },
+      hourlyPriceCents: price,
     });
     await setCourtPrice(db, first.actor, {
       venueId: first.venueId,
@@ -198,6 +201,7 @@ beforeEach(async () => {
   }
   const profile = await createCustomer(db, first.actor, {
       nickname: "改期客户",
+      phone: syntheticPhone(),
     }),
     subjectId = key();
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'synthetic amendment customer')", [subjectId]);
@@ -1077,6 +1081,9 @@ describe("unpaid order line adjustments", () => {
       venueId: first.venueId,
       name: "免费测试场",
       indoor: true,
+      surface: "ACRYLIC",
+      profile: { specification: "STANDARD" },
+      hourlyPriceCents: 0,
     });
     await setCourtPrice(db, first.actor, {
       venueId: first.venueId,
@@ -1101,6 +1108,9 @@ describe("unpaid order line adjustments", () => {
       venueId: first.venueId,
       name: "免费改期场",
       indoor: true,
+      surface: "ACRYLIC",
+      profile: { specification: "STANDARD" },
+      hourlyPriceCents: 0,
     });
     await setCourtPrice(db, first.actor, {
       venueId: first.venueId,

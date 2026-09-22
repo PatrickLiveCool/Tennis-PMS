@@ -49,7 +49,7 @@ import {
 } from "../../packages/db/src/tennis/exception-refunds.ts";
 import { enqueueExceptionRefundChannel } from "../../packages/db/src/tennis/channel-intents.ts";
 import { requestHash } from "../../packages/db/src/tennis/receipts.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(
@@ -239,7 +239,7 @@ beforeEach(async () => {
     openingHours: hours,
     minimumBookingMinutes: 15,
   });
-  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "异常退款测试球场", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "异常退款测试球场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
   courtId = court.id;
   await setCourtPrice(db, first.actor, {
     venueId: first.venueId,
@@ -247,7 +247,7 @@ beforeEach(async () => {
     expectedRevision: court.revision,
     hourlyPriceCents: 12000,
   });
-  const profile = await createCustomer(db, first.actor, { nickname: "异常实收客户" });
+  const profile = await createCustomer(db, first.actor, { nickname: "异常实收客户", phone: syntheticPhone() });
   const subjectId = key();
   subjects.push(subjectId);
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'synthetic cash exception customer')", [

@@ -9,7 +9,7 @@ import {
   createVenue,
   listCourts,
   listVenues,
-  setCourtPrice,
+  saveCourt,
   updateVenue,
 } from "../../packages/db/src/tennis/catalog.ts";
 import { createCustomer, searchCustomers } from "../../packages/db/src/tennis/customers.ts";
@@ -100,13 +100,17 @@ try {
     for (let index = 1; index <= spec.courtCount; index++) {
       let court = courts.find((value) => value.name === `${index} 号场`);
       if (!court)
-        court = await createCourt(db, actor, { venueId: venue.id, name: `${index} 号场`, indoor: index <= 2 });
-      if (court.hourlyPriceCents === null)
-        await setCourtPrice(db, actor, {
+        court = await createCourt(db, actor, { venueId: venue.id, name: `${index} 号场`, indoor: index <= 2,
+          surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: index <= 2 ? 12000 : 8000 });
+      if (court.hourlyPriceCents === null || court.surface === "UNSPECIFIED" || court.profile.specification === "UNSPECIFIED")
+        await saveCourt(db, actor, {
           venueId: venue.id,
-          courtId: court.id,
+          id: court.id,
           expectedRevision: court.revision,
-          hourlyPriceCents: index <= 2 ? 12000 : 8000,
+          assets: { name: court.name, environment: court.environment,
+            surface: court.surface === "UNSPECIFIED" ? "ACRYLIC" : court.surface,
+            profile: { specification: court.profile.specification === "UNSPECIFIED" ? "STANDARD" : court.profile.specification } },
+          hourlyPriceCents: court.hourlyPriceCents ?? (index <= 2 ? 12000 : 8000),
         });
     }
     courts = await listCourts(db, actor, venue.id);

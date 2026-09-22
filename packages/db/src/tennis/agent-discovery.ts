@@ -1,9 +1,10 @@
 import type pg from "pg";
+import { isCourtReadyForBooking } from "../../../domain/src/tennis-court-profile.ts";
 import { parseCourtInterval } from "../../../domain/src/court-interval.ts";
 import { assertCents, TennisPricingError, type CourtPrice } from "../../../domain/src/tennis-pricing.ts";
 import { assertDelegation } from "./agent-guard.ts";
 import { requireBookingVenue } from "./booking.ts";
-import { priceSelectionInTransaction } from "./catalog.ts";
+import { courtColumns, type CourtRecord, priceSelectionInTransaction } from "./catalog.ts";
 import { isCustomerActor, withBookingTransaction } from "./customers.ts";
 import { resolveDelegation } from "./external-agent.ts";
 
@@ -27,7 +28,7 @@ export interface AgentVenueCandidate {
   catalogRevision: number;
   isCurrentVenue: boolean;
   availableCourtCount: number;
-  courts: { courtId: string; name: string; indoor: boolean; price: CourtPrice }[];
+  courts: (Pick<CourtRecord, "name" | "indoor" | "environment" | "surface" | "profile"> & { courtId: string; price: CourtPrice })[];
   suggestedSelection: { courtIds: string[]; totalCents: number; currency: "CNY" };
 }
 export interface AgentVenueDiscovery {
@@ -105,8 +106,8 @@ export async function discoverAgentVenues(
     const candidates: AgentVenueCandidate[] = [];
     for (const venue of venues) {
       const courts = (
-        await tx.query<{ id: string; name: string; indoor: boolean }>(
-          `SELECT c.id,c.name,c.indoor FROM tennis.courts c
+        await tx.query<CourtRecord>(
+          `SELECT ${courtColumns} FROM tennis.courts c
           WHERE c.tenant_id=$1 AND c.venue_id=$2 AND c.active AND c.hourly_price_cents IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM tennis.occupancies o
@@ -119,7 +120,7 @@ export async function discoverAgentVenues(
           ) ORDER BY c.name,c.id FOR SHARE OF c`,
           [actor.tenantId, venue.id, query.startAt, query.endAt, checkedAt],
         )
-      ).rows;
+      ).rows.filter(isCourtReadyForBooking);
       if (courts.length < query.courtCount) continue;
       const priced: AgentVenueCandidate["courts"] = [];
       for (const court of courts) {
@@ -129,7 +130,7 @@ export async function discoverAgentVenues(
           const estimate = await priceSelectionInTransaction(tx, actor, venue.id, [
             { courtId: court.id, startAt: query.startAt, endAt: query.endAt },
           ]);
-          priced.push({ courtId: court.id, name: court.name, indoor: court.indoor, price: estimate.lines[0]! });
+          priced.push({ courtId: court.id, name: court.name, indoor: court.indoor, environment: court.environment, surface: court.surface, profile: court.profile, price: estimate.lines[0]! });
         } catch (error) {
           if (
             error instanceof TennisPricingError &&

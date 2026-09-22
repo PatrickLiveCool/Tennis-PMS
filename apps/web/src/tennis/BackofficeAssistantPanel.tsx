@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ChevronRight, MessageSquare, Plus, Send, Sparkles, Square, X } from "lucide-react";
 import { TennisApiError, streamAssistant } from "./api";
 import { AssistantDock } from "./AssistantDock";
+import { InfoHint } from "./InfoHint";
 const LazyMessageContent = lazy(() => import("../assistant/AssistantMessageContent").then((module) => ({ default: module.AssistantMessageContent })));
 function AssistantMessageContent({ text }: { text: string }) {
   return <Suspense fallback={<div className="assistant-message-text">{text}</div>}><LazyMessageContent text={text} /></Suspense>;
@@ -233,7 +234,7 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
   return (
     <AssistantDock open={open} onClose={onClose} messagesRef={messagesRef} readingPosition={readingPosition}>
       <header className="assistant-header">
-        <div><Sparkles size={18} aria-hidden="true" /><strong>AI 助手</strong></div>
+        <div><Sparkles size={18} aria-hidden="true" /><strong>AI 助手</strong><InfoHint label="助手使用说明">可以查空场、核对订单、准备预订和退改。办理前仍需你确认。</InfoHint></div>
         <div>
           <button type="button" className="icon-button" aria-label="新建对话" title="新建对话" disabled={busy || generating} onClick={() => void create()}><Plus size={18} /></button>
           <button type="button" className="icon-button" aria-label="关闭 AI 助手" onClick={onClose}><X size={19} /></button>
@@ -245,8 +246,8 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
       <details className="assistant-history"><summary>历史对话</summary>
         <select aria-label="选择后台助手会话" value={selected} disabled={busy} onChange={(event) => { readingPosition.current = 0; followResponse.current = true; setSelected(event.target.value); }}>
           <option value="">选择会话</option>
-          {selected && !selectedInDirectory && <option value={selected}>已保存会话 · {selected.slice(0, 8)}</option>}
-          {directory.map((item) => <option key={item.id} value={item.id}>{dateTime(item.updatedAt, venue.timezone)} · {item.id.slice(0, 8)}</option>)}
+          {selected && !selectedInDirectory && <option value={selected}>当前会话</option>}
+          {directory.map((item, index) => <option key={item.id} value={item.id}>{dateTime(item.updatedAt, venue.timezone)} · 对话 {index + 1}</option>)}
         </select>
         <button className="button button-secondary button-small" disabled={busy || details.busy} onClick={() => void refresh()}>刷新会话</button>
       </details>
@@ -254,10 +255,10 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
         onScroll={(event) => { const el = event.currentTarget; if (!el.isConnected || !el.getClientRects().length) return; readingPosition.current = el.scrollTop; followResponse.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {!current?.messages.length && !draft.pending && <div className="assistant-welcome">
           <MessageSquare size={27} aria-hidden="true" /><h2>需要帮你做什么？</h2>
-          <p>问我怎么操作，或让我查找空场、核对订单，准备预订与退改。</p>
-          {!status.busy && !status.data?.configured && !status.error && <p className="assistant-notice">助手尚未启用，请平台运营管理员配置模型连接。</p>}
+          <p>查空场、看订单，或告诉我你想做什么。</p>
+          {!status.busy && !status.data?.configured && !status.error && <p className="assistant-notice">助手尚未启用，请联系平台管理员。</p>}
           <div className="assistant-suggestions">{suggestions.map((question, index) => <button key={question} type="button" disabled={busy || !current || !status.data?.configured} onClick={() => void send(question)}>
-            <span><strong>{context.orderId ? ["核对这笔订单", "办理改期与退款"][index] : [activeContext.selection?.length ? "准备已选时段的预订" : "查找可预订空场", "核对场地价格", "核对订单与收款"][index]}</strong><small>{question}</small></span><ChevronRight size={16} aria-hidden="true" />
+            <span><strong>{context.orderId ? ["核对这笔订单", "办理改期与退款"][index] : [activeContext.selection?.length ? "准备已选时段的预订" : "查找可预订空场", "核对场地价格", "核对订单与收款"][index]}</strong></span><ChevronRight size={16} aria-hidden="true" />
           </button>)}</div>
         </div>}
         {selected && details.busy && !current && <LoadingBlock label="正在读取助手会话" />}
@@ -273,7 +274,7 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
                 else if (entry.orderId) window.dispatchEvent(new CustomEvent("tennis-open-order", { detail: { scope, orderId: entry.orderId } }));
                 else onNavigate?.(destination);
               }}>{entry.label}</button>
-              {entry.preparation && <p className="tennis-muted">带入办理表单，由你核对确认。</p>}
+              {entry.preparation && <InfoHint label="办理前确认">点击后打开表单，核对并确认后才会办理。</InfoHint>}
             </div>;
           })}
           {message.role === "ASSISTANT" && <div className="assistant-feedback">
@@ -285,9 +286,9 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
         </article>)}
         {draft.pending && !current?.requests.some((request) => request.messageId === draft.pending?.messageId) && <article className="assistant-message assistant-message-user"><span className="assistant-message-author">你</span><div className="assistant-message-text">{draft.pending.content}</div></article>}
         {busy && partial && <article className="assistant-message assistant-message-assistant"><span className="assistant-message-author">AI 助手 · 回答中</span><AssistantMessageContent text={partial} /></article>}
-        {(busy || generating) && <p className="assistant-wait" role="status">{busy ? progress : "正在找回原消息的处理结果…"}</p>}
+        {(busy || generating) && <p className="assistant-wait" role="status">{busy ? progress : "正在找回回答…"}</p>}
         {notice && <p className="assistant-notice" role="status">{notice}</p>}
-        {draft.pending && !busy && !generating && <p className="assistant-notice">原消息结果待核对，可刷新会话或沿用原消息重试。</p>}
+        {draft.pending && !busy && !generating && <p className="assistant-notice">上一条回答尚未确认，请刷新查看或重试。</p>}
         <ErrorNotice error={error ?? details.error ?? conversations.error ?? status.error} retry={() => void refresh()} />
       </div>
       <form className="assistant-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
@@ -299,9 +300,9 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
             if (mobile || event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
             event.preventDefault(); if (!event.repeat && canSend) void send();
           }} />
-        <div><div className="assistant-composer-help"><small>业务操作由你确认</small><small>{mobile ? "回车换行，点击发送" : "回车发送 · Shift + 回车换行"}</small></div>
+        <div><div className="assistant-composer-help"><InfoHint label="发送快捷键">{mobile ? "回车换行，点击发送。" : "回车发送，Shift + 回车换行。"}</InfoHint></div>
           {busy ? <button className="button button-secondary" type="button" onClick={() => controller.current?.abort()}><Square size={14} />停止生成</button>
-            : <button className="button button-primary" type="submit" disabled={!canSend}><Send size={16} />{draft.pending ? "核对并重试原消息" : "发送"}</button>}
+            : <button className="button button-primary" type="submit" disabled={!canSend}><Send size={16} />{draft.pending ? "重试上一条" : "发送"}</button>}
         </div>
       </form>
     </AssistantDock>

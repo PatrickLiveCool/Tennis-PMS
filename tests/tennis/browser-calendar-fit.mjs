@@ -243,7 +243,7 @@ try {
     );
   }
   await page.clock.setFixedTime(new Date("2400-02-28T15:59:00Z"));
-  await page.getByRole("button", { name: "现在", exact: true }).click();
+  await page.getByRole("button", { name: "今天", exact: true }).click();
   await expect(day().locator(".tennis-now-line")).toBeVisible();
   await assertFit();
   console.log(

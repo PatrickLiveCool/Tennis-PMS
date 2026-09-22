@@ -51,7 +51,7 @@ async function prepareVenue(venueId: string) {
   });
 }
 async function makeCourt(venueId: string, price: number, name: string) {
-  const court = await createCourt(db, first.actor, { venueId, name, indoor: true });
+  const court = await createCourt(db, first.actor, { venueId, name, indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: price });
   await setCourtPrice(db, first.actor, {
     venueId,
     courtId: court.id,

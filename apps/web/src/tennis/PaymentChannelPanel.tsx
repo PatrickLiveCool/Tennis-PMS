@@ -26,11 +26,11 @@ interface PaymentChannelPanelProps {
   businessBusy?: boolean;
 }
 const stateLabels: Record<PaymentChannelSnapshot["state"], string> = {
-  NOT_REQUIRED: "无需外部渠道",
-  READY: "原单尚未提交渠道",
-  IN_FLIGHT: "未收到渠道处理结束回报",
+  NOT_REQUIRED: "无需线上支付",
+  READY: "尚未提交",
+  IN_FLIGHT: "正在处理，结果待确认",
   UNKNOWN: "渠道结果待核对",
-  PENDING: "等待渠道最终结果",
+  PENDING: "等待支付平台确认",
   SUCCEEDED: "渠道已确认成功",
   FAILED: "渠道已确认失败",
 };
@@ -59,7 +59,7 @@ function ChannelDetails({
   const path = `/${paths[kind]}/${encodeURIComponent(sourceId)}/channel`;
   function validate(value: PaymentChannelSnapshot) {
     if (!value || value.sourceId !== sourceId || !Object.hasOwn(stateLabels, value.state))
-      throw new Error("渠道记录尚未核实，请重新读取原单状态。");
+      throw new Error("未能核实支付结果，请刷新后重试。");
     return value;
   }
   const channel = useLoad(async () => validate(await api<PaymentChannelSnapshot>(path)), [api, path, businessStatus]);
@@ -148,37 +148,38 @@ function ChannelDetails({
       <ErrorNotice error={error ?? channel.error} retry={() => void readSnapshot()} />
       {channel.busy && !current ? <LoadingBlock /> : null}
       {!!channel.error && current && (
-        <p className="tennis-note">渠道状态刷新未成功，以下为上次读取结果，请重新核对。</p>
+        <p className="tennis-note">刷新失败，以下为上次结果。请重新核对。</p>
       )}
-      <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-        原单编号：<code>{sourceId}</code>
-      </p>
       {current && (
         <>
           <p role="status">
             <strong>{stateLabels[current.state]}</strong>
           </p>
-          {current.message && <p className="tennis-muted">{current.message}</p>}
           {current.simulation && <p className="tennis-note">本地模拟渠道，不会发生真实扣费或退款。</p>}
-          {current.operationId && (
+          <details>
+            <summary>查看支付编号</summary>
             <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-              渠道操作编号：<code>{current.operationId}</code>
+              付款或退款编号：<code>{sourceId}</code>
             </p>
-          )}
+            {current.operationId && (
+              <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
+                办理编号：<code>{current.operationId}</code>
+              </p>
+            )}
+          </details>
           <p className="tennis-muted">
-            最近查单：{current.lastCheckedAt ? dateTime(current.lastCheckedAt, timezone) : "尚未查询"}
+            上次核对：{current.lastCheckedAt ? dateTime(current.lastCheckedAt, timezone) : "尚未查询"}
           </p>
           {current.checkout?.kind === "LOCAL_SIMULATION" &&
             current.simulation &&
             current.checkout.operationId === current.operationId &&
             current.state === "PENDING" && (
               <p className="tennis-note">
-                本地模拟付款动作已准备，有效至 {dateTime(current.checkout.expiresAt, timezone)}
-                。请使用本页的模拟按钮验证结果。
+                模拟付款有效至 {dateTime(current.checkout.expiresAt, timezone)}。
               </p>
             )}
           {(current.state === "UNKNOWN" || current.state === "IN_FLIGHT") && (
-            <p className="tennis-note">暂未确认渠道结果，不代表原单失败。请查询原结果后再继续办理。</p>
+            <p className="tennis-note">结果尚未确认，请先查询，勿重复付款或退款。</p>
           )}
           <div className="tennis-actions">
             {canOperate && current.canReconcile && (
@@ -188,7 +189,7 @@ function ChannelDetails({
                 disabled={busy}
                 onClick={() => void reconcile()}
               >
-                {working ? "正在核对原单…" : startsSubmission ? submitLabel : "查询原结果"}
+                {working ? "正在核对…" : startsSubmission ? submitLabel : "查询结果"}
               </button>
             )}
             {canRetry && (
@@ -198,7 +199,7 @@ function ChannelDetails({
                 disabled={busy}
                 onClick={() => void retryRefund()}
               >
-                重试原退款
+                重试这笔退款
               </button>
             )}
           </div>

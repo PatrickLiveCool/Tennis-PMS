@@ -98,7 +98,7 @@ beforeEach(async () => {
   });
   courts = [];
   for (let i = 0; i < 3; i++) {
-    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: `${i + 1} 号场`, indoor: false });
+    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: `${i + 1} 号场`, indoor: false, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 10000 });
     courts.push(
       await setCourtPrice(db, first.actor, {
         courtId: court.id,
@@ -129,6 +129,19 @@ afterAll(async () => {
 });
 
 describe("quotes and atomic multi-line orders", () => {
+  it("requires a valid mainland contact for new quotes while preserving historical quote confirmation and receipt recovery", async () => {
+    const prior = await quote();
+    for (const phone of [null, "+12025550123"]) {
+      await db.query("UPDATE tennis.customers SET phone=$2 WHERE id=$1", [customer.customerId, phone]);
+      await expect(quote()).rejects.toMatchObject({ code: "BOOKING_PHONE_REQUIRED" });
+    }
+    expect((await db.query("SELECT id FROM tennis.quotes WHERE tenant_id=$1", [first.actor.tenantId])).rowCount).toBe(1);
+    const commandKey = key();
+    const order = await confirmQuote(db, first.actor, { quoteId: prior.id, commandKey });
+    expect(order.customerId).toBe(customer.customerId);
+    expect((await confirmQuote(db, first.actor, { quoteId: prior.id, commandKey })).id).toBe(order.id);
+    expect((await getCommandReceipt(db, first.actor, commandKey))?.result).toEqual({ orderId: order.id });
+  });
   it("holds three simultaneous courts together with exact saved totals and independent payment status", async () => {
     const preview = await expectDatabaseDeadline(() => quote([0, 1, 2]), (value) => value.expiresAt, 300000);
     const order = await expectDatabaseDeadline(
@@ -323,7 +336,7 @@ describe("quotes and atomic multi-line orders", () => {
     });
   });
   it("limits customers to their identity and rejects staff quote adoption and foreign tenant resources", async () => {
-    const other = await createCustomer(db, first.actor, { nickname: "另一客户" });
+    const other = await createCustomer(db, first.actor, { nickname: "另一客户", phone: "13900000001" });
     await expect(
       createQuote(db, customer, { venueId: first.venueId, customerId: other.id, lines: lines() }),
     ).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });

@@ -103,7 +103,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   first = await seedTenantFixture(db);
   second = await seedTenantFixture(db);
-  courtId = (await createCourt(db, first.actor, { venueId: first.venueId, name: "目录测试一号场", indoor: true })).id;
+  courtId = (await createCourt(db, first.actor, { venueId: first.venueId, name: "目录测试一号场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 0 })).id;
   const profile = await createCustomer(db, first.actor, { nickname: "Rare_100% Customer" });
   await db.query("UPDATE tennis.customers SET subject_id=$1 WHERE tenant_id=$2 AND id=$3", [
     first.actor.subjectId,
@@ -196,13 +196,16 @@ describe("complete, scoped order directory", () => {
   it("isolates customers, venues and tenants in both results and cursor lookup", async () => {
     const [own, other] = await seedOrders([{}, { customerId: otherCustomerId }]);
     const otherVenue = await createVenue(db, first.actor, { name: "隔离场馆", timezone: "Asia/Shanghai" });
-    const otherCourt = await createCourt(db, first.actor, { venueId: otherVenue.id, name: "隔离球场", indoor: true });
+    const otherCourt = await createCourt(db, first.actor, { venueId: otherVenue.id, name: "隔离球场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 0 });
     const [differentVenue] = await seedOrders([{ venueId: otherVenue.id, courtId: otherCourt.id }]);
     const foreignCustomer = await createCustomer(db, second.actor, { nickname: "外租户客户" });
     const foreignCourt = await createCourt(db, second.actor, {
       venueId: second.venueId,
       name: "外租户球场",
       indoor: true,
+      surface: "ACRYLIC",
+      profile: { specification: "STANDARD" },
+      hourlyPriceCents: 0,
     });
     const [foreign] = await seedOrders([{ customerId: foreignCustomer.id, courtId: foreignCourt.id }], second);
     expect((await orderList(db, customer, first.venueId)).orders.map((order) => order.id)).toEqual([own]);

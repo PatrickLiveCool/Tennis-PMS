@@ -1,3 +1,7 @@
+import { CourtEditor } from "./CourtEditor";
+import { InfoHint } from "./InfoHint";
+import { courtDescription, missingCourtPurchaseFields } from "../../../../packages/domain/src/tennis-court-profile";
+import { courtPurchaseFieldNames } from "./court-purchase-fields";
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { TennisApi } from "./api";
@@ -60,7 +64,7 @@ export function SettingsPage({
   const admin = session.tenants.some((t) => t.id === session.tenantId && t.kind === "staff" && t.role === "ADMIN");
   return (
     <>
-      <PageHeading title="场地与定价" description="场馆 / 校区下面包含多片球场。每个租户独立管理价格与资产。">
+      <PageHeading title="场地与定价">
         {canAssets && (
           <button className="button button-secondary" onClick={() => setNewVenue(true)}>
             <Plus size={16} />
@@ -70,7 +74,7 @@ export function SettingsPage({
       </PageHeading>
       <div className="tennis-tabs">
         <button className={tab === "assets" ? "active" : ""} onClick={() => setTab("assets")}>
-          场地资产
+          球场资料
         </button>
         <button className={tab === "discounts" ? "active" : ""} onClick={() => setTab("discounts")}>
           时段折扣
@@ -104,7 +108,7 @@ export function SettingsPage({
           <Panel
             title="球场与小时价"
             action={
-              canAssets && (
+              canAssets && canPrices && (
                 <button className="button button-secondary button-small" onClick={() => setCourt("new")}>
                   <Plus size={15} />
                   添加球场
@@ -116,17 +120,18 @@ export function SettingsPage({
             {!courts.data ? (
               <LoadingBlock />
             ) : !courts.data.length ? (
-              <EmptyState title="暂无球场" detail="添加球场后设置小时价，完成营业配置即可开始销售。" />
+              <EmptyState title="暂无球场" detail="添加球场并补齐必填资料后，即可接受预订。" />
             ) : (
               courts.data.map((item) => (
                 <div className="tennis-ledger-row" key={item.id}>
                   <div>
                     <strong>
-                      {item.name} · {item.indoor ? "室内" : "室外"}{item.surface === "CLAY" ? " · 红土场" : ""}
+                      {item.name} · {courtDescription(item)}
                     </strong>
                     <span>
                       {item.active ? "启用" : "停用"} · {money(item.hourlyPriceCents)} / 小时
                     </span>
+                    {missingCourtPurchaseFields(item).length > 0 && <span className="tennis-warning-text">待补齐：{missingCourtPurchaseFields(item).map((field) => courtPurchaseFieldNames[field]).join("、")}</span>}
                   </div>
                   {(canAssets || canPrices) && (
                     <button className="button button-secondary button-small" onClick={() => setCourt(item)}>
@@ -267,7 +272,7 @@ function VenueEditor({
               场馆营业
             </label>
             <div className="panel-heading">
-              <h3>每周营业时段</h3>
+              <h3>每周营业时段 <InfoHint label="营业时段说明">同一天可以添加多段营业时间，例如上午和晚间。</InfoHint></h3>
               <button
                 className="button button-secondary button-small"
                 type="button"
@@ -341,7 +346,7 @@ function VenueEditor({
             ))}
           </div>
         </fieldset>
-        <p className="tennis-muted">同一天可设置多段营业窗口。影响既有预约的停业或营业时间缩短，需要先处理相关预约。</p>
+        <p className="tennis-muted">停业或缩短营业时间前，请先处理受影响的预约。</p>
         {canEdit && (
           <button type="submit" className="button button-primary" disabled={busy}>
             {busy ? "正在保存…" : "保存营业设置"}
@@ -378,136 +383,11 @@ export function NewVenue({ api, onClose, onSaved }: { api: TennisApi; onClose: (
           地址
           <input value={address} onChange={(e) => setAddress(e.target.value)} />
         </label>
-        <p className="tennis-muted">新场馆需补齐营业时间、最短时长和球场价格。</p>
+        <p className="tennis-muted">创建后，请设置营业时间和球场价格。</p>
         <button className="button button-primary" disabled={busy}>
           创建场馆
         </button>
       </form>
-    </Modal>
-  );
-}
-function CourtEditor({
-  api,
-  venue,
-  court,
-  canAssets,
-  canPrices,
-  onClose,
-  onSaved,
-}: {
-  api: TennisApi;
-  venue: VenueRecord;
-  court: CourtRecord | "new";
-  canAssets: boolean;
-  canPrices: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [current, setCurrent] = useState(court === "new" ? null : court);
-  const [name, setName] = useState(current?.name ?? "");
-  const [indoor, setIndoor] = useState(current?.indoor ?? false);
-  const [surface, setSurface] = useState<CourtRecord["surface"]>(current?.surface ?? "UNSPECIFIED");
-  const [active, setActive] = useState(current?.active ?? true);
-  const [price, setPrice] = useState(current?.hourlyPriceCents == null ? "" : String(current.hourlyPriceCents / 100));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>();
-  const [message, setMessage] = useState("");
-  async function save(kind: "asset" | "price") {
-    setBusy(true);
-    setError(undefined);
-    try {
-      const result =
-        kind === "price" && current
-          ? await api<CourtRecord>(`/venues/${venue.id}/courts/${current.id}/price`, "PATCH", {
-              expectedRevision: current.revision,
-              hourlyPriceCents: cents(price),
-            })
-          : current
-            ? await api<CourtRecord>(`/venues/${venue.id}/courts/${current.id}`, "PATCH", {
-                expectedRevision: current.revision,
-                name,
-                indoor,
-                surface,
-                active,
-              })
-            : await api<CourtRecord>(`/venues/${venue.id}/courts`, "POST", { name, indoor, surface });
-      setCurrent(result);
-      setMessage(kind === "price" ? "标准小时价已保存。" : "球场资料已保存，请核对小时价格。");
-      onSaved();
-    } catch (next) {
-      setError(next);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal title={current ? "编辑球场" : "添加球场"} onClose={onClose} closeDisabled={busy}>
-      <div className="tennis-form">
-        <ErrorNotice error={error} />
-        {message && <p className="tennis-success">{message}</p>}
-        <label>
-          球场名称
-          <input value={name} onChange={(e) => setName(e.target.value)} disabled={!canAssets || busy} />
-        </label>
-        <label>
-          场地材质
-          <select value={surface} onChange={(e) => setSurface(e.target.value as CourtRecord["surface"])} disabled={!canAssets || busy}>
-            <option value="UNSPECIFIED">未标注材质</option>
-            <option value="CLAY">红土场</option>
-          </select>
-        </label>
-        <label className="tennis-check">
-          <input
-            type="checkbox"
-            checked={indoor}
-            onChange={(e) => setIndoor(e.target.checked)}
-            disabled={!canAssets || busy}
-          />
-          室内球场
-        </label>
-        {current && (
-          <label className="tennis-check">
-            <input
-              type="checkbox"
-              checked={active}
-              onChange={(e) => setActive(e.target.checked)}
-              disabled={!canAssets || busy}
-            />
-            启用球场
-          </label>
-        )}
-        {canAssets && (
-          <button className="button button-primary" disabled={busy || !name.trim()} onClick={() => void save("asset")}>
-            {current ? "保存球场资料" : "创建球场"}
-          </button>
-        )}
-        {current && (
-          <>
-            <hr />
-            <label>
-              标准小时价（元 / 小时）
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                disabled={!canPrices || busy}
-              />
-            </label>
-            <p className="tennis-muted">按实际时段折算，跨折扣时段分段计价；新设置不追溯修改已确认订单。</p>
-            {canPrices && (
-              <button
-                className="button button-primary"
-                disabled={busy || price === ""}
-                onClick={() => void save("price")}
-              >
-                保存小时价格
-              </button>
-            )}
-          </>
-        )}
-      </div>
     </Modal>
   );
 }

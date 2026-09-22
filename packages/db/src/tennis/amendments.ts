@@ -450,6 +450,7 @@ export async function applyAmendmentInTransaction(tx: pg.PoolClient, tenantId: s
     actor,
     amendment.venueId,
     amendment.lines.map((l) => l.new),
+    { existingQuote: true },
   );
   await checkTargets(tx, tenantId, order.id, amendment.lines, id);
   for (const line of amendment.lines) {
@@ -583,6 +584,7 @@ export async function confirmOrderAmendment(
           actor,
           located.venueId,
           amendment.lines.map((l) => l.new),
+          { existingQuote: true },
         );
         await checkTargets(tx, actor.tenantId, order.id, amendment.lines);
         for (const line of amendment.lines)

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseBookingPhone, parseCustomerPhone } from "../../../domain/src/customer-contact.ts";
 import type pg from "pg";
 import {
   recordTenantAudit,
@@ -29,16 +30,14 @@ export function isCustomerActor(actor: BookingActor): actor is CustomerActor {
   return "kind" in actor && actor.kind === "customer";
 }
 export class TennisCustomerError extends Error {
-  constructor(readonly code: "INVALID_CUSTOMER" | "PHONE_ALREADY_EXISTS") {
+  constructor(readonly code: "INVALID_CUSTOMER" | "PHONE_ALREADY_EXISTS" | "BOOKING_PHONE_REQUIRED" | "BOOKING_PHONE_ALREADY_SET") {
     super(code);
     this.name = "TennisCustomerError";
   }
 }
 export function normalizedPhone(value?: string | null): string | null {
-  if (!value?.trim()) return null;
-  const compact = value.replace(/[\s()-]/g, "");
-  const phone = /^1[3-9]\d{9}$/.test(compact) ? `+86${compact}` : compact;
-  if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw new TennisCustomerError("INVALID_CUSTOMER");
+  const phone = parseCustomerPhone(value);
+  if (phone === undefined) throw new TennisCustomerError("INVALID_CUSTOMER");
   return phone;
 }
 /** Minimal booking identity only. No wallet, channel binding or profile-edit authority. */
@@ -48,7 +47,9 @@ export async function registerBookingCustomer(
   input: { venueId: string; commandKey: string; nickname: string; phone?: string | null },
 ) {
   if (!input.nickname.trim() || input.nickname.length > 200) throw new TennisCustomerError("INVALID_CUSTOMER");
-  const phone = normalizedPhone(input.phone);
+  const phone = parseBookingPhone(input.phone);
+  if (phone === undefined) throw new TennisCustomerError("INVALID_CUSTOMER");
+  if (phone === null) throw new TennisCustomerError("BOOKING_PHONE_REQUIRED");
   return withBookingTransaction(db, actor, async (tx) => {
     if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
     await requireVenuePermission(tx, actor, input.venueId, "book");
@@ -65,6 +66,37 @@ export async function registerBookingCustomer(
           [id, actor.tenantId, input.nickname.trim(), phone]);
         await recordTenantAudit(tx, actor, "booking.customer", id, { venueId: input.venueId });
         return { customerId: id, customer: { id, tenantId: actor.tenantId, nickname: input.nickname.trim(), phone: null, hasContact: Boolean(phone), active: true } };
+      });
+  }).catch((error: unknown) => {
+    if ((error as { code?: string }).code === "23505") throw new TennisCustomerError("PHONE_ALREADY_EXISTS");
+    throw error;
+  });
+}
+/** Booking staff may supply a missing contact, never replace a contact or merge identities. */
+export async function completeBookingCustomerContact(
+  db: pg.Pool,
+  actor: TenantActor,
+  input: { venueId: string; customerId: string; commandKey: string; phone: string },
+) {
+  const phone = parseBookingPhone(input.phone);
+  if (phone === undefined) throw new TennisCustomerError("INVALID_CUSTOMER");
+  if (phone === null) throw new TennisCustomerError("BOOKING_PHONE_REQUIRED");
+  return withBookingTransaction(db, actor, async (tx) => {
+    if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+    await requireVenuePermission(tx, actor, input.venueId, "book");
+    const customer = await requireCustomer(tx, actor, input.customerId);
+    return idempotentCommand(tx, actor, input.venueId, input.commandKey, "booking.customer",
+      { customerId: input.customerId, phone }, async () => {
+        if (customer.phone !== null) throw new TennisCustomerError("BOOKING_PHONE_ALREADY_SET");
+        const existing = await tx.query(
+          "SELECT id FROM tennis.customers WHERE tenant_id=$1 AND phone=$2",
+          [actor.tenantId, phone],
+        );
+        if (existing.rowCount) throw new TennisCustomerError("PHONE_ALREADY_EXISTS");
+        await tx.query("UPDATE tennis.customers SET phone=$3 WHERE tenant_id=$1 AND id=$2 AND phone IS NULL",
+          [actor.tenantId, customer.id, phone]);
+        await recordTenantAudit(tx, actor, "booking.customer.contact", customer.id, { venueId: input.venueId });
+        return { customerId: customer.id, customer: { ...customer, phone: null, hasContact: true } };
       });
   }).catch((error: unknown) => {
     if ((error as { code?: string }).code === "23505") throw new TennisCustomerError("PHONE_ALREADY_EXISTS");

@@ -129,7 +129,6 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
             {busy ? "正在登录…" : "进入工作台"}
           </button>
         </form>
-        <p className="tennis-muted">使用平台分配的账号。本地演示使用固定账号密码，见验收说明。</p>
       </section>
     </main>
   );
@@ -262,7 +261,7 @@ function Workspace({
           {session.kind === "staff" && permits(session, "book") && (
             <button className="nav-link" onClick={() => setBusinessConversationsOpen(true)}>
               <MessagesSquare size={19} />
-              <span>业务会话</span>
+              <span>咨询与协助</span>
             </button>
           )}
           <button
@@ -298,7 +297,7 @@ function Workspace({
           <div className="tennis-workspace-select">
             <Building2 size={18} />
             <select
-              aria-label="切换租户与身份"
+              aria-label="切换商家与身份"
               value={session.contextValid === false ? "" : `${session.kind}:${session.tenantId ?? ""}`}
               onChange={(e) => void context(e.target.value)}
               disabled={busy}
@@ -345,7 +344,7 @@ function Workspace({
             </button>
             {session.localSimulation && <span className="tennis-demo-badge">本地模拟</span>}
             {session.kind === "staff" && permits(session, "book") && (
-              <button className="icon-button" aria-label="打开智能体业务会话" title="智能体业务会话" onClick={() => setBusinessConversationsOpen(true)}>
+              <button className="icon-button" aria-label="打开咨询与协助" title="咨询与协助" onClick={() => setBusinessConversationsOpen(true)}>
                 <MessagesSquare size={19} />
               </button>
             )}
@@ -367,7 +366,7 @@ function Workspace({
           <ErrorNotice error={error} />
           {session.contextValid === false ? (
             <Panel>
-              <EmptyState title="当前身份权限已变更" detail="请从顶部选择仍可访问的租户或身份，或退出后重新登录。" />
+              <EmptyState title="当前账号权限有变化" detail="请切换账号或重新登录。" />
             </Panel>
           ) : session.kind === "platform" ? (
             <PlatformPage api={api} scope={session.subjectId} />
@@ -377,7 +376,7 @@ function Workspace({
               {venues.busy ? (
                 <LoadingBlock />
               ) : (
-                <EmptyState title="暂无可访问场馆" detail="请联系租户管理员创建场馆或为此账号分配场馆权限。" />
+                <EmptyState title="暂无可访问场馆" detail="请联系管理员添加场馆或开通访问权限。" />
               )}
               {!venues.busy && permits(session, "manage_assets") && (
                 <button className="button button-primary" onClick={() => setCreatingVenue(true)}>

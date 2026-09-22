@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { InfoHint } from "./InfoHint";
 import type { BookingPolicy } from "../../../../packages/db/src/tennis/booking-policy";
 import type { TennisApi } from "./api";
 import { ErrorNotice, LoadingBlock, Panel, useLoad } from "./components";
@@ -10,15 +11,17 @@ export function BookingPolicyPanel({ api }: { api: TennisApi }) {
   const [message, setMessage] = useState("");
   async function refresh() {
     const result = await policy.refresh();
-    if (result) { setReload((v) => v + 1); setMessage("已重新读取当前设置。"); }
+    if (result) { setReload((v) => v + 1); setMessage("设置已刷新。"); }
   }
   return (
     <Panel title="预订期限" action={
-      <button className="button button-secondary" disabled={saving || policy.busy} onClick={() => void refresh()}>
-        重新读取当前设置
-      </button>
+      <div className="tennis-actions">
+        <InfoHint label="预订期限说明">用于所有场馆的新预订和改期报价，已有报价和订单的期限不变。</InfoHint>
+        <button className="button button-secondary" disabled={saving || policy.busy} onClick={() => void refresh()}>
+          刷新设置
+        </button>
+      </div>
     }>
-      <p className="tennis-muted">适用于本租户全部场馆的新订场报价和改期报价。已有报价及订单保留原期限。</p>
       <ErrorNotice error={policy.error} retry={() => void refresh()} />
       {message && <p className="tennis-success" role="status">{message}</p>}
       {policy.data ? (
@@ -50,15 +53,16 @@ function PolicyForm({ api, source, onBusy, onSaved }: {
       <ErrorNotice error={error} />
       <fieldset disabled={busy}>
         <div className="tennis-two">
-          <label>报价有效期（分钟）
-            <input type="number" min="1" max="1440" step="1" required value={quote} onChange={(e) => setQuote(e.target.value)} />
-          </label>
-          <label>待付款占位期（分钟）
-            <input type="number" min="1" max="1440" step="1" required value={hold} onChange={(e) => setHold(e.target.value)} />
-          </label>
+          <div className="tennis-label">
+            <div className="tennis-field-heading"><label htmlFor="booking-quote-minutes">报价有效期（分钟）</label><InfoHint label="报价有效期说明">客户需要在这段时间内确认报价，过期后需重新核价。可填 1–1440 分钟。</InfoHint></div>
+            <input id="booking-quote-minutes" type="number" min="1" max="1440" step="1" required value={quote} onChange={(e) => setQuote(e.target.value)} />
+          </div>
+          <div className="tennis-label">
+            <div className="tennis-field-heading"><label htmlFor="booking-hold-minutes">待付款保留时间（分钟）</label><InfoHint label="待付款保留时间说明">从确认报价开始计时。未付款订单改期不延长原付款期限；人工保留预约按单独填写的截止时间处理。可填 1–1440 分钟。</InfoHint></div>
+            <input id="booking-hold-minutes" type="number" min="1" max="1440" step="1" required value={hold} onChange={(e) => setHold(e.target.value)} />
+          </div>
         </div>
       </fieldset>
-      <p className="tennis-muted">默认报价 5 分钟、待付款占位 10 分钟，可设置 1–1440 整分钟。待付款占位从确认报价开始计时。员工注明原因的保留预约沿用单独填写的截止时间；未付款订单改期不延长原截止时间。</p>
       <button type="submit" className="button button-primary" disabled={busy}>{busy ? "正在保存…" : "保存预订期限"}</button>
     </form>
   );

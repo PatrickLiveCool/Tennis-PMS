@@ -1,0 +1,1 @@
+export const SCHEDULE_COURT_WIDTH = 148;
