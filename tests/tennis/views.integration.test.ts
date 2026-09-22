@@ -29,7 +29,7 @@ import {
   type TopupPayment,
 } from "../../packages/db/src/tennis/topups.ts";
 import { financeLedger } from "../../packages/db/src/tennis/views.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(
@@ -57,7 +57,7 @@ async function configureCourt(venueId: string) {
     openingHours: hours,
     minimumBookingMinutes: 15,
   });
-  const court = await createCourt(db, first.actor, { venueId, name: "财务测试球场", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId, name: "财务测试球场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
   await setCourtPrice(db, first.actor, {
     venueId,
     courtId: court.id,
@@ -165,7 +165,7 @@ beforeEach(async () => {
   first = await seedTenantFixture(db);
   second = await seedTenantFixture(db);
   courtId = await configureCourt(first.venueId);
-  const profile = await createCustomer(db, first.actor, { nickname: "财务测试客户" });
+  const profile = await createCustomer(db, first.actor, { nickname: "财务测试客户", phone: syntheticPhone() });
   customerSubject = key();
   await db.query("INSERT INTO tennis.subjects (id,display_name) VALUES ($1,'synthetic finance customer')", [
     customerSubject,

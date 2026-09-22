@@ -13,7 +13,7 @@ import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payme
 import { TrustedWecomCollectionSource, ingestWecomCollection, linkWecomReceipt, listWecomPaymentTargets, listWecomReceipts, simulateWecomReceipt, type WecomCollectionFacts } from "../../packages/db/src/tennis/wecom-reconciliation.ts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { createLocalAccount, type SessionView } from "../../packages/db/src/tennis/auth.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 const db = new pg.Pool({ connectionString: assertLocalTennisDatabaseUrl(process.env.TENNIS_TEST_DATABASE_URL ?? localTennisTestDatabaseUrl, "test"), max: 8, connectionTimeoutMillis: 5000, statement_timeout: 10000 });
 const gateway = new LocalMockPaymentGateway("wecom-synthetic-reconciliation-test-secret", "local-simulation");
 const key = () => randomUUID();
@@ -47,10 +47,10 @@ beforeEach(async () => {
   const venue = (await listVenues(db, first.actor))[0]!;
   await updateVenue(db, first.actor, { ...venue, expectedRevision: venue.catalogRevision, minimumBookingMinutes: 15,
     openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })) });
-  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "企微合成验收球场", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "企微合成验收球场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
   courtId = court.id;
   await setCourtPrice(db, first.actor, { venueId: first.venueId, courtId, expectedRevision: court.revision, hourlyPriceCents: 12000 });
-  customerId = (await createCustomer(db, first.actor, { nickname: "合成收款客户" })).id;
+  customerId = (await createCustomer(db, first.actor, { nickname: "合成收款客户", phone: syntheticPhone() })).id;
 });
 afterEach(async () => {
   await db.query("DELETE FROM tennis.auth_sessions WHERE subject_id=ANY($1::text[])", [accountSubjects]);

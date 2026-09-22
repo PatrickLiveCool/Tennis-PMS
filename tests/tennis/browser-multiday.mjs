@@ -1,5 +1,6 @@
 import { chromium, expect } from "@playwright/test";
 import fs from "node:fs/promises";
+import { reserveSyntheticPhone } from "./browser-fixtures.mjs";
 
 // Only synthetic local demo records. No payment or external-service calls.
 const baseURL = "http://127.0.0.1:4273";
@@ -70,7 +71,8 @@ try {
   await expect(page.locator(".tennis-schedule-header")).toHaveCount(1);
   await drag(slot(0, 3, "09:45"), slot(0, 1, "09:00"));
   await expect(page.locator(".tennis-selection")).toHaveCount(3);
-  await page.getByLabel("称呼", { exact: true }).fill("多日排场验收客");
+  await page.getByLabel("姓名", { exact: true }).fill("多日排场验收客");
+  await page.getByLabel("手机号", { exact: true }).fill(reserveSyntheticPhone());
   await group(0)
     .getByRole("button", { name: "取消草稿 1 号场 09:00", exact: true })
     .click();
@@ -80,7 +82,7 @@ try {
   expect(
     new Set((await draft()).lines.map((l) => l.startAt.slice(0, 10))).size,
   ).toBe(2);
-  await expect(page.getByLabel("称呼", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("姓名", { exact: true })).toHaveValue(
     "多日排场验收客",
   );
   console.log(
@@ -105,13 +107,13 @@ try {
     x: el.scrollLeft,
     y: el.scrollTop,
   }));
-  await page.getByLabel("称呼", { exact: true }).fill("刷新中继续填写");
+  await page.getByLabel("姓名", { exact: true }).fill("刷新中继续填写");
   await drag(slot(1, 2, "10:00"), slot(1, 3, "10:45"));
   await expect(page.locator(".tennis-selection")).toHaveCount(5);
   releases.forEach((resolve) => resolve());
   await expect.poll(() => completed).toBe(3);
   await page.unroute("**/schedule?date=*");
-  await expect(page.getByLabel("称呼", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("姓名", { exact: true })).toHaveValue(
     "刷新中继续填写",
   );
   expect(
@@ -144,7 +146,7 @@ try {
   await expect(page.getByText("更新失败", { exact: true })).toBeVisible();
   await expect(quoteButton).toBeDisabled();
   await expect(page.locator(".tennis-selection")).toHaveCount(4);
-  await expect(page.getByLabel("称呼", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("姓名", { exact: true })).toHaveValue(
     "刷新中继续填写",
   );
   await page.unroute("**/schedule?date=*");
@@ -342,7 +344,7 @@ try {
   await md
     .getByRole("button", { name: "1 号场 09:00 选场", exact: true })
     .tap();
-  await mp.getByLabel("称呼", { exact: true }).fill("手机跨日验收客");
+  await mp.getByLabel("姓名", { exact: true }).fill("手机跨日验收客");
   await expect(mp.locator(".tennis-selection")).toHaveCount(1);
   await mp.getByRole("button", { name: "收起", exact: true }).tap();
   await mp
@@ -350,7 +352,7 @@ try {
     .getByRole("button", { name: "1 号场 10:00 选场", exact: true })
     .tap();
   await expect(mp.locator(".tennis-selection")).toHaveCount(2);
-  await expect(mp.getByLabel("称呼", { exact: true })).toHaveValue(
+  await expect(mp.getByLabel("姓名", { exact: true })).toHaveValue(
     "手机跨日验收客",
   );
   await mp.screenshot({ path: `${out}/mobile-cross-day.png`, fullPage: true });

@@ -35,7 +35,7 @@ import {
 import { pollBusinessEvents } from "../../packages/db/src/tennis/business-events.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
-import { seedTenantFixture, removeTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { seedTenantFixture, removeTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(localTennisTestDatabaseUrl, "test"),
   max: 8,
@@ -95,7 +95,7 @@ beforeEach(async () => {
     minimumBookingMinutes: 15,
     openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })),
   });
-  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "gateway court", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "gateway court", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 10000 });
   courtId = court.id;
   await setCourtPrice(db, first.actor, {
     venueId: first.venueId,
@@ -103,7 +103,7 @@ beforeEach(async () => {
     expectedRevision: court.revision,
     hourlyPriceCents: 10000,
   });
-  const profile = await createCustomer(db, first.actor, { nickname: "合成绑定客户" }),
+  const profile = await createCustomer(db, first.actor, { nickname: "合成绑定客户", phone: syntheticPhone() }),
     subjectId = randomUUID();
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'合成渠道客户')", [subjectId]);
   await db.query("UPDATE tennis.customers SET subject_id=$1 WHERE tenant_id=$2 AND id=$3", [

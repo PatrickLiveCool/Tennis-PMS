@@ -4,6 +4,7 @@ import { TennisApiError, type TennisApi } from "./api";
 import type { TenantRecord, BackofficeAIConfiguration } from "./types";
 import { PlatformGatewayPanel } from "./GatewayPanel";
 import { MerchantBindingsPanel } from "./MerchantBindingsPanel";
+import { InfoHint } from "./InfoHint";
 import {
   dateTime,
   EmptyState,
@@ -109,7 +110,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
         adminDisplayName: draft.adminDisplayName.trim(),
         adminPassword: draft.adminPassword,
       });
-      setNotice(`「${result.name}」已开通，租户管理员可使用所设账号登录。`);
+      setNotice(`「${result.name}」已开通，商家管理员可使用所设账号登录。`);
       writeStored(pendingKey, null);
       setDraft(emptyTenant);
       setUncertain(false);
@@ -131,7 +132,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
     <>
       <PageHeading
         title="平台运营"
-        description="人工开通租户，统一维护 AI 服务。租户独立管理自己的场馆、价格与资金。"
+        description="管理商家和平台服务。"
       />
       {notice && (
         <div className="tennis-success" role="status">
@@ -144,13 +145,14 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
         </div>
       )}
       <Panel
-        title="租户"
+        title="商家"
         action={
           <div className="tennis-actions">
+            <InfoHint label="商家管理说明">平台账号负责开通和维护服务。进入场馆办理业务，还需对应商家的员工权限。</InfoHint>
             <RefreshButton onClick={() => void refreshTenants()} busy={tenants.busy || busy} />
             <button className="button button-primary" type="button" onClick={() => setOpen(true)}>
               <Plus size={16} />
-              {uncertain ? "核对上次开通" : "开通租户"}
+              {uncertain ? "核对上次开通" : "开通商家"}
             </button>
           </div>
         }
@@ -159,16 +161,15 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
         {!tenants.data && tenants.busy ? (
           <LoadingBlock />
         ) : !tenants.data?.length ? (
-          <EmptyState title="还没有租户" detail="开通租户及首位管理员后，由租户配置场馆和球场。" />
+          <EmptyState title="还没有商家" detail="点击“开通商家”添加首位管理员。" />
         ) : (
           <div className="tennis-table-scroll">
             <table className="tennis-table">
               <thead>
                 <tr>
-                  <th>租户名称</th>
+                  <th>商家名称</th>
                   <th>状态</th>
                   <th>开通时间</th>
-                  <th>租户编号</th>
                   <th>服务管理</th>
                 </tr>
               </thead>
@@ -176,7 +177,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
                 {tenants.data.map((tenant) => (
                   <tr key={tenant.id}>
                     <td>
-                      <strong>{tenant.name}</strong>
+                      <strong>{tenant.name}</strong>{" "}<InfoHint label={`${tenant.name}的商家编号`}><span style={{ overflowWrap: "anywhere" }}>{tenant.id}</span></InfoHint>
                     </td>
                     <td>
                       <span
@@ -186,9 +187,6 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
                       </span>
                     </td>
                     <td>{dateTime(tenant.createdAt)}</td>
-                    <td>
-                      <small>{tenant.id}</small>
-                    </td>
                     <td>
                       <button
                         type="button"
@@ -204,7 +202,6 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
             </table>
           </div>
         )}
-        <p className="tennis-muted">平台账号负责开通和维护服务；进入租户业务需要相应租户的员工权限。</p>
       </Panel>
       <PlatformGatewayPanel api={api} tenants={tenants.data ?? []} scope={scope} />
       <MerchantBindingsPanel api={api} tenants={tenants.data ?? []} scope={scope} />
@@ -219,7 +216,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
       )}
       {open && (
         <Modal
-          title={uncertain ? "核对租户开通结果" : "人工开通租户"}
+          title={uncertain ? "核对商家开通结果" : "人工开通商家"}
           onClose={() => setOpen(false)}
           closeDisabled={busy}
         >
@@ -227,12 +224,12 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
             <ErrorNotice error={error} />
             {uncertain && (
               <div className="tennis-note is-warning" role="status">
-                上次提交的结果尚未确认。请先刷新租户列表核对「{draft.name}」，保留管理员账号「{draft.adminUsername}
-                」。重试会沿用同一账号；不要改用新账号重复开通。密码不会保存，返回此页面后如需重试，请重新填写密码。
+                「{draft.name}」是否开通还未确认，请先刷新列表核对。需要重试时，请使用账号「{draft.adminUsername}」，避免重复开通。
+                <InfoHint label="重试开通说明">密码不会保存在草稿中，重新打开后需要再次填写。</InfoHint>
               </div>
             )}
             <label>
-              租户名称
+              商家名称
               <input
                 required
                 maxLength={200}
@@ -267,7 +264,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
               />
             </label>
             <label>
-              管理员初始密码
+              管理员初始密码（至少 12 位）
               <input
                 required
                 type="password"
@@ -281,19 +278,18 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
                 }}
               />
             </label>
-            <p className="tennis-muted">密码至少 12 位，请通过约定方式交给租户管理员。系统不会在列表中展示密码。</p>
             {uncertain && (
               <>
                 <RefreshButton onClick={() => void refreshTenants()} busy={tenants.busy || busy} />
                 <ErrorNotice error={tenants.error} />
                 {checked && (
                   <div className="tennis-note">
-                    已重新读取列表。相同名称的记录：
+                    列表中同名商家：
                     {tenants.data
                       ?.filter((tenant) => tenant.name === draft.name.trim())
                       .map((tenant) => `${tenant.name}（${tenant.id}）`)
                       .join("；") || "暂未查到"}
-                    。名称相同仍需核实，不能仅凭名称判定开通成功。
+                    。请再核实管理员是否能登录。
                   </div>
                 )}
               </>
@@ -314,10 +310,10 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
                     setChecked(false);
                     setOpen(false);
                     setError(undefined);
-                    setNotice("已结束本次开通核对，请以租户列表和管理员实际登录结果为准。");
+                    setNotice("已结束核对，请确认管理员能正常登录。");
                   }}
                 >
-                  已人工核对，结束本次操作
+                  核对完毕
                 </button>
               )}
               <button
@@ -332,7 +328,7 @@ export function PlatformPage({ api, scope }: { api: TennisApi; scope: string }) 
                   draft.adminPassword.length < 12
                 }
               >
-                {busy ? "正在开通…" : uncertain ? "重试同一账号" : "开通租户及管理员"}
+                {busy ? "正在开通…" : uncertain ? "重试同一账号" : "开通商家及管理员"}
               </button>
             </div>
           </form>
@@ -366,7 +362,7 @@ function TenantStatusEditor({
     try {
       const tenants = await api<TenantRecord[]>("/platform/tenants");
       const found = tenants.find((item) => item.id === tenant.id);
-      if (!found) throw new Error("未找到原租户，请关闭后刷新列表核对。");
+      if (!found) throw new Error("未找到原商家，请关闭后刷新列表核对。");
       setCurrent(found);
       setUncertain(false);
       setDone(found.active === desired);
@@ -398,7 +394,7 @@ function TenantStatusEditor({
     }
   }
   return (
-    <Modal title={`${desired ? "恢复" : "停用"}租户服务`} onClose={onClose} closeDisabled={busy}>
+    <Modal title={`${desired ? "恢复" : "停用"}商家服务`} onClose={onClose} closeDisabled={busy}>
       <form className="tennis-form" onSubmit={(event) => void save(event)}>
         <strong>{tenant.name}</strong>
         <ErrorNotice error={error} />
@@ -410,8 +406,8 @@ function TenantStatusEditor({
           <>
             <p className="tennis-muted">
               {desired
-                ? "恢复后，租户原有授权账号可以继续使用业务。"
-                : "停用后，该租户的客户和员工将无法访问业务，外部智能体的现有授权会撤销。预约与资金记录保留，到期处理仍继续执行。"}
+                ? "恢复后，该商家的员工和客户可以继续使用。"
+                : "停用后，该商家的员工、客户和已授权的智能体将无法继续使用。预约和资金记录保留，到期处理照常进行。"}
             </p>
             <label>
               处理原因
@@ -425,7 +421,7 @@ function TenantStatusEditor({
             </label>
             {uncertain && (
               <div className="tennis-note is-warning">
-                提交结果需要核对，请先读取当前服务状态。
+                结果还未确认，请先核对当前状态。
                 <button type="button" className="button button-secondary" disabled={busy} onClick={() => void verify()}>
                   核对当前状态
                 </button>
@@ -496,7 +492,7 @@ function AISettings({ api }: { api: TennisApi }) {
     setReview(null);
     setNeedsReview(false);
     setError(undefined);
-    setNotice("已核对当前配置，可继续编辑后保存。");
+    setNotice("已核对，可以继续编辑。");
   }
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -522,7 +518,7 @@ function AISettings({ api }: { api: TennisApi }) {
       setKeyMode("keep");
       setNeedsReview(false);
       setReview(null);
-      setNotice("后台 AI 助手配置已保存。可以测试模型连接。");
+      setNotice("AI 配置已保存。");
       await config.refresh();
     } catch (next) {
       setError(next);
@@ -561,7 +557,7 @@ function AISettings({ api }: { api: TennisApi }) {
     }
   }
   return (
-    <Panel title="后台 AI 助手配置" action={<RefreshButton onClick={() => void reload()} busy={config.busy || busy} />}>
+    <Panel title="AI 助手配置" action={<div className="tennis-actions"><InfoHint label="AI 配置说明">此配置供各场馆的后台助手使用，由平台管理员统一维护。</InfoHint><RefreshButton onClick={() => void reload()} busy={config.busy || busy} /></div>}>
       <ErrorNotice error={error ?? config.error} retry={() => void reload()} />
       {!draft ? (
         config.busy ? (
@@ -571,13 +567,12 @@ function AISettings({ api }: { api: TennisApi }) {
         )
       ) : (
         <form className="tennis-form" onSubmit={(event) => void save(event)}>
-          {draft.connectionAvailable === false && <p className="tennis-note">当前尚未启用真实模型连接。可先保存配置和验收界面；保存不会发送模型请求。</p>}
+          {draft.connectionAvailable === false && <p className="tennis-note">当前未连接真实模型，助手暂时无法回答。</p>}
           {notice && (
             <div className="tennis-success" role="status">
               {notice}
             </div>
           )}
-          <p className="tennis-muted">由平台运营管理员统一维护，供各租户工作人员查询、核对并准备业务表单。模型与密钥仅在此配置。</p>
           <label className="tennis-check">
             <input
               type="checkbox"
@@ -623,7 +618,7 @@ function AISettings({ api }: { api: TennisApi }) {
             >
               <option value="keep">{draft.hasApiKey ? "保留已保存密钥" : "保持未设置密钥"}</option>
               <option value="replace">设置或替换密钥</option>
-              {draft.hasApiKey && <option value="clear">明确清除已保存密钥</option>}
+              {draft.hasApiKey && <option value="clear">清除已保存密钥</option>}
             </select>
           </label>
           {keyMode === "replace" && (
@@ -640,31 +635,24 @@ function AISettings({ api }: { api: TennisApi }) {
               />
             </label>
           )}
-          <p className="tennis-muted">
-            {draft.hasApiKey ? "服务器已保存密钥，原值不会回填。" : "当前未设置密钥。"}
-            {keyMode === "clear"
-              ? "本次保存将清除服务器中的密钥。"
-              : keyMode === "keep"
-                ? "保持此选项将保留当前密钥状态。"
-                : "新密钥仅在本次保存时提交。"}
-          </p>
+          {keyMode === "clear" && <p className="tennis-note is-warning">保存后将清除密钥，助手可能无法使用。</p>}
           {needsReview && (
             <div className="tennis-note is-warning">
-              <p>请先读取服务器当前配置核对；你的输入仍保留，尚未覆盖新版本。</p>
+              <p>配置需要重新核对。你的输入已保留，请先查看最新配置。</p>
               <button
                 className="button button-secondary"
                 type="button"
                 disabled={busy || config.busy}
                 onClick={() => void reload()}
               >
-                读取当前配置核对
+                查看最新配置
               </button>
               {review && (
                 <>
                   <dl>
                     <dt>当前状态</dt>
                     <dd>
-                      {review.enabled ? "启用" : "停用"} · 配置版本 {review.revision}
+                      {review.enabled ? "启用" : "停用"}
                     </dd>
                     <dt>模型</dt>
                     <dd>{review.model || "未设置"}</dd>
@@ -675,10 +663,10 @@ function AISettings({ api }: { api: TennisApi }) {
                   </dl>
                   <div className="tennis-actions">
                     <button className="button button-secondary" type="button" onClick={() => adoptLatest(false)}>
-                      采用服务器配置
+                      使用最新配置
                     </button>
                     <button className="button button-secondary" type="button" onClick={() => adoptLatest(true)}>
-                      保留输入，按当前版本继续编辑
+                      保留我的输入继续编辑
                     </button>
                   </div>
                 </>
@@ -692,7 +680,7 @@ function AISettings({ api }: { api: TennisApi }) {
               disabled={busy || needsReview || config.busy || (keyMode === "replace" && !apiKey.trim())}
             >
               <Save size={16} />
-              {busy && !testing ? "正在保存…" : "保存统一配置"}
+              {busy && !testing ? "正在保存…" : "保存配置"}
             </button>
             <button
               className="button button-secondary"

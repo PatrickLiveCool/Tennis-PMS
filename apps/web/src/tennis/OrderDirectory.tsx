@@ -41,7 +41,7 @@ export function OrderPagination({ directory }: { directory: ReturnType<typeof us
   if (!directory.data && directory.page === 1) return null;
   return (
     <nav className="tennis-toolbar" aria-label="订单分页">
-      <span className="text-muted">第 {directory.page} 页 · 每页最多 25 单</span>
+      <span className="text-muted">第 {directory.page} 页</span>
       {directory.page > 1 && (
         <button className="button button-secondary button-small" disabled={directory.busy} onClick={directory.first}>
           返回第一页

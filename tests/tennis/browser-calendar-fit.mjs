@@ -35,53 +35,70 @@ async function drag(a, b) {
   await page.mouse.up();
 }
 async function assertFit() {
+  await expect
+    .poll(() =>
+      board.locator(".tennis-time-axis").evaluate((axis) => {
+        const bounds = axis.getBoundingClientRect();
+        const labels = Array.from(axis.querySelectorAll(".tennis-time-label"));
+        return labels.length >= 2 && labels.every((label, index) => {
+          const box = label.getBoundingClientRect();
+          const previous = labels[index - 1]?.getBoundingClientRect();
+          return box.width > 0 && box.left >= bounds.left - 0.5 &&
+            box.right <= bounds.right + 0.5 && label.scrollWidth <= label.clientWidth &&
+            (!previous || box.left >= previous.right);
+        });
+      }),
+    )
+    .toBe(true);
   const geometry = await board.evaluate((el) => {
     const row = el.querySelector(".tennis-schedule-row");
     const cells = row.querySelectorAll(".tennis-grid-slot");
-    const header = el.querySelectorAll(".tennis-grid-time");
+    const axis = el.querySelector(".tennis-time-axis");
+    const ticks = Array.from(axis.querySelectorAll(".tennis-time-tick"));
     const rect = (node) => node.getBoundingClientRect();
+    const axisBounds = rect(axis);
+    const firstLabel = ticks[0].querySelector(".tennis-time-label");
+    const lastLabel = ticks[ticks.length - 1].querySelector(".tennis-time-label");
     return {
       gap: rect(el).right - rect(cells[cells.length - 1]).right,
       overflow: el.scrollWidth - el.clientWidth,
+      startSlot: Number(ticks[0].dataset.slotStart),
+      endSlot: Number(ticks[ticks.length - 1].dataset.slotStart),
+      slotCount: cells.length,
+      axisAlignment: Math.max(
+        Math.abs(axisBounds.left - rect(cells[0]).left),
+        Math.abs(axisBounds.right - rect(cells[cells.length - 1]).right),
+      ),
       alignment: Math.max(
-        ...Array.from(header, (label) =>
-          Math.abs(
-            rect(cells[Number(label.dataset.slotStart)]).left -
-              rect(label).left,
-          ),
-        ),
+        ...ticks.map((tick) => {
+          const slotStart = Number(tick.dataset.slotStart);
+          const boundary = slotStart === cells.length
+            ? rect(cells[cells.length - 1]).right
+            : rect(cells[slotStart]).left;
+          return Math.abs(boundary - rect(tick).left);
+        }),
       ),
       centering: Math.max(
-        ...Array.from(header, (label) => {
-          const text = label.querySelector("span");
-          return text
-            ? Math.abs(
-                (rect(text).left + rect(text).right) / 2 -
-                  (rect(label).left + rect(label).right) / 2,
-              )
-            : 0;
+        0,
+        ...ticks.slice(1, -1).filter((tick) => tick.querySelector(".tennis-time-label")).map((tick) => {
+          const text = rect(tick.querySelector(".tennis-time-label"));
+          return Math.abs((text.left + text.right) / 2 - rect(tick).left);
         }),
+      ),
+      endpointAlignment: Math.max(
+        Math.abs(rect(firstLabel).left - axisBounds.left),
+        Math.abs(rect(lastLabel).right - axisBounds.right),
       ),
     };
   });
   expect(Math.abs(geometry.gap)).toBeLessThanOrEqual(1);
   expect(geometry.overflow).toBeLessThanOrEqual(1);
+  expect(geometry.startSlot).toBe(0);
+  expect(geometry.endSlot).toBe(geometry.slotCount);
+  expect(geometry.axisAlignment).toBeLessThanOrEqual(1);
   expect(geometry.alignment).toBeLessThanOrEqual(1);
   expect(geometry.centering).toBeLessThanOrEqual(1);
-  await expect
-    .poll(() =>
-      board
-        .locator(".tennis-grid-time > span")
-        .evaluateAll((els) =>
-          els.every(
-            (el, i) =>
-              !i ||
-              el.getBoundingClientRect().left >
-                els[i - 1].getBoundingClientRect().right,
-          ),
-        ),
-    )
-    .toBe(true);
+  expect(geometry.endpointAlignment).toBeLessThanOrEqual(1);
   const occupancy = await day()
     .locator(".tennis-schedule-block")
     .first()
@@ -89,7 +106,7 @@ async function assertFit() {
   const occupied = day()
     .locator(".tennis-schedule-row")
     .first()
-    .locator(".tennis-grid-slot.is-blocked");
+    .locator(".tennis-grid-slot.is-maintenance");
   const first = await occupied.first().boundingBox(),
     last = await occupied.last().boundingBox();
   expect(Math.abs(occupancy.x - first.x)).toBeLessThan(1);
@@ -243,7 +260,7 @@ try {
     );
   }
   await page.clock.setFixedTime(new Date("2400-02-28T15:59:00Z"));
-  await page.getByRole("button", { name: "现在", exact: true }).click();
+  await page.getByRole("button", { name: "今天", exact: true }).click();
   await expect(day().locator(".tennis-now-line")).toBeVisible();
   await assertFit();
   console.log(

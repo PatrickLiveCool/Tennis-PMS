@@ -7,7 +7,7 @@ export { Modal, LoadingBlock, EmptyState } from "../uiBasic";
 export const money = (cents: number | null | undefined) =>
   cents == null ? "未设置" : new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(cents / 100);
 export const cents = (value: string) => {
-  if (!/^\d+(\.\d{1,2})?$/.test(value)) throw new Error("请输入有效人民币金额，最多两位小数。");
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) throw new Error("请输入金额，最多两位小数。");
   const [whole = "0", fraction = ""] = value.split(".");
   const result = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
   if (result > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("金额过大。");
@@ -102,11 +102,10 @@ export function ErrorNotice({ error, retry }: { error: unknown; retry?: () => vo
     <div className="inline-error" role="alert">
       <AlertCircle size={18} aria-hidden="true" />
       <div>
-        <strong>需要核对</strong>
         <p>{errorText(error)}</p>
         {retry && (
           <button className="button button-secondary button-small" onClick={retry}>
-            重新读取
+            重试
           </button>
         )}
       </div>
@@ -256,7 +255,7 @@ export function useCommand(scope: string) {
     const serialized = JSON.stringify(payload);
     const existing = pendingCommands(scope).find((p) => p.intent === intent);
     if (existing && existing.payload !== serialized) {
-      setError(new Error("这项操作还有待核实的提交结果。请先查询原操作，保留原输入后可安全重试。"));
+      setError(new Error("上一次提交还没确认结果，请先查看办理结果。"));
       return undefined;
     }
     const command = existing ?? {
@@ -275,7 +274,13 @@ export function useCommand(scope: string) {
       forgetCommand(scope, command.key);
       return result;
     } catch (next) {
-      if (!existing && next instanceof TennisApiError && !next.uncertain) forgetCommand(scope, command.key);
+      // These booking-only conflicts are checked after the server looks up the
+      // original receipt. A definitive rejection lets staff correct the customer.
+      const rejectedBookingCustomer = intent === "booking.customer" &&
+        next instanceof TennisApiError && next.status === 409 &&
+        ["PHONE_ALREADY_EXISTS", "BOOKING_PHONE_ALREADY_SET"].includes(next.code);
+      if ((!existing || rejectedBookingCustomer) && next instanceof TennisApiError && !next.uncertain)
+        forgetCommand(scope, command.key);
       setError(next);
       return undefined;
     } finally {
@@ -312,17 +317,17 @@ export function RecoveryNotice({
         const result = await api<{ status: string; orderId?: string }>(`/${path}/${id}`);
         if (kind === "topup.simulate" && id && openTopup) openTopup(id);
         if (["PENDING", "REQUESTED", "PROCESSING"].includes(result.status)) {
-          setMessage("原付款 / 退款仍在处理中，请从原记录刷新或使用同一模拟操作重试。");
+          setMessage("还在处理中，请打开这笔记录刷新查看。");
           return;
         }
         forgetCommand(scope, item.key);
-        setMessage("已查询原资金记录，请核对最新状态。");
+        setMessage("已更新，请核对这笔记录的最新状态。");
         if (result.orderId) openOrder(result.orderId);
         return;
       }
       const receipt = await api<CommandReceipt | null>(`/receipts/${encodeURIComponent(item.key)}`);
       if (!receipt) {
-        setMessage("尚未查到已完成回执。请保留原输入，在原入口重试；系统会复用同一个操作编号。");
+        setMessage("暂时查不到办理结果，请回到刚才的表单重试，不要另建一笔。");
         return;
       }
       if (receipt.commandType === "booking.customer" && receipt.result.customer) {
@@ -336,7 +341,7 @@ export function RecoveryNotice({
         openTopup(payment.id);
       }
       forgetCommand(scope, item.key);
-      setMessage("已查到原操作成功回执，请刷新相关订单或余额核对最新状态。");
+      setMessage("已找到办理记录，请查看订单或余额的最新状态。");
       if (typeof receipt.result.orderId === "string") {
         openOrder(receipt.result.orderId);
         return;
@@ -362,10 +367,10 @@ export function RecoveryNotice({
     <div className="tennis-recovery" role="status">
       {pending.length > 0 && (
         <>
-          <strong>{pending.length} 项操作正在提交或等待结果核实</strong>
+          <strong>{pending.length} 笔办理结果待确认</strong>
           {pending.map((p) => (
             <button key={p.key} className="button button-secondary button-small" onClick={() => void recover(p)}>
-              查询原操作 · {dateTime(p.createdAt)}
+              查看办理结果 · {dateTime(p.createdAt)}
             </button>
           ))}
         </>

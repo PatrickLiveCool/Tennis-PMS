@@ -1,3 +1,41 @@
+.tennis-app {
+  /* GreenPMS calendar hues, mapped to tennis booking and occupancy states. */
+  --tennis-held-key: #f97316;
+  --tennis-held-surface: color-mix(in srgb, var(--tennis-held-key) 13%, white);
+  --tennis-booked-key: #0969da;
+  --tennis-booked-surface: color-mix(in srgb, var(--tennis-booked-key) 12%, white);
+  --tennis-course-surface: #eeedf4;
+}
+:where(.tennis-legend > span, .tennis-grid-slot, .tennis-schedule-block, .tennis-mobile-times > button).is-free {
+  --tennis-status-key: var(--success);
+  --tennis-status-surface: var(--surface);
+  --tennis-status-ink: var(--success);
+}
+:where(.tennis-legend > span, .tennis-grid-slot, .tennis-schedule-block, .tennis-mobile-times > button).is-held {
+  --tennis-status-key: var(--tennis-held-key);
+  --tennis-status-surface: var(--tennis-held-surface);
+  --tennis-status-ink: var(--warning);
+}
+:where(.tennis-legend > span, .tennis-grid-slot, .tennis-schedule-block, .tennis-mobile-times > button).is-booked {
+  --tennis-status-key: var(--tennis-booked-key);
+  --tennis-status-surface: var(--tennis-booked-surface);
+  --tennis-status-ink: var(--tennis-booked-key);
+}
+:where(.tennis-legend > span, .tennis-grid-slot, .tennis-schedule-block, .tennis-mobile-times > button).is-course {
+  --tennis-status-key: var(--muted);
+  --tennis-status-surface: var(--tennis-course-surface);
+  --tennis-status-ink: var(--muted);
+}
+:where(.tennis-legend > span, .tennis-grid-slot, .tennis-schedule-block, .tennis-mobile-times > button).is-maintenance {
+  --tennis-status-key: var(--danger);
+  --tennis-status-surface: var(--danger-soft);
+  --tennis-status-ink: var(--danger);
+}
+:where(.tennis-grid-slot, .tennis-schedule-block, .tennis-mobile-times > button).is-blocked {
+  --tennis-status-key: var(--muted);
+  --tennis-status-surface: var(--surface-muted);
+  --tennis-status-ink: var(--muted);
+}
 .tennis-app button.nav-link {
   border: 0;
   background: transparent;
@@ -46,6 +84,14 @@
   border-color: transparent;
   font-weight: 650;
 }
+.tennis-tenant-name { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 13px; }
+.tennis-tenant-name > svg { flex: 0 0 auto; }
+.tennis-tenant-name strong { font-weight: 550; overflow-wrap: anywhere; }
+.tennis-campus-switch { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tennis-workspace-select .tennis-campus-switch select { min-height: 36px; border-color: var(--border-strong); background-color: var(--brand-soft); color: var(--brand-hover); font-size: 14px; font-weight: 700; cursor: pointer; }
+.tennis-workspace-select .tennis-campus-switch select:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.tennis-workspace-recovery { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.tennis-workspace-choice { display: grid; gap: 6px; flex: 1 1 240px; min-width: 0; font-size: 13px; }
 .tennis-demo-badge {
   font-size: 12px;
   border: 1px solid #d8c395;
@@ -156,34 +202,25 @@
 }
 .tennis-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   font-size: 12px;
   color: var(--muted);
 }
-.tennis-legend span {
+.tennis-legend > span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  white-space: nowrap;
 }
-.tennis-legend span:before {
+.tennis-legend > span:not(.tennis-info-hint):before {
   content: "";
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  background: var(--surface);
-}
-.tennis-legend .is-held:before {
-  background: var(--warning-soft);
-  border-color: #dbc297;
-}
-.tennis-legend .is-booked:before {
-  background: var(--brand-soft);
-  border-color: #8dc2a6;
-}
-.tennis-legend .is-course:before {
-  background: var(--accent-soft);
-  border-color: #a9c1ce;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 1px solid var(--tennis-status-key);
+  border-radius: 3px;
+  background: var(--tennis-status-key);
 }
 .tennis-booking-layout {
   display: grid;
@@ -277,16 +314,9 @@
   background: #c3e2d1;
   box-shadow: inset 0 3px 0 var(--brand);
 }
-.tennis-grid-slot.is-booked {
-  background: var(--brand-soft);
-  border-color: #c4dbcc;
-}
-.tennis-grid-slot.is-held {
-  background: var(--warning-soft);
-  border-color: #ead9bb;
-}
-.tennis-grid-slot.is-blocked {
-  background: var(--accent-soft);
+.tennis-grid-slot:is(.is-booked, .is-held, .is-course, .is-maintenance, .is-blocked) {
+  background: var(--tennis-status-surface);
+  border-color: color-mix(in srgb, var(--tennis-status-key) 20%, white);
 }
 .tennis-grid-slot.is-closed {
   background: repeating-linear-gradient(135deg, #f1f3f0, #f1f3f0 5px, #e9ede8 5px, #e9ede8 6px);
@@ -691,12 +721,40 @@
   border-top: 1px solid var(--border);
   width: 100%;
 }
-.tennis-assistant-trigger {
-  min-height: 54px !important;
+.tennis-sidebar-utility-slot {
+  display: flex;
+  align-items: center;
 }
+.tennis-sidebar-utility-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+.tennis-sidebar-utility-trigger > svg { flex-shrink: 0; }
+.tennis-sidebar-utility-trigger:hover:not(:disabled) { background: var(--surface-muted); color: var(--text); }
+.tennis-sidebar-utility-trigger[aria-expanded="true"] { color: var(--brand); }
+.tennis-app.sidebar-is-collapsed .tennis-sidebar-utility-trigger {
+  justify-content: center;
+  padding-inline: 0;
+}
+.tennis-app.sidebar-is-collapsed .tennis-sidebar-utility-trigger > span,
+.tennis-app.sidebar-is-collapsed .sidebar-user > svg { display: none; }
 .tennis-app .sidebar-user {
   margin-top: 0;
 }
+.tennis-app .sidebar-user > .icon-button { min-width: 0; }
 .tennis-app .sidebar-brand-product {
   font-size: 11px;
   color: var(--muted);
@@ -842,9 +900,10 @@
     gap: 9px;
     font-size: 11px;
   }
-  .tennis-legend span:before {
-    width: 8px;
-    height: 8px;
+  .tennis-legend > span:not(.tennis-info-hint):before {
+    width: 11px;
+    height: 11px;
+    flex-basis: 11px;
   }
   .tennis-grid-scroll {
     max-height: 380px;
@@ -911,7 +970,6 @@
 .tennis-booking-layout.has-draft { grid-template-columns: minmax(0, 1fr) 340px; }
 .tennis-booking-side { position: sticky; top: 76px; max-height: calc(100vh - 100px); overflow: auto; }
 .tennis-booking-side h3 { font-size: 14px; margin: 0 0 10px; }
-.tennis-app .sidebar-user { grid-template-columns: minmax(0, 1fr) 28px; }
 .tennis-occupancy-tools > summary { cursor: pointer; color: var(--muted); padding: 14px 0; font-size: 13px; }
 .tennis-now-line { position: absolute; top: 38px; bottom: 0; width: 1px; background: var(--brand); pointer-events: none; z-index: 2; }
 .tennis-now-line > span { position: absolute; top: 0; left: 3px; font-size: 10px; color: var(--brand); background: var(--surface); }
@@ -923,16 +981,26 @@
 .tennis-selection-summary { margin: 12px 0; font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tennis-selection-summary p { margin: 0; }
 .tennis-schedule-header { display: grid; position: sticky; top: 0; z-index: 6; }
-.tennis-schedule-row { display: grid; position: relative; height: 56px; }
+.tennis-schedule-row { display: grid; position: relative; min-height: 80px; }
 .tennis-grid { user-select: none; }
 .tennis-grid-scroll { max-height: calc(100vh - 300px); min-height: 260px; }
-.tennis-schedule-block, .tennis-draft-block, .tennis-drag-preview { position: absolute; top: 5px; height: 46px; border-radius: 4px; z-index: 2; min-width: 0; overflow: hidden; }
-.tennis-schedule-block { padding: 8px 6px; text-align: left; display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--border-strong); }
+.tennis-schedule-block, .tennis-draft-block, .tennis-drag-preview { position: absolute; top: 5px; height: calc(100% - 10px); border-radius: 4px; z-index: 2; min-width: 0; overflow: hidden; }
+.tennis-schedule-block { padding: 8px 6px; text-align: left; display: flex; flex-direction: column; gap: 3px; background: var(--tennis-status-surface); color: var(--text); border: 1px solid var(--tennis-status-key); }
 .tennis-schedule-block strong, .tennis-schedule-block span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-size: 12px; }
 .tennis-schedule-block span { font-size: 10px; }
-.tennis-schedule-block.is-held { background: var(--warning-soft); }
-.tennis-schedule-block.is-booked { background: var(--brand-soft); }
-.tennis-schedule-block.is-blocked { background: var(--accent-soft); }
+.tennis-schedule-block .tennis-occupancy-status { color: var(--tennis-status-ink); font-weight: 650; line-height: 1.15; }
+.tennis-schedule-block .tennis-occupancy-time { color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.tennis-schedule-block:enabled:hover { border-color: var(--tennis-status-key); box-shadow: inset 0 0 0 1px var(--tennis-status-key); }
+.tennis-schedule-block:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 4; }
+.tennis-mobile-times > button { background: var(--tennis-status-surface, var(--surface)); color: var(--text); border-color: color-mix(in srgb, var(--tennis-status-key, var(--border-strong)) 55%, white); flex-direction: column; gap: 3px; }
+.tennis-mobile-times > button:hover:not(:disabled) { filter: brightness(.97); }
+.tennis-mobile-times .tennis-occupancy-time { font-variant-numeric: tabular-nums; font-weight: 650; }
+.tennis-mobile-times .tennis-occupancy-status { color: var(--tennis-status-ink, var(--muted)); white-space: normal; }
+.tennis-mobile-times > button:is(.is-held, .is-booked, .is-course, .is-maintenance, .is-blocked):disabled { opacity: 1; cursor: default; }
+.tennis-mobile-times > button.is-selected { background: var(--brand-soft); border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.tennis-mobile-times > button.is-selected .tennis-occupancy-status { color: var(--brand); }
+.tennis-mobile-times > button.has-conflict { background: var(--danger-soft); border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+.tennis-mobile-times > button.has-conflict .tennis-occupancy-status { color: var(--danger); }
 .tennis-draft-block { z-index: 3; background: var(--brand-soft); border: 2px solid var(--brand); }
 .tennis-draft-hit { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 5px; padding: 8px; text-align: left; border: 0; background: transparent; color: var(--brand); overflow: hidden; white-space: nowrap; }
 .tennis-draft-hit strong { font-size: 12px; }
@@ -969,10 +1037,11 @@
 .tennis-app .main-content:has(.tennis-schedule-toolbar) { padding: 12px 20px; }
 .tennis-workspace-header { min-height: 52px; padding-top: 6px; padding-bottom: 6px; }
 .tennis-schedule-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px 20px; flex-wrap: wrap; min-height: 40px; }
+.tennis-schedule-title { display: flex; align-items: baseline; gap: 10px; flex: 0 0 auto; }
+.tennis-schedule-title h1 { margin: 0; font-size: 18px; font-weight: 700; line-height: 1.4; }
+.tennis-schedule-title > span { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .tennis-schedule-toolbar .button { min-height: 34px; padding: 6px 10px; font-size: 13px; gap: 5px; }
 .tennis-schedule-toolbar .icon-button { width: 30px; height: 34px; }
-.tennis-schedule-toolbar .tennis-date-switch { gap: 3px; }
-.tennis-schedule-toolbar input[type="date"] { width: 142px; min-height: 34px; padding: 5px 7px; font-size: 13px; font-weight: 650; }
 .tennis-schedule-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .tennis-view-switch { display: flex; border: 1px solid var(--border); border-radius: 5px; padding: 2px; background: var(--surface); }
 .tennis-view-switch button { border: 0; background: transparent; color: var(--muted); font-size: 12px; padding: 5px 9px; border-radius: 3px; }
@@ -980,25 +1049,47 @@
 .tennis-schedule-toolbar .tennis-court-filter select { width: auto; min-height: 34px; padding: 5px 7px; font-size: 12px; }
 .tennis-schedule-meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 16px; min-height: 32px; padding: 4px 0 7px; color: var(--muted); font-size: 11px; }
 .tennis-schedule-meta .tennis-legend { gap: 12px; font-size: 11px; align-items: center; }
-.tennis-sync-status { display: inline-block; margin-left: 12px; color: var(--muted); }
+.tennis-schedule-status { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.tennis-pending-count { color: var(--warning); font-weight: 650; }
+.tennis-sync-status { display: inline-block; color: var(--muted); }
 .tennis-sync-status:before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin: 0 5px 1px 0; background: var(--brand); }
 .tennis-sync-status.is-error:before { background: var(--warning); }
-.tennis-schedule-help { position: relative; }
-.tennis-schedule-help summary { display: flex; cursor: pointer; list-style: none; padding: 3px; }
-.tennis-schedule-help summary::-webkit-details-marker { display: none; }
-.tennis-schedule-help p { position: absolute; right: 0; top: 20px; width: min(300px, 80vw); background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 12px; z-index: 15; line-height: 1.7; box-shadow: var(--shadow-sm); }
 .tennis-schedule-panel { padding: 0; overflow: hidden; margin-bottom: 0; }
-.tennis-board { max-height: calc(100dvh - 170px); min-height: 0; border: 0; scroll-padding-top: 76px; }
-.tennis-board .tennis-schedule-header { display: grid; min-width: 100%; overflow: hidden; }
-.tennis-day-heading { position: sticky; top: 38px; z-index: 5; margin: 0; background: var(--surface-muted); border-bottom: 1px solid var(--border); font-size: 12px; height: 30px; }
+.tennis-board {
+  --tennis-schedule-header-height: 64px;
+  --tennis-header-surface: #e5f4ec;
+  --tennis-header-text: #285e4b;
+  --tennis-header-border: #cfe3d7;
+  --tennis-header-tick: #b1cebe;
+  --tennis-header-hour-tick: #79a68e;
+  max-height: calc(100dvh - 170px); min-height: 0; border: 0;
+  scroll-padding-top: calc(var(--tennis-schedule-header-height) + 38px);
+}
+.tennis-board .tennis-schedule-header { display: grid; min-width: 100%; overflow: hidden; background: var(--tennis-header-surface); }
+.tennis-board .tennis-grid-corner { height: var(--tennis-schedule-header-height); padding: 5px 7px; background: var(--tennis-header-surface); color: var(--tennis-header-text); border-right: 1px solid var(--tennis-header-border); border-bottom-color: var(--tennis-header-border); }
+.tennis-grid-date-navigation { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; gap: 3px; align-items: center; }
+.tennis-grid-date-picker { grid-column: 1 / -1; min-width: 0; }
+.tennis-grid-date-navigation button { display: inline-flex; align-items: center; justify-content: center; min-width: 0; height: 24px; padding: 0 5px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--tennis-header-text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.tennis-grid-date-navigation .tennis-grid-today { background: #ffffff80; }
+.tennis-grid-date-navigation button:hover { border-color: var(--tennis-header-border); background: var(--surface); }
+.tennis-grid-date-navigation button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.tennis-day-heading { position: sticky; top: var(--tennis-schedule-header-height); z-index: 5; margin: 0; background: var(--surface-muted); border-bottom: 1px solid var(--border); font-size: 12px; height: 30px; }
 .tennis-day-heading button { border: 0; padding: 0; width: 100%; height: 30px; text-align: left; background: transparent; color: var(--text); }
 .tennis-day-heading button > span { position: sticky; left: 10px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; height: 30px; }
 .tennis-day-heading em { font-style: normal; font-size: 10px; color: var(--brand); }
 .tennis-day-heading small { font-size: 10px; color: var(--brand); font-weight: 500; }
-.tennis-board .tennis-grid-court { height: 56px; padding: 8px 10px; gap: 4px; }
-.tennis-board .tennis-grid-slot { height: 56px; min-width: 0; }
-.tennis-board .tennis-grid-time { min-width: 0; position: relative; z-index: auto; background: transparent; display: flex; align-items: center; justify-content: center; padding-top: 0; text-align: center; }
-.tennis-board .tennis-grid-time > span { position: relative; z-index: 1; }
+.tennis-board .tennis-schedule-row { min-height: 68px; }
+.tennis-board .tennis-grid-court { height: auto; min-height: 68px; padding: 6px 8px; gap: 2px; border: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); border-radius: 0; text-align: left; color: var(--text); align-items: stretch; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.tennis-board .tennis-grid-slot { height: 100%; min-height: 68px; min-width: 0; }
+.tennis-time-axis { position: relative; min-width: 0; height: var(--tennis-schedule-header-height); background: var(--tennis-header-surface); color: var(--tennis-header-text); border-bottom: 1px solid var(--tennis-header-border); }
+.tennis-time-tick { position: absolute; top: 0; bottom: 0; width: 0; }
+.tennis-time-tick::after { content: ""; position: absolute; left: 0; bottom: 0; width: 1px; height: 4px; background: var(--tennis-header-tick); }
+.tennis-time-tick.is-hour::after { height: 10px; background: var(--tennis-header-hour-tick); }
+.tennis-time-tick.is-start::after, .tennis-time-tick.is-end::after { height: 12px; background: var(--tennis-header-hour-tick); }
+.tennis-time-tick.is-end::after { left: -1px; }
+.tennis-time-label { position: absolute; left: 0; bottom: 23px; width: 40px; transform: translateX(-50%); text-align: center; white-space: nowrap; font-size: 13px; line-height: 1.2; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tennis-time-tick.is-start .tennis-time-label { transform: none; text-align: left; }
+.tennis-time-tick.is-end .tennis-time-label { transform: translateX(-100%); text-align: right; }
 .tennis-board .tennis-now-line { top: 0; }
 .tennis-board .tennis-now-line > span { left: auto; right: 3px; }
 .tennis-board .tennis-schedule-block { padding: 5px 0; gap: 2px; }
@@ -1014,15 +1105,33 @@
   .tennis-schedule-controls { gap: 5px; }
 }
 @media (max-width: 700px) {
+  .tennis-workspace-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .tennis-workspace-select { display: contents; }
+  .tennis-tenant-name { grid-column: 1; grid-row: 1; font-size: 12px; }
+  .tennis-tenant-name > svg { display: none; }
+  .tennis-campus-switch { grid-column: 1 / -1; grid-row: 2; }
+  .tennis-workspace-select .tennis-campus-switch select { flex: 1; width: 100%; max-width: none; min-width: 0; min-height: 44px; padding: 6px 10px; }
+  .tennis-header-tools { grid-column: 2; grid-row: 1; }
+  .tennis-header-tools .icon-button { min-width: 40px; min-height: 44px; }
   .tennis-app .main-content:has(.tennis-schedule-toolbar) { padding: 10px 12px 90px; }
-  .tennis-schedule-toolbar .tennis-date-switch { width: 100%; justify-content: space-between; }
-  .tennis-schedule-toolbar .button, .tennis-schedule-toolbar .icon-button, .tennis-schedule-toolbar input[type="date"], .tennis-schedule-toolbar .tennis-court-filter select { min-height: 44px; }
+  .tennis-schedule-toolbar .button, .tennis-schedule-toolbar .icon-button, .tennis-schedule-toolbar .tennis-court-filter select { min-height: 44px; }
   .tennis-schedule-controls { width: 100%; justify-content: space-between; gap: 5px; }
+  .tennis-schedule-title h1 { font-size: 16px; }
+  .tennis-schedule-title { gap: 8px; }
   .tennis-view-switch button { min-height: 38px; padding: 5px 8px; }
   .tennis-schedule-meta { padding: 8px 0; }
   .tennis-schedule-meta .tennis-legend { gap: 10px; }
   .tennis-board { max-height: none; overflow: visible; }
-  .tennis-board .tennis-schedule-header { display: none; }
+  .tennis-board .tennis-schedule-header { display: block; position: static; }
+  .tennis-board .tennis-time-axis { display: none; }
+  .tennis-board .tennis-grid-corner { height: auto; padding: 6px; border-right: 0; }
+  .tennis-grid-date-navigation { grid-template-columns: 44px minmax(0, 1fr) auto 44px; gap: 5px; }
+  .tennis-grid-date-picker { grid-column: 2; grid-row: 1; }
+  .tennis-grid-date-previous { grid-column: 1; grid-row: 1; }
+  .tennis-grid-today { grid-column: 3; grid-row: 1; }
+  .tennis-grid-date-next { grid-column: 4; grid-row: 1; }
+  .tennis-grid-date-navigation button { min-height: 44px; }
+  .tennis-grid-date-navigation .tennis-grid-today { padding: 0 10px; }
   .tennis-day-heading { top: 0; position: relative; height: 36px; }
   .tennis-day-heading button, .tennis-day-heading button > span { height: 36px; }
   .tennis-booking-side { top: auto; max-height: 68dvh; }
@@ -1044,3 +1153,43 @@
   .tennis-work-assistant .tennis-actions .button { min-height: 44px; }
   .tennis-work-assistant textarea { font-size: 16px; }
 }
+
+.tennis-court-editor > fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; min-width: 0; }
+.tennis-court-editor > fieldset > legend { font-weight: 650; margin-bottom: 14px; }
+.tennis-court-editor > fieldset + fieldset { border-top: 1px solid var(--border); padding-top: 16px; }
+.tennis-court-editor .tennis-muted { margin: 0; font-size: 12px; line-height: 1.65; }
+.tennis-court-dimensions summary { cursor: pointer; color: var(--brand); }
+.tennis-court-dimensions[open] > * + * { margin-top: 12px; }
+@media (max-width: 600px) {
+  .tennis-court-editor > fieldset > .tennis-two { grid-template-columns: 1fr; }
+}
+
+/* Court summary: complete text in aligned rows, with detail outside the scrolling grid. */
+.tennis-board .tennis-court-name { line-height: 1.35; white-space: normal; }
+.tennis-board .tennis-court-price { font-size: 12px; line-height: 1.35; color: var(--text); font-variant-numeric: tabular-nums; }
+.tennis-board .tennis-court-tags { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+.tennis-board .tennis-court-tags > span { font-size: 11px; line-height: 1.35; }
+.tennis-board .tennis-grid-court.has-details:hover, .tennis-board .tennis-grid-court.has-details:focus-visible { background: var(--surface-muted); }
+.tennis-court-tooltip { position: fixed; z-index: 100; width: min(280px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.tennis-court-tooltip > strong { font-size: 13px; }
+.tennis-court-tooltip dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 8px; margin: 0; }
+.tennis-court-tooltip dt, .tennis-court-tooltip p { color: var(--muted); }
+.tennis-court-tooltip dd { margin: 0; white-space: pre-wrap; }
+.tennis-court-tooltip p, .tennis-guest-phone-error p { margin: 0; }
+
+.tennis-info-hint { display: inline-flex; align-items: center; vertical-align: middle; flex: 0 0 auto; }
+.tennis-info-trigger { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.tennis-info-trigger:hover, .tennis-info-trigger[aria-expanded="true"] { color: var(--brand); background: var(--brand-soft); }
+.tennis-info-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.tennis-info-popup { position: fixed; z-index: 1100; box-sizing: border-box; width: max-content; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow-sm); font-size: 13px; font-weight: 400; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+.tennis-info-popup p { margin: 0; }
+.tennis-info-popup p + p { margin-top: 6px; }
+.tennis-heading-with-help, .tennis-field-heading { display: flex; align-items: center; gap: 6px; }
+.tennis-heading-with-help > h3 { margin: 0; }
+.tennis-field-heading > label { flex: 1; }
+.tennis-required { color: var(--danger, #a52a2a); margin-left: 3px; }
+.tennis-ledger-row .tennis-warning-text { color: var(--danger, #a52a2a); }
+@media (pointer: coarse) {
+  .tennis-info-trigger { width: 44px; height: 44px; }
+}
+.tennis-guest-phone-error { display: grid; gap: 8px; }

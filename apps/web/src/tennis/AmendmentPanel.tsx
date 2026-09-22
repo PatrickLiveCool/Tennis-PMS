@@ -99,9 +99,9 @@ export function AmendmentPanel({
       <ErrorNotice error={amendments.error ?? command.error} />
       {unpaid && (
         <>
-          <p className="tennis-muted">未付款调整保留原付款截止时间和保留原因，只更新所选时段及应付金额。</p>
+          <p className="tennis-muted">调整时段不会延长付款期限。</p>
           {paymentUnresolved && (
-            <p className="tennis-note">原付款仍需核对，请先刷新并确认付款结果，再调整未付款时段。</p>
+            <p className="tennis-note">付款结果尚未确认，请先刷新核对，再调整时段。</p>
           )}
           {canEdit && (
             <button
@@ -147,7 +147,7 @@ export function AmendmentPanel({
         />
       )}
       {amendments.data?.length === 0 && !editing && (
-        <p className="tennis-muted">尚无改期记录。改期前会核对原、新时段与补退差额。</p>
+        <p className="tennis-muted">暂无改期记录。</p>
       )}
       {amendments.data?.map((item) => (
         <div className="tennis-ledger-row" key={item.id}>
@@ -436,15 +436,15 @@ function AmendmentEditor({
                 />
                 <small>
                   建议最多 {money(line.suggestedRefundCents)}
-                  ，由授权员工核准；默认不自动退款。
+                  ，请填写与客户确认的退款金额。
                 </small>
               </label>
             ))}
           <p className="tennis-note">
             方案有效至 {dateTime(draft.preview.expiresAt, venue.timezone)}
             {draft.preview.unpaid
-              ? `。付款截止仍为 ${dateTime(order.holdUntil, venue.timezone)}；确认成功后更新预约，失败保留原场地，不延长付款期限。若调整后应付为零，按免费预约确认。`
-              : "。涉及补款时保留原预约并暂占新时段；全额补款成功后才完成改期。退款按原支付来源执行。"}
+              ? `。仍需在 ${dateTime(order.holdUntil, venue.timezone)} 前付款。调整失败会保留原预约；应付为零时直接确认。`
+              : "。补款付清后才完成改期，此前保留原预约和新时段。退款原路退回。"}
           </p>
           <div className="tennis-actions">
             <button className="button button-secondary" disabled={command.busy} onClick={() => update({})}>
@@ -622,11 +622,11 @@ function UnpaidCancelEditor({
             ? `保留 ${remaining.length} 条时段，整单待付由 ${money(order.totalCents)} 调整为 ${money(total)}。`
             : "所选为全部有效时段，确认后整单取消。"}
           {remaining.length && total > 0
-            ? `付款截止仍为 ${dateTime(order.holdUntil, venue.timezone)}；保留原因不变。`
+            ? `付款截止仍为 ${dateTime(order.holdUntil, venue.timezone)}。`
             : remaining.length
-              ? "剩余免费时段按无需支付确认。"
+              ? "剩余免费时段会直接确认。"
               : ""}
-          本次不产生收款或退款。
+          本次无需收款或退款。
         </p>
         <div className="tennis-actions">
           <button className="button button-secondary" disabled={command.busy} onClick={onClose}>

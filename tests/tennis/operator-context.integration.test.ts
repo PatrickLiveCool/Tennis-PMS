@@ -24,7 +24,7 @@ import {
 } from "../../packages/db/src/tennis/external-agent.ts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({
   connectionString: assertLocalTennisDatabaseUrl(localTennisTestDatabaseUrl, "test"),
@@ -57,7 +57,7 @@ beforeEach(async () => {
   extraSubjects = [];
   courts.clear();
   orderCounter = 0;
-  const profile = await createCustomer(db, first.actor, { nickname: "人工协作新客户" });
+  const profile = await createCustomer(db, first.actor, { nickname: "人工协作新客户", phone: syntheticPhone() });
   const subjectId = randomUUID();
   extraSubjects.push(subjectId);
   await db.query("INSERT INTO tennis.subjects(id,display_name) VALUES($1,'人工协作新客户')", [subjectId]);
@@ -92,7 +92,7 @@ async function booked(fixture = first, customerId = customer.customerId, venueId
       minimumBookingMinutes: 15,
       openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 0, endMinute: 1440 })),
     });
-    const court = await createCourt(db, fixture.actor, { venueId, name: "context court", indoor: true });
+    const court = await createCourt(db, fixture.actor, { venueId, name: "context court", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 0 });
     await setCourtPrice(db, fixture.actor, {
       venueId,
       courtId: court.id,
@@ -183,11 +183,11 @@ describe("operator order context and recoverable conversation directory", () => 
   });
 
   it("denies foreign customer, venue and tenant orders even when staff can read the customer's HUMAN conversation", async () => {
-    const otherCustomer = await createCustomer(db, first.actor, { nickname: "另一客户" });
+    const otherCustomer = await createCustomer(db, first.actor, { nickname: "另一客户", phone: syntheticPhone() });
     const otherCustomerOrder = await booked(first, otherCustomer.id);
     const otherVenue = await createVenue(db, first.actor, { name: "other context venue", timezone: "Asia/Shanghai" });
     const otherVenueOrder = await booked(first, customer.customerId, otherVenue.id);
-    const foreignCustomer = await createCustomer(db, second.actor, { nickname: "外租户客户" });
+    const foreignCustomer = await createCustomer(db, second.actor, { nickname: "外租户客户", phone: syntheticPhone() });
     const foreignOrder = await booked(second, foreignCustomer.id);
     const conv = await createConversation(db, customer, first.venueId);
     for (const actor of [customer, first.actor]) {

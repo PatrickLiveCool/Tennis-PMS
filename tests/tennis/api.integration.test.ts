@@ -113,7 +113,7 @@ beforeEach(async () => {
     openingHours: hours,
     minimumBookingMinutes: 15,
   });
-  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "API测试球场", indoor: true });
+  const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "API测试球场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
   await setCourtPrice(db, first.actor, {
     venueId: first.venueId,
     courtId: court.id,
@@ -121,8 +121,8 @@ beforeEach(async () => {
     hourlyPriceCents: 12000,
   });
   courtId = court.id;
-  customerId = (await createCustomer(db, first.actor, { nickname: "本人客户" })).id;
-  otherCustomerId = (await createCustomer(db, first.actor, { nickname: "他人私有客户" })).id;
+  customerId = (await createCustomer(db, first.actor, { nickname: "本人客户", phone: "13800000001" })).id;
+  otherCustomerId = (await createCustomer(db, first.actor, { nickname: "他人私有客户", phone: "13800000002" })).id;
   app = await buildTennisServer({
     db,
     gateway,
@@ -156,6 +156,33 @@ afterAll(async () => {
 });
 
 describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
+  it("round-trips the complete court form with an atomic price and rejects invalid attributes", async () => {
+    const url = `/venues/${first.venueId}/courts`;
+    const missingEnvironment = await request(staff, "POST", url, { name: "未选择环境" });
+    expect(missingEnvironment.statusCode).toBe(409);
+    expect(missingEnvironment.json().error.code).toBe("INVALID_CONFIGURATION");
+    const before = await okay(staff, "GET", url);
+    for (const field of ["hourlyPriceCents", "surface", "profile"]) {
+      const incomplete: Record<string, unknown> = { name: "停用也必须填全", active: false, environment: "INDOOR", surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 10000 };
+      delete incomplete[field];
+      const rejected = await request(staff, "POST", url, incomplete);
+      expect(rejected.statusCode).toBe(409);
+      expect(rejected.json().error.code).toBe("COURT_DETAILS_INCOMPLETE");
+    }
+    expect(await okay(staff, "GET", url)).toEqual(before);
+    const created = await okay(staff, "POST", url, { name: "橡胶练习场", environment: "COVERED", surface: "RUBBER", hourlyPriceCents: 8800,
+      profile: { specification: "PRACTICE", lighting: "AVAILABLE", climate: "VENTILATED", playingLengthM: 18.29, playingWidthM: 8.23, description: "合成场地资料" } });
+    expect(created).toMatchObject({ indoor: false, environment: "COVERED", surface: "RUBBER", hourlyPriceCents: 8800, profile: { playingWidthM: 8.23 } });
+    const path = `${url}/${created.id}/profile`;
+    const updated = await okay(staff, "PATCH", path, { expectedRevision: created.revision, assets: { name: "室内标准场", environment: "INDOOR", profile: { specification: "STANDARD" } }, hourlyPriceCents: 12000 });
+    expect(updated).toMatchObject({ indoor: true, environment: "INDOOR", revision: created.revision + 1, hourlyPriceCents: 12000, profile: { specification: "STANDARD", lighting: "AVAILABLE" } });
+    for (const assets of [{ name: "错误", surface: "MADE_UP" }, { name: "错误", profile: { unknownField: true } }, { name: "错误", profile: { playingLengthM: -1 } }]) {
+      expect((await request(staff, "PATCH", path, { expectedRevision: updated.revision, assets, hourlyPriceCents: 1 })).statusCode).toBe(400);
+    }
+    expect((await request(customer, "PATCH", path, { expectedRevision: updated.revision, hourlyPriceCents: 1 })).statusCode).toBe(403);
+    const publicCourt = (await okay(customer, "GET", url)).find((c: { id: string }) => c.id === created.id);
+    expect(publicCourt).toMatchObject({ hourlyPriceCents: 12000, surface: "RUBBER", environment: "INDOOR", profile: { description: "合成场地资料" } });
+  });
   it("searches the full order directory and validates paginated HTTP queries", async () => {
     const old = await booking();
     const seeds = Array.from({ length: 105 }, () => ({ id: key(), quote_id: key() }));
@@ -541,9 +568,12 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
   it("registers and recovers a booking-only guest without customer-management authority", async () => {
     await db.query("UPDATE tennis.tenant_memberships SET role='STAFF',all_venues=true,permissions=ARRAY['read','book'] WHERE tenant_id=$1 AND subject_id=$2", [first.actor.tenantId, staff.session.subjectId]);
     const path = `/venues/${first.venueId}/booking-customers`;
-    const payload = { commandKey: key(), nickname: "HTTP 临时客" };
+    const payload = { commandKey: key(), nickname: "HTTP 临时客", phone: "13900000001" };
+    // Invalid or missing contact does not consume the command key; correcting it can continue the same draft.
+    expect((await request(staff, "POST", path, { ...payload, phone: "123" })).json().error.code).toBe("INVALID_CUSTOMER");
+    expect((await request(staff, "POST", path, { ...payload, phone: "" })).json().error.code).toBe("BOOKING_PHONE_REQUIRED");
     const registered = await okay(staff, "POST", path, payload);
-    expect(registered.customer).toMatchObject({ nickname: payload.nickname, phone: null, hasContact: false });
+    expect(registered.customer).toMatchObject({ nickname: payload.nickname, phone: null, hasContact: true });
     expect(await okay(staff, "POST", path, payload)).toEqual(registered);
     expect((await okay(staff, "GET", `/receipts/${payload.commandKey}`)).result).toEqual(registered);
     expect((await request(staff, "POST", "/customers", { nickname: "不允许" })).statusCode).toBe(403);
@@ -553,6 +583,39 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
     const quote = await okay(staff, "POST", "/quotes", selection(registered.customerId));
     const order = await okay(staff, "POST", `/quotes/${quote.id}/confirm`, { commandKey: key() });
     expect(order.customerId).toBe(registered.customerId);
+  });
+  it("accepts eleven-digit mainland mobiles for bookings without requiring a country code", async () => {
+    const path = `/venues/${first.venueId}/booking-customers`;
+    const payload = { commandKey: key(), nickname: "手机号规则验收", phone: "13900000002" };
+    for (const phone of ["1390000000", "139000000022", "+12025550123"]) {
+      expect((await request(staff, "POST", path, { ...payload, phone })).json().error.code).toBe("INVALID_CUSTOMER");
+    }
+    const registered = await okay(staff, "POST", path, payload);
+    expect(registered.customer).toMatchObject({ nickname: payload.nickname, hasContact: true });
+    expect((await db.query("SELECT phone FROM tennis.customers WHERE id=$1", [registered.customerId])).rows[0].phone).toBe("+8613900000002");
+    expect((await request(staff, "POST", path, { ...payload, commandKey: key(), phone: "+8613900000002" })).json().error.code).toBe("PHONE_ALREADY_EXISTS");
+    const quote = await okay(staff, "POST", "/quotes", selection(registered.customerId));
+    expect(quote.customerId).toBe(registered.customerId);
+  });
+  it("lets booking staff complete a missing phone without broader profile editing and requires it for new quotes", async () => {
+    const legacy = await createCustomer(db, first.actor, { nickname: "缺手机号的既有客户" });
+    await db.query("UPDATE tennis.tenant_memberships SET role='STAFF',all_venues=true,permissions=ARRAY['read','book'] WHERE tenant_id=$1 AND subject_id=$2", [first.actor.tenantId, staff.session.subjectId]);
+    const path = `/venues/${first.venueId}/booking-customers/${legacy.id}/contact`;
+    const payload = { commandKey: key(), phone: "13700000003" };
+    expect((await request(staff, "POST", "/quotes", selection(legacy.id))).json().error.code).toBe("BOOKING_PHONE_REQUIRED");
+    expect((await request(customer, "POST", path, payload)).statusCode).toBe(403);
+    expect((await request(foreign, "POST", path, payload)).statusCode).toBe(404);
+    expect((await request(staff, "POST", path, { ...payload, nickname: "不能改名" })).statusCode).toBe(400);
+    expect((await request(staff, "POST", path, { ...payload, phone: "" })).json().error.code).toBe("BOOKING_PHONE_REQUIRED");
+    expect((await request(staff, "POST", path, { ...payload, phone: "13800000001" })).json().error.code).toBe("PHONE_ALREADY_EXISTS");
+    const completed = await okay(staff, "POST", path, payload);
+    expect(completed).toMatchObject({ customerId: legacy.id, customer: { nickname: legacy.nickname, phone: null, hasContact: true } });
+    expect(await okay(staff, "POST", path, payload)).toEqual(completed);
+    expect((await okay(staff, "GET", `/receipts/${payload.commandKey}`)).result).toEqual(completed);
+    expect((await request(staff, "POST", path, { commandKey: key(), phone: "13700000004" })).json().error.code).toBe("BOOKING_PHONE_ALREADY_SET");
+    expect((await request(staff, "GET", "/customers")).statusCode).toBe(403);
+    expect((await okay(staff, "POST", "/quotes", selection(legacy.id))).customerId).toBe(legacy.id);
+    expect((await db.query("SELECT phone FROM tennis.customers WHERE id=$1", [legacy.id])).rows[0].phone).toBe("+8613700000003");
   });
   it("completes quoted booking, balance plus simulated cash payment and authorized original-source refund", async () => {
     await okay(staff, "POST", `/customers/${customerId}/topups/offline`, {

@@ -9,10 +9,14 @@ import { assertLocalTennisDatabaseUrl, localTennisDatabaseUrl } from "../../pack
 export const demoPassword = "TennisPMS123!";
 export const demoAccounts = {
   "demo.platform": "演示平台运营（模拟）",
-  "demo.green": "格林网球（模拟租户）管理员",
-  "demo.staff": "演示前台（模拟）",
+  "demo.green": "格林网球管理员",
+  "demo.staff": "演示前台",
   "demo.customer": "演示球友（模拟）",
   "demo.second": "第二租户（隔离演示）管理员",
+};
+const legacyDemoDisplayNames: Record<string, string> = {
+  "demo.green": "格林网球（模拟租户）管理员",
+  "demo.staff": "演示前台（模拟）",
 };
 export const credentialsPath = ".local-workspace/demo-credentials.json";
 
@@ -28,8 +32,12 @@ export async function syncDemoCredentials(db: pg.Pool) {
         `SELECT s.display_name FROM tennis.local_accounts a JOIN tennis.subjects s ON s.id=a.subject_id
          WHERE a.username=$1 FOR UPDATE OF a`, [username],
       );
-      if (result.rows[0]?.display_name !== displayName)
+      const current = result.rows[0];
+      if (!current || (current.display_name !== displayName && current.display_name !== legacyDemoDisplayNames[username]))
         throw new Error(`Missing demo account or unrelated account collision: ${username}`);
+      if (current.display_name !== displayName)
+        await tx.query(`UPDATE tennis.subjects s SET display_name=$1 FROM tennis.local_accounts a
+          WHERE a.subject_id=s.id AND a.username=$2 AND s.display_name=$3`, [displayName, username, current.display_name]);
       const salt = randomBytes(16);
       const derived = scryptSync(demoPassword, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
       const hash = `scrypt$32768$8$1$${salt.toString("hex")}$${derived.toString("hex")}`;

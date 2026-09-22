@@ -1,4 +1,7 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { SCHEDULE_COURT_WIDTH } from "./schedule-layout";
+import { scheduleTimeAxis } from "./schedule-time-axis";
+import { matchesCourtFilter } from "../../../../packages/domain/src/tennis-court-profile";
+import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ScheduleGrid } from "./ScheduleGrid";
 import {
@@ -25,6 +28,8 @@ export function ScheduleBoard({
   openOrder,
   issues,
   timezone,
+  dateNavigation,
+  emptyState,
 }: {
   dates: string[];
   days: Record<string, Schedule>;
@@ -40,6 +45,8 @@ export function ScheduleBoard({
   openOrder: (id: string) => void;
   issues: string[];
   timezone: string;
+  dateNavigation: ReactNode;
+  emptyState?: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useDraft<string[]>(
     `${storageKey}:collapsed`,
@@ -56,58 +63,50 @@ export function ScheduleBoard({
     observer.observe(board);
     return () => observer.disconnect();
   }, [scrollRef]);
-  // Keep complete clock labels readable on narrow boards and long operating days.
-  const labelEvery = Math.max(
-    1,
-    Math.ceil(((ticks.length / 4) * 40) / Math.max(1, boardWidth - 104)),
-  );
+  const timePoints = scheduleTimeAxis(ticks, boardWidth - SCHEDULE_COURT_WIDTH);
   return (
     <div
       ref={scrollRef}
       className="tennis-grid-scroll tennis-board"
       aria-label="排场表，滚动查看日期与时段"
-      onScroll={(e) =>
+      onScroll={(e) => {
+        if (emptyState) return;
         writeStored(storageKey, {
           left: e.currentTarget.scrollLeft,
           top: e.currentTarget.scrollTop,
-        })
-      }
+        });
+      }}
     >
       <div
-        className="tennis-schedule-header tennis-desktop-schedule"
+        className="tennis-schedule-header"
         style={{
-          gridTemplateColumns: `104px repeat(${ticks.length}, minmax(0, 1fr))`,
+          gridTemplateColumns: `${SCHEDULE_COURT_WIDTH}px repeat(${ticks.length}, minmax(0, 1fr))`,
           width: "100%",
         }}
       >
-        <div className="tennis-grid-corner">日期 / 球场</div>
-        {ticks.map(
-          (t, index) =>
-            index % (4 * labelEvery) === 0 && (
+        <div className="tennis-grid-corner">{dateNavigation}</div>
+        {timePoints.length > 0 && (
+          <div className="tennis-time-axis" role="group" aria-label="时间刻度" style={{ gridColumn: "2 / -1" }}>
+            {timePoints.map((point) => (
               <div
-                key={t}
-                className="tennis-grid-time is-hour"
-                data-slot-start={index}
-                style={{
-                  gridColumn: `span ${Math.min(4 * labelEvery, ticks.length - index)}`,
-                }}
+                key={point.minute}
+                className={`tennis-time-tick${point.hour ? " is-hour" : ""}${point.edge ? ` is-${point.edge}` : ""}`}
+                data-slot-start={point.slot}
+                data-time-minute={point.minute}
+                style={{ left: `${point.fraction * 100}%` }}
               >
-                {((ticks.length - index) / ticks.length) * (boardWidth - 104) >=
-                34 ? (
-                  <span>{minuteLabel(t)}</span>
-                ) : (
-                  ""
-                )}
+                {point.label && <span className="tennis-time-label">{minuteLabel(point.minute)}</span>}
               </div>
-            ),
+            ))}
+          </div>
         )}
       </div>
-      {dates.map((date) => {
+      {emptyState ?? dates.map((date) => {
         const schedule = days[date];
         const courts =
           schedule?.courts.filter(
             (c) =>
-              filter === "all" || (filter === "clay" ? c.surface === "CLAY" : filter === "indoor" ? c.indoor : !c.indoor),
+              c.active && matchesCourtFilter(c, filter),
           ) ?? [];
         const weekday = new Intl.DateTimeFormat("zh-CN", {
           weekday: "short",

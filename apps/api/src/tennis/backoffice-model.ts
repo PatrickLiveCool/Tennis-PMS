@@ -1,3 +1,4 @@
+import { courtSurfaces, courtEnvironments, courtSpecifications, courtLighting, courtClimate } from "../../../../packages/domain/src/tennis-court-profile.ts";
 import type pg from "pg";
 import type { ModelInput, ModelMessage, ModelTool, ModelTransport } from "../assistant-model.ts";
 import { AgentAccessError } from "../../../../packages/db/src/tennis/agent-guard.ts";
@@ -83,13 +84,13 @@ export function backofficeExecutor(db: pg.Pool, actor: BookingActor, transport?:
         }
         case "get_courts": {
           const courts = await accessibleCourts(db, actor, run.venue.id);
-          return { priceUnit: "人民币分/小时，100分=1元", courts: courts.slice(0, 100).map(({ name, active, indoor, surface, hourlyPriceCents }) => ({ name, active, indoor, surface, hourlyPriceCents })), truncated: courts.length > 100 };
+          return { priceUnit: "人民币分/小时，100分=1元", courts: courts.slice(0, 100).map(({ name, active, indoor, environment, surface, profile, hourlyPriceCents }) => ({ name, active, indoor, environment: courtEnvironments[environment], surface: courtSurfaces[surface], profile: { ...profile, specification: courtSpecifications[profile.specification], lighting: courtLighting[profile.lighting], climate: courtClimate[profile.climate] }, hourlyPriceCents })), truncated: courts.length > 100 };
         }
         case "get_schedule": {
           const result = await venueSchedule(db, actor, run.venue.id, args.date!);
           const courtNames = new Map(result.courts.map((court) => [court.id, court.name]));
           return { date: result.date, timezone: result.venue.timezone, openingHours: result.venue.openingHours, minimumBookingMinutes: result.venue.minimumBookingMinutes,
-            courts: result.courts.slice(0, 100).map(({ name, active, indoor, surface }) => ({ name, active, indoor, surface })),
+            courts: result.courts.slice(0, 100).map(({ name, active, indoor, environment, surface, profile }) => ({ name, active, indoor, environment: courtEnvironments[environment], surface: courtSurfaces[surface], specification: courtSpecifications[profile.specification] })),
             busyIntervals: result.occupancies.slice(0, 200).map(({ courtId, startAt, endAt }) => ({ courtName: courtNames.get(courtId), startAt, endAt })),
             truncated: result.courts.length > 100 || result.occupancies.length > 200 };
         }

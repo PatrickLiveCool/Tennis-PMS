@@ -14,7 +14,7 @@ import { backofficeExecutor } from "../../apps/api/src/tennis/backoffice-model.t
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
 import type { ModelInput } from "../../apps/api/src/assistant-model.ts";
-import { removeTenantFixture, seedTenantFixture, type TenantFixture } from "./tenant-fixture.ts";
+import { removeTenantFixture, seedTenantFixture, syntheticPhone, type TenantFixture } from "./tenant-fixture.ts";
 
 const db = new pg.Pool({ connectionString: assertLocalTennisDatabaseUrl(localTennisTestDatabaseUrl, "test"), max: 8, connectionTimeoutMillis: 5000, statement_timeout: 10000 });
 const key = randomBytes(32);
@@ -146,7 +146,7 @@ describe("private backoffice assistant configuration and request lifecycle", () 
     await configure();
     const venue = (await listVenues(db, first.actor))[0]!;
     await updateVenue(db, first.actor, { ...venue, expectedRevision: venue.catalogRevision, minimumBookingMinutes: 15, openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })) });
-    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "示例1号场", indoor: true });
+    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "示例1号场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
     await setCourtPrice(db, first.actor, { venueId: first.venueId, courtId: court.id, expectedRevision: court.revision, hourlyPriceCents: 12000 });
     const customer = await createCustomer(db, first.actor, { nickname: "private-synthetic-customer", phone: "+8613800138000" });
     const quote = await createQuote(db, first.actor, { venueId: first.venueId, customerId: customer.id, lines: [{ courtId: court.id, startAt: "2099-09-18T19:00:00+08:00", endAt: "2099-09-18T20:00:00+08:00" }] });
@@ -288,7 +288,7 @@ describe("private backoffice assistant configuration and request lifecycle", () 
     await configure();
     const venue = (await listVenues(db, first.actor))[0]!;
     await updateVenue(db, first.actor, { ...venue, expectedRevision: venue.catalogRevision, minimumBookingMinutes: 60, openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 480, endMinute: 1320 })) });
-    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "助手测试场", indoor: true });
+    const court = await createCourt(db, first.actor, { venueId: first.venueId, name: "助手测试场", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
     await setCourtPrice(db, first.actor, { venueId: first.venueId, courtId: court.id, expectedRevision: court.revision, hourlyPriceCents: 12000 });
     const line = { courtId: court.id, startAt: "2099-09-18T11:00:00.000Z", endAt: "2099-09-18T12:00:00.000Z" };
     const conversation = await createBackofficeConversation(db, first.actor, first.venueId);
@@ -315,7 +315,7 @@ describe("private backoffice assistant configuration and request lifecycle", () 
   });
   it("rejects a foreign court or malformed context before any model call", async () => {
     const { conversation, run, line } = await assistantFixture();
-    const foreign = await createCourt(db, second.actor, { venueId: second.venueId, name: "另一租户", indoor: true });
+    const foreign = await createCourt(db, second.actor, { venueId: second.venueId, name: "另一租户", indoor: true, surface: "ACRYLIC", profile: { specification: "STANDARD" }, hourlyPriceCents: 12000 });
     const execute = vi.fn(reply);
     await expect(sendBackofficeMessage(db, first.actor, key, conversation.id, { messageId: randomUUID(), content: "查询", context: { ...run.context, selection: [{ ...line, courtId: foreign.id }] } }, execute)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
     await expect(sendBackofficeMessage(db, first.actor, key, conversation.id, { messageId: randomUUID(), content: "查询", context: { ...run.context, date: "2099-02-31" } }, execute)).rejects.toMatchObject({ code: "INVALID_AGENT_MESSAGE" });
@@ -323,7 +323,7 @@ describe("private backoffice assistant configuration and request lifecycle", () 
   });
   it("blocks occupied, closed, duplicate and non-grid preparations and respects read-only roles", async () => {
     const { run, line } = await assistantFixture();
-    const customer = await createCustomer(db, first.actor, { nickname: "助手准备验证" });
+    const customer = await createCustomer(db, first.actor, { nickname: "助手准备验证", phone: syntheticPhone() });
     const quote = await createQuote(db, first.actor, { venueId: first.venueId, customerId: customer.id, lines: [line] });
     await confirmQuote(db, first.actor, { quoteId: quote.id, commandKey: randomUUID() });
     await expect(prepareAssistantAction(db, first.actor, run, "prepare_booking", { source: "selection" })).rejects.toThrow("已有占用");
@@ -335,7 +335,7 @@ describe("private backoffice assistant configuration and request lifecycle", () 
   });
   it("prepares an order amendment and reason but never applies it or takes payment", async () => {
     const { run, line } = await assistantFixture();
-    const customer = await createCustomer(db, first.actor, { nickname: "助手改期验证" });
+    const customer = await createCustomer(db, first.actor, { nickname: "助手改期验证", phone: syntheticPhone() });
     const quote = await createQuote(db, first.actor, { venueId: first.venueId, customerId: customer.id, lines: [line] });
     const order = await confirmQuote(db, first.actor, { quoteId: quote.id, commandKey: randomUUID() });
     run.context = { page: "orders", orderId: order.id };

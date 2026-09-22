@@ -4,6 +4,7 @@ import { MessageCircle, Plus, Send } from "lucide-react";
 import { TennisApiError, type TennisApi } from "./api";
 import { OrderDialog } from "./OrdersPage";
 import { BackofficeAssistantPanel } from "./BackofficeAssistantPanel";
+import { InfoHint } from "./InfoHint";
 import type { AgentRequestDetail, AgentRequestSummary } from "../../../../packages/db/src/tennis/external-agent";
 import type { Session, VenueRecord, AssistantStatus } from "./types";
 import {
@@ -114,10 +115,10 @@ function useConversationDirectory(api: TennisApi, venueId: string, mode: string,
   return { data: snapshot?.path === path ? snapshot.data : undefined, busy, error, refresh: load };
 }
 const requestStatusLabels: Record<AgentRequestSummary["dispatchStatus"], string> = {
-  IN_FLIGHT: "未收到处理结束回报",
-  SUCCEEDED: "已收到处理结束回报",
+  IN_FLIGHT: "等待处理结果",
+  SUCCEEDED: "处理已结束",
   UNCERTAIN: "结果待核对",
-  ISSUED: "请求已签发",
+  ISSUED: "等待处理",
 };
 const commandLabels: Record<string, string> = {
   "quote.confirm": "确认预订并占位",
@@ -212,10 +213,9 @@ function ConversationRequests({
     void detail.refresh();
   }
   return (
-    <Panel title="办理记录" action={<RefreshButton busy={busy || detail.busy} onClick={refresh} />}>
-      <p className="tennis-muted">按本次会话核对已登记的业务操作和最新状态。刷新仅查询记录，不会重新办理。</p>
+    <Panel title="办理记录" action={<div className="tennis-actions"><InfoHint label="办理记录说明">这里显示助手的处理进度。预订和付款结果请查看关联订单；刷新不会重复办理。</InfoHint><RefreshButton busy={busy || detail.busy} onClick={refresh} /></div>}>
       <ErrorNotice error={error} retry={refresh} />
-      {!!error && page && <p className="tennis-muted">列表刷新未成功，以下仍为上次读取的记录。</p>}
+      {!!error && page && <p className="tennis-muted">刷新失败，以下为上次的记录。</p>}
       {busy && !page ? (
         <LoadingBlock />
       ) : !page?.items.length && !selected && !error ? (
@@ -225,16 +225,16 @@ function ConversationRequests({
         <>
           <div className="tennis-toolbar">
             <label>
-              选择办理请求
+              选择办理记录
               <select
-                aria-label="选择办理请求"
+                aria-label="选择办理记录"
                 value={selected?.requestId ?? ""}
                 onChange={(event) => setSelected(items.find((item) => item.requestId === event.target.value) ?? null)}
               >
                 {items.map((item) => (
                   <option value={item.requestId} key={item.requestId}>
                     {dateTime(item.createdAt, timezone)} · {requestStatusLabels[item.dispatchStatus]} ·{" "}
-                    {item.commandCount} 项操作 · {item.requestId.slice(0, 8)}
+                    {item.commandCount} 项操作
                   </option>
                 ))}
               </select>
@@ -256,29 +256,22 @@ function ConversationRequests({
           ) : current ? (
             <>
               {!!detail.error && (
-                <p className="tennis-note">本次核对未成功，以下为上次读取的状态，请重新读取后再判断。</p>
+                <p className="tennis-note">刷新失败，以下状态可能已变化，请重试。</p>
               )}
-              <p style={{ overflowWrap: "anywhere" }}>
-                请求编号：<code>{current.requestId}</code>
-              </p>
               <p>
-                回报状态：{requestStatusLabels[current.dispatchStatus]} · 已登记 {current.commandCount} 项操作
+                {requestStatusLabels[current.dispatchStatus]} · {current.commandCount} 项操作{" "}
+                <InfoHint label="办理记录编号"><span style={{ overflowWrap: "anywhere" }}>{current.requestId}</span></InfoHint>
               </p>
               {(current.dispatchStatus === "UNCERTAIN" || current.dispatchStatus === "IN_FLIGHT") && (
                 <p className="tennis-note">
-                  回报未确认，不代表业务没有执行。请核对下方业务编号及当前状态，必要时交由工作人员处理。
+                  处理结果还未确认，请先查看关联订单，避免重复办理。
                 </p>
               )}
-              <p className="tennis-muted">
-                处理回报与付款结果分别核对；订单是否成立、款项是否到账，以业务记录的当前状态为准。
-              </p>
               {current.commands.map((command) => (
                 <article key={command.commandKey} style={{ marginTop: 12 }}>
-                  <strong>{commandLabels[command.commandType] ?? command.commandType}</strong>
+                  <strong>{commandLabels[command.commandType] ?? "业务操作"}</strong>
                   <span className="tennis-muted"> · {dateTime(command.completedAt, timezone)}</span>
-                  <p style={{ overflowWrap: "anywhere" }}>
-                    操作编号：<code>{command.commandKey}</code>
-                  </p>
+                  <InfoHint label="操作编号"><span style={{ overflowWrap: "anywhere" }}>{command.commandKey}</span></InfoHint>
                   {command.resources.length ? (
                     <ul>
                       {command.resources.map((resource) => (
@@ -286,7 +279,7 @@ function ConversationRequests({
                           key={`${resource.type}:${resource.id}`}
                           style={{ marginBottom: 8, overflowWrap: "anywhere" }}
                         >
-                          {resourceLabels[resource.type] ?? resource.type}：<code>{resource.id}</code>{" "}
+                          {resourceLabels[resource.type] ?? "业务记录"}{" "}<InfoHint label={`${resourceLabels[resource.type] ?? "业务"}编号`}><span style={{ overflowWrap: "anywhere" }}>{resource.id}</span></InfoHint>{" "}
                           {resource.status === "CREDITED" ? (
                             "已入账"
                           ) : resource.status === "RECORDED" ? (
@@ -314,17 +307,17 @@ function ConversationRequests({
                       ))}
                     </ul>
                   ) : (
-                    <p className="tennis-muted">操作已登记；没有可展示的关联业务记录。</p>
+                    <p className="tennis-muted">已记录操作，暂无关联订单。</p>
                   )}
                 </article>
               ))}
               {current.restrictedCommandCount > 0 && (
                 <p className="tennis-note">
-                  有 {current.restrictedCommandCount} 项操作当前无权查看，请由有权限的工作人员核对。
+                  还有 {current.restrictedCommandCount} 项记录需要有权限的工作人员查看。
                 </p>
               )}
               {!current.commandCount && (
-                <p className="tennis-muted">尚未查询到已登记的业务操作。仅凭此信息不能判断原请求是否执行。</p>
+                <p className="tennis-muted">暂未查到办理记录，结果仍待确认。</p>
               )}
             </>
           ) : null}
@@ -499,7 +492,7 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
     await run(async (isCurrent) => {
       const original = messageDraft.pending;
       if (original && (original.conversationId !== selected || original.content !== content.trim()))
-        throw new Error("上一条消息的处理结果尚未确认，请保留原文并查询原会话。");
+        throw new Error("上一条消息还未确认，请先刷新会话查看结果。");
       const request = original ?? {
         messageId: crypto.randomUUID(),
         content: content.trim(),
@@ -609,31 +602,29 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
     contextReady;
   return (
     <>
-      <Modal title="智能体业务会话" size="wide" onClose={onClose} closeDisabled={busy}>
+      <Modal title="咨询与协助" size="wide" onClose={onClose} closeDisabled={busy}>
         <div className="tennis-assistant">
           <p className="tennis-muted">
-            {venue.name} · {session.kind === "customer" ? "订场咨询与工作人员协助" : "当前工作区的咨询、预订与人工协作"}
+            {venue.name}
           </p>
           {messageDraft.pending ? (
-            <p className="tennis-note">
-              {messageDraft.pending.context.orderId
-                ? `待核实消息关联订单 ${messageDraft.pending.context.orderId.slice(0, 8)}。`
-                : "待核实消息未关联订单。"}
-              请继续核对原消息，重试时保留原上下文。
+            <p className="tennis-note is-warning" role="status">
+              上一条消息还未确认，请刷新查看或重试。
+              {messageDraft.pending.context.orderId && `关联订单 ${messageDraft.pending.context.orderId.slice(0, 8)}。`}
             </p>
           ) : canAttachOrder ? (
             <p className="tennis-note">
-              本次消息关联订单 {context.orderId!.slice(0, 8)}。关闭助手后可继续填写原订单表单。
+              正在咨询订单 {context.orderId!.slice(0, 8)}。
             </p>
           ) : null}
           {!messageDraft.pending && context.orderId && current && contextReady && !canAttachOrder && (
             <p className="tennis-note">
-              当前会话与正在查看的订单不匹配，发送消息不会附带该订单。可从本会话的历史关联订单继续核对。
+              这笔订单不属于当前会话，发送消息时不会带入。
             </p>
           )}
           {!status.data?.configured && !status.busy && (
             <div className="tennis-note">
-              外部智能体尚未连接会话回复服务。已接入 Gateway 的业务仍可通过 PMS 接口办理；这里可以查看记录和人工协作。
+              AI 暂时无法回复，可以查看记录或转人工协助。
             </div>
           )}
           <ErrorNotice
@@ -672,7 +663,7 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
           </div>
           {conversations.busy && !conversations.data && <LoadingBlock label="正在读取会话目录" />}
           {!!conversations.error && conversations.data && (
-            <p className="tennis-note">目录刷新未成功，仍显示上次结果，请重新读取后核对。</p>
+            <p className="tennis-note">刷新失败，以下为上次的会话列表。</p>
           )}
           {!conversations.busy && !conversations.error && conversations.data?.items.length === 0 && (
             <p className="tennis-muted">
@@ -703,8 +694,7 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
                   <option value={item.id} key={item.id} title={`${item.displayName} · ${item.id}`}>
                     {item.displayName} · {item.actorKind === "customer" ? "客户" : "员工"}
                     {item.subjectId === session.subjectId ? "（我）" : ""} ·{" "}
-                    {item.mode === "HUMAN" ? "人工处理中" : "AI 协作"} · {dateTime(item.updatedAt, venue.timezone)} ·{" "}
-                    {item.id.slice(0, 8)}
+                    {item.mode === "HUMAN" ? "人工处理中" : "AI 协作"} · {dateTime(item.updatedAt, venue.timezone)}
                   </option>
                 ))}
               </select>
@@ -744,7 +734,7 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
               >
                 查看订单 {current.latestOrderContext.orderId.slice(0, 8)}
               </button>
-              <p className="tennis-muted">此关联来自历史消息；新留言不一定仍在讨论这笔订单。</p>
+              <InfoHint label="历史关联订单说明">这是之前聊到的订单。</InfoHint>
             </div>
           )}
           {selected && !current ? (
@@ -852,24 +842,13 @@ function AssistantWorkspace({ api, session, venue, scope, context, onClose }: As
                 refreshVersion={current.conversation.updatedAt}
                 openResource={(type, id) => void openResource(type, id)}
               />
-              <div className="tennis-note">
+              {(current.conversation.mode === "HUMAN" || !own) && <div className="tennis-note">
                 {current.conversation.mode === "HUMAN"
-                  ? "当前由工作人员处理，AI 操作已停止。"
-                  : own
-                    ? "确认预订、付款或退改时，请以订单中的最新记录为准。"
-                    : "先接管此会话，再以工作人员身份回复。"}
-              </div>
-              {messageDraft.pending && (
-                <p className="tennis-note is-warning" role="status">
-                  上一条消息的结果尚待核实。原文、会话和
-                  {messageDraft.pending.context.orderId
-                    ? `订单 ${messageDraft.pending.context.orderId.slice(0, 8)} 的`
-                    : "页面"}
-                  上下文已保留；重试仍使用原消息编号，不会改为当前页面的另一笔订单。
-                </p>
-              )}
+                  ? "工作人员正在处理，AI 已暂停。"
+                  : "接管会话后即可回复。"}
+              </div>}
               <div style={{ marginBottom: 12 }}>
-                <p className="tennis-muted">常用提问 · 点击填入后可编辑，不会自动发送</p>
+                <p className="tennis-muted">常用提问 <InfoHint label="常用提问说明">点击后填入消息框，可以修改后再发送。</InfoHint></p>
                 <div className="tennis-actions" style={{ marginTop: 8 }}>
                   {suggestions.map((question) => (
                     <button

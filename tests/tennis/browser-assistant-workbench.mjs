@@ -1,5 +1,6 @@
 import { chromium, expect } from "@playwright/test";
 import fs from "node:fs/promises";
+import { reserveSyntheticPhone } from "./browser-fixtures.mjs";
 
 // Model replies are synthetic browser fixtures. The calendar, guest booking and
 // order reads use the isolated local demo API. No model provider/payment is called.
@@ -46,7 +47,8 @@ try {
   const { context, page, state } = await setup({ width: 1440, height: 900 });
   const day = page.locator(`[data-schedule-date="${date}"]`);
   await day.getByRole("button", { name: "1 号场 09:00 添加预订", exact: true }).click();
-  await page.getByLabel("称呼", { exact: true }).fill("助手流程合成客户");
+  await page.getByLabel("姓名", { exact: true }).fill("助手流程合成客户");
+  await page.getByLabel("手机号", { exact: true }).fill(reserveSyntheticPhone());
   await page.getByRole("button", { name: "打开 AI 助手", exact: true }).click();
   const assistant = page.getByRole("complementary", { name: "AI 助手", exact: true });
   await expect(assistant.getByText(/已选 1 条时段/)).toBeVisible();
@@ -57,7 +59,7 @@ try {
   expect(state.sent[0].context).toMatchObject({ page: "booking", date, viewDays: 3 });
   expect(state.sent[0].context.selection).toHaveLength(1);
   await expect(page.locator(".tennis-selection")).toHaveCount(1);
-  await expect(page.getByLabel("称呼", { exact: true })).toHaveValue("助手流程合成客户");
+  await expect(page.getByLabel("姓名", { exact: true })).toHaveValue("助手流程合成客户");
   console.log("PASS automatic conversation, live calendar context, preparation preserves customer and does not duplicate slots");
 
   await expect(assistant).toBeVisible();
@@ -81,7 +83,7 @@ try {
   await assistant.getByLabel("后台助手消息", { exact: true }).fill("把第一条明细顺延一天，客户希望顺延一天");
   await assistant.getByRole("button", { name: "发送", exact: true }).click();
   await assistant.getByRole("button", { name: "准备改期 / 改场", exact: true }).click();
-  await expect(dialog.getByText("助手已准备办理内容，请核对后确认；尚未提交业务操作。", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("助手已填好，尚未提交。请核对后确认。", { exact: true })).toBeVisible();
   await expect(dialog.locator('input[type="date"]').first()).toHaveValue(`${date.slice(0, 8)}06`);
   const after = await (await page.request.get(`/api/tennis/orders/${order.id}`)).json();
   expect(after.revision).toBe(order.revision);

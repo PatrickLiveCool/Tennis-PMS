@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { isCourtReadyForBooking } from "../../../domain/src/tennis-court-profile.ts";
 import { TenantAccessError } from "./access.ts";
 import {
   expireVenueHolds,
@@ -8,7 +9,7 @@ import {
   type OrderRecord,
   type OrderLine,
 } from "./booking.ts";
-import { listVenues, venueInTransaction, type CourtRecord, type VenueRecord } from "./catalog.ts";
+import { courtColumns, listVenues, venueInTransaction, type CourtRecord, type VenueRecord } from "./catalog.ts";
 import { isCustomerActor, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { refundableLines } from "./refunds.ts";
 
@@ -56,12 +57,11 @@ export async function accessibleCourts(db: pg.Pool, actor: BookingActor, venueId
     await requireBookingVenue(tx, actor, venueId, "read");
     return (
       await tx.query<CourtRecord>(
-        `SELECT id,tenant_id AS "tenantId",venue_id AS "venueId",name,active,indoor,surface,
-      hourly_price_cents::float8 AS "hourlyPriceCents",revision FROM tennis.courts
+        `SELECT ${courtColumns} FROM tennis.courts
       WHERE tenant_id=$1 AND venue_id=$2 AND ($3 OR active) ORDER BY name,id`,
         [actor.tenantId, venueId, !isCustomerActor(actor)],
       )
-    ).rows;
+    ).rows.filter((court) => !isCustomerActor(actor) || isCourtReadyForBooking(court));
   });
 }
 export async function venueSchedule(db: pg.Pool, actor: BookingActor, venueId: string, date: string) {
@@ -72,11 +72,11 @@ export async function venueSchedule(db: pg.Pool, actor: BookingActor, venueId: s
     const range = venueDayRange(date, venue.timezone);
     const courts = (
       await tx.query<CourtRecord>(
-        `SELECT id,tenant_id AS "tenantId",venue_id AS "venueId",name,active,indoor,surface,hourly_price_cents::float8 AS "hourlyPriceCents",revision
+        `SELECT ${courtColumns}
       FROM tennis.courts WHERE tenant_id=$1 AND venue_id=$2 AND ($3 OR active) ORDER BY name,id`,
         [actor.tenantId, venueId, !isCustomerActor(actor)],
       )
-    ).rows;
+    ).rows.filter((court) => !isCustomerActor(actor) || isCourtReadyForBooking(court));
     const rows = (
       await tx.query<{
         id: string;

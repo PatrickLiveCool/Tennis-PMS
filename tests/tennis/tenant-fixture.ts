@@ -6,6 +6,13 @@ export interface TenantFixture {
   actor: TenantActor;
   venueId: string;
 }
+
+let phoneSequence = 0;
+/** Unique within a test worker; only used for synthetic customers in tennis_test. */
+export function syntheticPhone(): string {
+  return `199${String(++phoneSequence).padStart(8, "0")}`;
+}
+
 export async function seedTenantFixture(db: pg.Pool): Promise<TenantFixture> {
   const actor = { tenantId: randomUUID(), subjectId: randomUUID() };
   const venueId = randomUUID();

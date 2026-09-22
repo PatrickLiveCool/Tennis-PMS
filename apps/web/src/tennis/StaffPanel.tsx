@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { InfoHint } from "./InfoHint";
 import type { TennisApi } from "./api";
 import type { VenueRecord } from "./types";
 import type { StaffView } from "../../../../packages/db/src/tennis/auth";
@@ -6,11 +7,11 @@ import { ErrorNotice, Modal, Panel, useLoad } from "./components";
 const permissionNames: Record<string, string> = {
   read: "查看",
   book: "预订",
-  manage_assets: "资产管理",
+  manage_assets: "场地管理",
   manage_prices: "定价",
   refund: "退款",
   hold_unpaid: "保留未付款",
-  manage_members: "客户与余额",
+  manage_members: "会员储值",
 };
 export function StaffPanel({ api }: { api: TennisApi }) {
   const staff = useLoad(() => api<StaffView[]>("/staff"), [api]);
@@ -18,7 +19,7 @@ export function StaffPanel({ api }: { api: TennisApi }) {
   const [edit, setEdit] = useState<StaffView | "new" | null>(null);
   return (
     <Panel
-      title="员工身份与权限"
+      title="员工与权限"
       action={
         <button className="button button-primary" onClick={() => setEdit("new")}>
           新增员工
@@ -117,6 +118,7 @@ function StaffEditor({
               登录账号
               <input
                 autoComplete="off"
+                placeholder="如 frontdesk01"
                 value={draft.username}
                 onChange={(e) => setDraft({ ...draft, username: e.target.value })}
                 required
@@ -136,6 +138,7 @@ function StaffEditor({
               <input
                 type="password"
                 autoComplete="new-password"
+                placeholder="至少 12 位"
                 minLength={12}
                 maxLength={256}
                 value={draft.password}
@@ -159,7 +162,7 @@ function StaffEditor({
           >
             <option value="STAFF">工作人员</option>
             <option value="VIEWER">只读查看</option>
-            <option value="ADMIN">租户管理员</option>
+            <option value="ADMIN">管理员</option>
           </select>
         </label>
         {draft.role === "STAFF" && (
@@ -224,12 +227,15 @@ function StaffEditor({
           />
           账号启用
         </label>
-        <p className="tennis-muted">
-          管理员可以管理本租户全部业务；只读角色不能执行交易。变更生效后，员工需刷新工作空间。
-        </p>
-        <button className="button button-primary" disabled={busy}>
-          保存员工权限
-        </button>
+        {draft.role === "ADMIN" && <p className="tennis-note">管理员可以管理全部业务，包括员工权限、收款和退款。</p>}
+        {draft.role === "VIEWER" && <p className="tennis-muted">只读账号只能查看，不能办理预订、收款或退款。</p>}
+        {!draft.active && <p className="tennis-note">停用后，该员工将无法进入当前商家的工作台。</p>}
+        <div className="tennis-actions">
+          <button className="button button-primary" disabled={busy}>
+            保存员工权限
+          </button>
+          <InfoHint label="权限生效说明">保存后，请员工刷新页面以使用最新权限。</InfoHint>
+        </div>
       </form>
     </Modal>
   );

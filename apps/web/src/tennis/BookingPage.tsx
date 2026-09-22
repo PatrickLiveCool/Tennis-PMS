@@ -1,3 +1,5 @@
+import { matchesCourtFilter, isCourtReadyForBooking } from "../../../../packages/domain/src/tennis-court-profile";
+import { parseBookingPhone, invalidGuestPhoneMessage } from "../../../../packages/domain/src/customer-contact";
 import type { BackofficeAction } from "../../../../packages/db/src/tennis/backoffice-assistant";
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import {
@@ -7,13 +9,14 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  HelpCircle,
 } from "lucide-react";
 import type { TennisApi } from "./api";
 import { isWithinOpeningHours } from "../../../../packages/domain/src/tennis-pricing";
 import { OccupancyPanel } from "./OccupancyPanel";
 import { BookingCustomer, type GuestDraft } from "./BookingCustomer";
+import { InfoHint } from "./InfoHint";
 import { ScheduleBoard } from "./ScheduleBoard";
+import { ScheduleDatePicker } from "./ScheduleDatePicker";
 import { shiftDate, useScheduleRange } from "./useScheduleRange";
 import { appendSelection } from "./selection";
 import type {
@@ -139,10 +142,16 @@ export function BookingPage({
         range.days[dateValue(new Date(line.startAt), venue.timezone)];
       if (!snapshot) return "";
       const court = snapshot.courts.find((item) => item.id === line.courtId);
+      // Customer discovery omits incomplete profiles. An issued quote can still
+      // be confirmed; the confirmation endpoint rechecks current availability.
+      if (!court && draft.quote && session.kind === "customer" && snapshot.venue.active)
+        return Date.parse(line.startAt) <= now ? "开始时间已到，请调整时段。" : "";
       if (!court || !court.active || !snapshot?.venue.active)
         return "球场或场馆已停用，请移除此时段或更换球场。";
       if (court.hourlyPriceCents === null)
         return "球场尚未配置价格，请先核对价目。";
+      if (!draft.quote && !isCourtReadyForBooking(court))
+        return "球场必填资料尚未补齐，请先到场地与定价中完善。";
       if (Date.parse(line.startAt) <= now) return "开始时间已到，请调整时段。";
       if (
         selectedSchedules.some((item) =>
@@ -175,7 +184,7 @@ export function BookingPage({
         return "该时长低于当前最短可售时长，请调整。";
       return "";
     });
-  }, [selectedSchedules, range.days, draft.lines, now, venue.timezone]);
+  }, [selectedSchedules, range.days, draft.lines, draft.quote, now, venue.timezone, session.kind]);
   const issuesKey = selectionIssues.join("|");
   const hasSelectionIssues = selectionIssues.some(Boolean);
   const pendingConfirmation = pendingCommands(scope).some((item) =>
@@ -194,10 +203,11 @@ export function BookingPage({
     return () => clearInterval(timer);
   }, [draft.quote?.id]);
   useEffect(() => {
-    if (schedule.data && !schedule.data.courts.some((c) => c.id === courtId))
-      setCourtId(schedule.data.courts.find((c) => c.active)?.id ?? "");
+    if (schedule.data && !schedule.data.courts.some((c) => c.id === courtId && c.active && isCourtReadyForBooking(c)))
+      setCourtId(schedule.data.courts.find((c) => c.active && isCourtReadyForBooking(c))?.id ?? "");
   }, [schedule.data, courtId]);
   useLayoutEffect(() => {
+    if (!schedule.data?.courts.length) return;
     try {
       const saved = JSON.parse(
         sessionStorage.getItem(gridStorageKey) ?? "null",
@@ -216,7 +226,7 @@ export function BookingPage({
   const canBook = session.kind === "customer" || permits(session, "book");
   const courts = schedule.data?.courts ?? [];
   const visibleCourts = courts.filter(
-    (c) => filter === "all" || (filter === "clay" ? c.surface === "CLAY" : filter === "indoor" ? c.indoor : !c.indoor),
+    (c) => c.active && matchesCourtFilter(c, filter),
   );
   const windows = venue.openingHours.filter((w) =>
     visibleDates.some(
@@ -243,6 +253,7 @@ export function BookingPage({
     selectionVersion.current++;
     setDraft((current) => ({ ...current, ...patch, quote: null }));
     setError(undefined);
+    command.setError(undefined);
   }
   function navigate(date: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
@@ -251,6 +262,7 @@ export function BookingPage({
   }
   function addLines(lines: SelectionLine[]) {
     try {
+      requireCompleteCourts(lines);
       update({ lines: appendSelection(draft.lines, lines) });
       if (lines[0])
         setManualDate(dateValue(new Date(lines[0].startAt), venue.timezone));
@@ -262,6 +274,7 @@ export function BookingPage({
   }
   function resizeLine(index: number, line: SelectionLine) {
     try {
+      requireCompleteCourts([line]);
       appendSelection(
         draft.lines.filter((_, i) => i !== index),
         [line],
@@ -271,6 +284,14 @@ export function BookingPage({
       });
     } catch (next) {
       setError(next);
+    }
+  }
+  function requireCompleteCourts(lines: SelectionLine[]) {
+    for (const line of lines) {
+      const court = courts.find((item) => item.id === line.courtId);
+      if (!court?.active) throw new Error("所选球场暂不可预订，请重新选择。");
+      if (!isCourtReadyForBooking(court))
+        throw new Error(`${court.name} 的必填资料尚未补齐，本次选区未添加。请先完善资料或调整选区。`);
     }
   }
   function addLine(id: string, minute: number) {
@@ -288,7 +309,7 @@ export function BookingPage({
             l.endAt > line.startAt,
         )
       )
-        throw new Error("这片球场已在所选明细中，请调整时间或移除原明细。");
+        throw new Error("这个时段已经选过了，请调整时间。");
       addLines([line]);
     } catch (next) {
       setError(next);
@@ -297,16 +318,16 @@ export function BookingPage({
   function moveDate(days: number) {
     navigate(shiftDate(draft.date, days));
   }
-  const pendingNow = useRef(false);
-  function goNow() {
-    pendingNow.current = true;
+  const pendingToday = useRef(false);
+  function goToday() {
+    pendingToday.current = true;
     navigate(dateValue(new Date(), venue.timezone));
   }
   useLayoutEffect(() => {
-    if (!pendingNow.current || !schedule.data || !gridRef.current) return;
+    if (!pendingToday.current || !schedule.data || !gridRef.current) return;
     gridRef.current.scrollLeft = 0;
     gridRef.current.scrollTop = 0;
-    pendingNow.current = false;
+    pendingToday.current = false;
   });
   useEffect(() => {
     const apply = (event?: Event) => {
@@ -334,7 +355,7 @@ export function BookingPage({
     ) {
       setError(
         new Error(
-          "有一笔预订提交结果待核实，请先查询原操作结果，再建立新报价。",
+          "上一笔预订还没确认结果，请先查看办理结果。",
         ),
       );
       return;
@@ -344,10 +365,13 @@ export function BookingPage({
     setError(undefined);
     try {
       let customer = draft.customer;
-      if (!customer && !session.customerId) {
-        if (!guest.nickname.trim())
-          throw new Error("请填写预订人称呼，或选择已有客户。");
-        const payload = { nickname: guest.nickname, phone: guest.phone };
+      if (!session.customerId && (!customer || !customer.phone && !customer.hasContact)) {
+        if (!customer && !guest.nickname.trim())
+          throw new Error("请填写预订人姓名，或选择已有客户。");
+        if (!guest.phone.trim()) throw new Error("请填写预订人手机号。");
+        if (parseBookingPhone(guest.phone) === undefined) throw new Error(invalidGuestPhoneMessage);
+        const contactCustomerId = customer?.id;
+        const payload = contactCustomerId ? { customerId: contactCustomerId, phone: guest.phone } : { nickname: guest.nickname, phone: guest.phone };
         const pending = pendingCommands(scope).find(
           (p) => p.intent === "booking.customer",
         );
@@ -361,10 +385,10 @@ export function BookingPage({
           receipt?.result ??
           (await command.execute("booking.customer", payload, (key) =>
             api<{ customer: CustomerRecord }>(
-              `/venues/${venue.id}/booking-customers`,
+              `/venues/${venue.id}/booking-customers${contactCustomerId ? `/${contactCustomerId}/contact` : ""}`,
               "POST",
               {
-                ...payload,
+                ...(contactCustomerId ? { phone: guest.phone } : { nickname: guest.nickname, phone: guest.phone }),
                 commandKey: key,
               },
             ),
@@ -435,46 +459,31 @@ export function BookingPage({
     }
   }
   const quoteExpired = draft.quote && Date.parse(draft.quote.expiresAt) <= now;
+  const heldOrderCount = new Set(
+    visibleDates.flatMap((date) => range.days[date]?.occupancies
+      .filter((occupancy) => occupancy.status === "HELD" && occupancy.orderId)
+      .map((occupancy) => occupancy.orderId) ?? []),
+  ).size;
+  const dateNavigation = (
+    <div className="tennis-grid-date-navigation" role="group" aria-label="排场日期导航">
+      <ScheduleDatePicker value={draft.date} onChange={navigate} today={dateValue(new Date(now), venue.timezone)} />
+      <button type="button" className="tennis-grid-date-previous"
+        aria-label={`向前 ${viewDays} 天`} title={`向前 ${viewDays} 天`} onClick={() => moveDate(-viewDays)}>
+        <ChevronLeft size={15} aria-hidden="true" />
+      </button>
+      <button type="button" className="tennis-grid-today" onClick={goToday}>今天</button>
+      <button type="button" className="tennis-grid-date-next"
+        aria-label={`向后 ${viewDays} 天`} title={`向后 ${viewDays} 天`} onClick={() => moveDate(viewDays)}>
+        <ChevronRight size={15} aria-hidden="true" />
+      </button>
+    </div>
+  );
   return (
     <>
-      <h1 className="sr-only" tabIndex={-1}>
-        场地排期
-      </h1>
       <div className="tennis-schedule-toolbar">
-        <div className="tennis-date-switch">
-          <button
-            className="icon-button"
-            aria-label={`向前 ${viewDays} 天`}
-            title={`向前 ${viewDays} 天`}
-            onClick={() => moveDate(-viewDays)}
-          >
-            <ChevronLeft size={17} />
-          </button>
-          <label>
-            <span className="sr-only">排场日期</span>
-            <input
-              type="date"
-              value={draft.date}
-              onChange={(e) => navigate(e.target.value)}
-            />
-          </label>
-          <button
-            className="icon-button"
-            aria-label={`向后 ${viewDays} 天`}
-            title={`向后 ${viewDays} 天`}
-            onClick={() => moveDate(viewDays)}
-          >
-            <ChevronRight size={17} />
-          </button>
-          <button
-            className="button button-secondary"
-            onClick={() => navigate(dateValue(new Date(), venue.timezone))}
-          >
-            今天
-          </button>
-          <button className="button button-secondary" onClick={goNow}>
-            现在
-          </button>
+        <div className="tennis-schedule-title">
+          <h1 tabIndex={-1}>场地排期</h1>
+          <span>{visibleCourts.length} 片球场</span>
         </div>
         <div className="tennis-schedule-controls">
           <div
@@ -503,6 +512,7 @@ export function BookingPage({
               <option value="all">全部球场</option>
               <option value="indoor">室内球场</option>
               <option value="outdoor">室外球场</option>
+              <option value="covered">有顶棚球场</option>
               <option value="clay">红土场</option>
             </select>
           </label>
@@ -528,19 +538,18 @@ export function BookingPage({
         </div>
       </div>
       <div className="tennis-schedule-meta">
-        <span>
-          {visibleCourts.length} 片球场 ·{" "}
-          {
-            new Set(
-              visibleDates.flatMap(
-                (date) =>
-                  range.days[date]?.occupancies
-                    .filter((o) => o.status === "HELD")
-                    .map((o) => o.orderId) ?? [],
-              ),
-            ).size
-          }{" "}
-          笔待付款
+        <div className="tennis-legend">
+          <span className="is-free">可预订</span>
+          <span className="is-held">待付款</span>
+          <span className="is-booked">已预订</span>
+          <span className="is-course">课程</span>
+          <span className="is-maintenance">维护</span>
+          <InfoHint label="排场操作帮助">
+            点击空场选 1 小时，拖动可同时选多片。点已选时段可取消，拖边缘可调整时长；Esc 取消拖动。不同日期分别选，确认预订后才占场。
+          </InfoHint>
+        </div>
+        <div className="tennis-schedule-status">
+          {heldOrderCount > 0 && <span className="tennis-pending-count">{heldOrderCount} 笔待付款</span>}
           <span
             className={`tennis-sync-status ${range.error ? "is-error" : ""}`}
             role="status"
@@ -553,22 +562,6 @@ export function BookingPage({
                   ? "待更新"
                   : "已同步"}
           </span>
-        </span>
-        <div className="tennis-legend">
-          <span className="is-free">可预订</span>
-          <span className="is-held">待付款</span>
-          <span className="is-booked">已预订</span>
-          <span className="is-course">课程 / 维护</span>
-          <details className="tennis-schedule-help">
-            <summary aria-label="排场操作帮助" title="排场操作帮助">
-              <HelpCircle size={14} />
-            </summary>
-            <p>
-              点击空场选 1
-              小时，拖动可选同日多片。点击已选块取消，拖边缘调整，Esc
-              放弃拖动。跨日请分别选择，草稿不会占场。
-            </p>
-          </details>
         </div>
       </div>
       <ErrorNotice
@@ -578,47 +571,46 @@ export function BookingPage({
       {hasSelectionIssues && (
         <p className="tennis-note is-warning" role="status">
           {pendingConfirmation
-            ? "原预订提交结果尚待核实，请先查询原操作。"
-            : "已选时段需要调整，原报价已失效。"}
-          预订人和明细已保留，请按下方提示核对。
+            ? "上一笔预订结果待确认，请先查看办理结果。"
+            : "所选时段有变化，请调整后重新核价。"}
         </p>
       )}
       <div className={`tennis-booking-layout ${sideOpen ? "has-draft" : ""}`}>
         <section className="tennis-panel tennis-schedule-panel">
-          {!schedule.data && schedule.busy ? (
-            <LoadingBlock />
-          ) : !schedule.data ? (
-            <EmptyState
-              title="排场暂时不可用"
-              detail="请重新读取当前场馆排期。"
-            />
-          ) : courts.length === 0 ? (
-            <EmptyState
-              title="还没有球场"
-              detail="请先在场地与定价中添加球场、营业时间和小时价格。"
-            />
-          ) : (
-            <>
-              <ScheduleBoard
-                dates={visibleDates}
-                days={range.days}
-                ticks={ticks}
-                filter={filter}
-                lines={draft.lines}
-                disabled={!canBook || command.busy || pendingConfirmation}
-                scrollRef={gridRef}
-                storageKey={gridStorageKey}
-                timezone={venue.timezone}
-                onAdd={addLines}
-                onRemove={(index) =>
-                  update({ lines: draft.lines.filter((_, i) => i !== index) })
-                }
-                onResize={resizeLine}
-                openOrder={openOrder}
-                issues={selectionIssues}
-              />
-            </>
-          )}
+          <ScheduleBoard
+            dateNavigation={dateNavigation}
+            emptyState={
+              !schedule.data && schedule.busy ? (
+                <LoadingBlock />
+              ) : !schedule.data ? (
+                <EmptyState
+                  title="排场暂时不可用"
+                  detail="请重新读取当前场馆排期。"
+                />
+              ) : !courts.some((court) => court.active) ? (
+                <EmptyState
+                  title={session.kind === "customer" ? "暂无可预订球场" : "暂无启用球场"}
+                  detail={session.kind === "customer" ? "请稍后再来查看。" : "请先在场地与定价中添加或启用球场。"}
+                />
+              ) : undefined
+            }
+            dates={visibleDates}
+            days={range.days}
+            ticks={ticks}
+            filter={filter}
+            lines={draft.lines}
+            disabled={!canBook || command.busy || pendingConfirmation}
+            scrollRef={gridRef}
+            storageKey={gridStorageKey}
+            timezone={venue.timezone}
+            onAdd={addLines}
+            onRemove={(index) =>
+              update({ lines: draft.lines.filter((_, i) => i !== index) })
+            }
+            onResize={resizeLine}
+            openOrder={openOrder}
+            issues={selectionIssues}
+          />
         </section>
         {sideOpen && (
           <aside className="tennis-booking-side" aria-label="预订草稿">
@@ -636,7 +628,7 @@ export function BookingPage({
               <ErrorNotice error={error ?? command.error} />
               {stale && schedule.data && (
                 <p className="tennis-note">
-                  排场状态待更新，已保留输入；更新成功后可继续提交。
+                  排场还没更新，请刷新后再提交。
                 </p>
               )}
               {session.kind !== "customer" && (
@@ -682,7 +674,7 @@ export function BookingPage({
                           disabled={!canBook}
                         >
                           {courts
-                            .filter((c) => c.active)
+                            .filter((c) => c.active && isCourtReadyForBooking(c))
                             .map((c) => (
                               <option key={c.id} value={c.id}>
                                 {c.name}
@@ -735,8 +727,8 @@ export function BookingPage({
                       </button>
                     </div>
                     <p className="tennis-muted">
-                      最短可售 {venue.minimumBookingMinutes ?? "未设置"}{" "}
-                      分钟。增加明细可预订其他时间，空档不会占用。
+                      最少订 {venue.minimumBookingMinutes ?? "未设置"} 分钟
+                      <InfoHint label="预订时段说明">可以继续添加其他球场或日期，只预订你选中的时段。</InfoHint>
                     </p>
                   </details>
                 </>
@@ -783,7 +775,7 @@ export function BookingPage({
                   ))
                 ) : (
                   <div className="tennis-selection-empty">
-                    从排场表点击或框选，也可展开按时间添加。
+                    请先选球场和时间。
                   </div>
                 )}
               </div>
@@ -840,8 +832,8 @@ export function BookingPage({
                     className={`tennis-note ${quoteExpired ? "is-warning" : ""}`}
                   >
                     {quoteExpired
-                      ? "报价已过期，请重新获取。"
-                      : `报价保留至 ${clock(draft.quote.expiresAt, venue.timezone)}；确认后锁场待付款 ${draft.quote.paymentHoldMinutes ?? 10} 分钟。`}
+                      ? "报价已过期，请返回重新核价。"
+                      : `报价有效至 ${clock(draft.quote.expiresAt, venue.timezone)}，确认后请在 ${draft.quote.paymentHoldMinutes ?? 10} 分钟内付款。`}
                   </p>
                   {permits(session, "hold_unpaid") && (
                     <details className="tennis-advanced">
@@ -888,7 +880,7 @@ export function BookingPage({
                             />
                           </label>
                           <p className="tennis-muted">
-                            保留预约仍为未付款，不会登记收款。
+                            这里只延长付款期限，订单仍是未付款。
                           </p>
                         </div>
                       )}
@@ -934,7 +926,8 @@ export function BookingPage({
                     !draft.lines.length ||
                     (!draft.customer &&
                       !session.customerId &&
-                      !guest.nickname.trim())
+                      !guest.nickname.trim()) ||
+                    (!session.customerId && (!draft.customer || !draft.customer.phone && !draft.customer.hasContact) && !parseBookingPhone(guest.phone))
                   }
                 >
                   {quoteBusy ? "正在核对场地与价格…" : "核对场地与报价"}

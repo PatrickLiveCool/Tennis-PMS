@@ -1,0 +1,117 @@
+.tennis-schedule-date-control {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--tennis-header-hour-tick, #79a68e);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 2px #285e4b0d;
+}
+.tennis-schedule-date-control:hover { border-color: var(--brand, #26734d); }
+.tennis-schedule-date-control:focus-within { outline: 2px solid var(--brand, #26734d); outline-offset: 1px; }
+.tennis-grid-date-picker .tennis-schedule-date-input {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 0 2px 5px;
+  border: 0;
+  border-radius: 4px 0 0 4px;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--tennis-header-text, #285e4b);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tennis-grid-date-picker .tennis-schedule-date-input:focus-visible { outline: none; }
+.tennis-grid-date-picker .tennis-schedule-date-input[aria-invalid="true"] { color: var(--danger, #a33636); }
+.tennis-grid-date-picker .tennis-schedule-date-trigger {
+  display: inline-flex;
+  flex: 0 0 25px;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  min-height: 24px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+  color: var(--tennis-header-text, #285e4b);
+  cursor: pointer;
+}
+.tennis-grid-date-picker .tennis-schedule-date-trigger:hover { background: var(--brand-soft, #e8f3ed); }
+.tennis-grid-date-picker .tennis-schedule-date-trigger:focus-visible { outline: 2px solid var(--brand, #26734d); outline-offset: -2px; }
+.tennis-schedule-calendar {
+  position: fixed;
+  z-index: 120;
+  box-sizing: border-box;
+  width: min(336px, calc(100vw - 8px));
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border, #d7e0d9);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text, #17201b);
+  box-shadow: 0 8px 28px #17201b24, 0 2px 6px #17201b0c;
+  font-size: 12px;
+}
+.tennis-schedule-calendar-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 2px; }
+.tennis-schedule-calendar-heading strong { font-size: 13px; font-weight: 650; }
+.tennis-schedule-calendar-heading button {
+  display: inline-flex;
+  width: 36px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.tennis-schedule-calendar-heading button:hover:not(:disabled) { background: var(--surface-muted, #f1f5f2); }
+.tennis-schedule-calendar-heading button:disabled { opacity: .35; cursor: default; }
+.tennis-schedule-calendar-grid { width: 100%; table-layout: fixed; border-collapse: collapse; border: 0; margin: 0; }
+.tennis-schedule-calendar-grid th,
+.tennis-schedule-calendar-grid td { padding: 0; border: 0; background: transparent; text-align: center; }
+.tennis-schedule-calendar-grid th { height: 24px; color: var(--muted, #536159); font-size: 11px; font-weight: 500; }
+.tennis-schedule-calendar-grid .tennis-schedule-calendar-day {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.tennis-schedule-calendar-grid .tennis-schedule-calendar-day.is-outside { color: var(--muted, #536159); opacity: .65; }
+.tennis-schedule-calendar-grid .tennis-schedule-calendar-day:hover { background: var(--brand-soft, #e8f3ed); opacity: 1; }
+.tennis-schedule-calendar-grid .tennis-schedule-calendar-day.is-today { font-weight: 750; }
+.tennis-schedule-calendar-day.is-today::after { content: ""; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--brand, #26734d); }
+.tennis-schedule-calendar-grid .tennis-schedule-calendar-day.is-selected { background: var(--brand, #26734d); color: #fff; opacity: 1; font-weight: 700; }
+.tennis-schedule-calendar-day.is-selected.is-today::after { background: #fff; }
+.tennis-schedule-calendar button:focus-visible { outline: 2px solid var(--brand, #26734d); outline-offset: -2px; }
+.tennis-schedule-calendar-grid .tennis-schedule-calendar-day.is-selected:focus-visible { outline-color: #fff; box-shadow: inset 0 0 0 3px var(--brand, #26734d); }
+.tennis-schedule-calendar-error { margin: 0; padding: 3px 6px 5px; color: var(--danger, #a33636); font-size: 11px; }
+@media (max-width: 640px), (pointer: coarse) {
+  .tennis-grid-date-picker .tennis-schedule-date-input { min-height: 42px; font-size: 16px; }
+  .tennis-grid-date-picker .tennis-schedule-date-trigger { flex-basis: 44px; width: 44px; min-height: 42px; }
+  .tennis-schedule-calendar { padding: 1px; }
+  .tennis-schedule-calendar-heading button { width: 44px; height: 44px; }
+  .tennis-schedule-calendar-grid .tennis-schedule-calendar-day { height: 44px; font-size: 13px; }
+}

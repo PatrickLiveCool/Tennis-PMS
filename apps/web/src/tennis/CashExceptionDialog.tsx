@@ -70,7 +70,7 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
   const detail = useLoad(async () => {
     const result = await api<CashException>(`/cash-exceptions/${encodeURIComponent(exceptionId)}`);
     if (!result || result.id !== exceptionId || result.tenantId !== session.tenantId || result.venueId !== venue.id)
-      throw new Error("实收记录尚未核实，请重新读取原记录。");
+      throw new Error("未能核实这笔收款，请刷新后重试。");
     return result;
   }, [api, exceptionId, session.tenantId, venue.id]);
   useEffect(() => {
@@ -121,8 +121,8 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
       command.setError(undefined);
       setNotice(
         checked.length
-          ? "已查询原记录，尚未确认提交完成。保留原输入，可使用原操作编号重试。"
-          : "已重新核对原实收和退款记录，请以当前状态为准。",
+          ? "结果尚未确认，可以重试这笔申请。已保留你的填写内容。"
+          : "收款和退款进度已更新。",
       );
       await onChanged();
     } catch (next) {
@@ -159,7 +159,7 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
     );
     if (result && mounted.current) {
       setReason("");
-      await changed("原额退款已申请，等待原支付渠道确认；申请成功不代表已退款。");
+      await changed("退款已申请，尚未到账，请继续核对退款进度。");
     }
   }
   async function retryRefund() {
@@ -196,7 +196,7 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
           <RefreshButton busy={busy} onClick={() => void recover()} />
           {pending.length > 0 && (
             <button type="button" className="button button-secondary" disabled={busy} onClick={() => void recover()}>
-              核对原操作
+              核对申请结果
             </button>
           )}
         </div>
@@ -208,11 +208,11 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
         )}
         {pending.length > 0 && (
           <p className="tennis-note is-warning">
-            有提交结果尚未核实，请先查询原实收和退款记录。原操作编号与输入已保留。
+            上一笔申请的结果尚未确认，请先核对。填写内容已保留。
           </p>
         )}
         {stale && record && (
-          <p className="tennis-note is-warning">读取未完成，以下为上次记录；重新核对成功后才能继续退款。</p>
+          <p className="tennis-note is-warning">刷新失败，以下为上次记录。核对成功后才能继续退款。</p>
         )}
         {!record ? (
           detail.busy ? (
@@ -221,7 +221,7 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
         ) : (
           <>
             <p className="tennis-note">
-              这笔实收未用于完成预订或增加充值余额，仅按原到账金额退回原支付来源，不改变会员余额或球场占用。
+              这笔款项未完成预订或计入充值余额，退款将按到账金额原路退回。客户余额和原预约不变。
             </p>
             {record.provider === "MOCK" && (
               <p className="tennis-note is-warning">当前为本地模拟记录，不会发生真实退款。</p>
@@ -238,15 +238,18 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
                 来源：{record.sourceKind === "ORDER" ? "预订付款" : "会员充值"} ·{" "}
                 {dateTime(record.createdAt, venue.timezone)}
               </p>
-              <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-                原付款编号：<code>{record.sourceId}</code>
-              </p>
-              <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-                原商户：<code>{record.merchantId}</code>
-              </p>
-              <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-                原渠道流水：<code>{record.transactionId}</code>
-              </p>
+              <details>
+                <summary>查看收款凭据</summary>
+                <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
+                  付款编号：<code>{record.sourceId}</code>
+                </p>
+                <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
+                  收款商户：<code>{record.merchantId}</code>
+                </p>
+                <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
+                  支付流水：<code>{record.transactionId}</code>
+                </p>
+              </details>
               {record.orderId && (
                 <button
                   type="button"
@@ -266,18 +269,21 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
                 </div>
                 <Badge value={refund.status} />
                 <p>{refund.reason}</p>
-                <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-                  退款编号：<code>{refund.id}</code>
-                </p>
                 <p className="tennis-muted">
                   发起于 {dateTime(refund.createdAt, venue.timezone)}
                   {refund.completedAt ? ` · 完成于 ${dateTime(refund.completedAt, venue.timezone)}` : ""}
                 </p>
-                {refund.providerRefundId && (
+                <details>
+                  <summary>查看退款凭据</summary>
                   <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
-                    渠道退款流水：<code>{refund.providerRefundId}</code>
+                    退款编号：<code>{refund.id}</code>
                   </p>
-                )}
+                  {refund.providerRefundId && (
+                    <p className="tennis-muted" style={{ overflowWrap: "anywhere" }}>
+                      支付平台退款流水：<code>{refund.providerRefundId}</code>
+                    </p>
+                  )}
+                </details>
                 <PaymentChannelPanel
                   api={api}
                   kind="exception-refund"
@@ -333,12 +339,12 @@ function ExceptionDetails({ api, session, venue, scope, exceptionId, onClose, on
                   disabled={busy || stale || unchecked || !reason.trim()}
                   onClick={() => void requestRefund()}
                 >
-                  {pending.length > 0 ? "使用原操作重试退款申请" : `按原额申请退款 ${money(record.amountCents)}`}
+                  {pending.length > 0 ? "重试这笔退款申请" : `按原额申请退款 ${money(record.amountCents)}`}
                 </button>
               </>
             ) : null}
             {!canRefund && (
-              <p className="tennis-muted">当前账号可查看核对记录；发起或重试退款需由有退款权限的员工办理。</p>
+              <p className="tennis-muted">你可以查看记录；退款请联系有退款权限的同事办理。</p>
             )}
           </>
         )}

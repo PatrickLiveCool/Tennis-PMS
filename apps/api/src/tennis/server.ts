@@ -1,3 +1,4 @@
+import { courtAssetProperties, courtPriceSchema } from "./court-schema.ts";
 import { getBookingPolicy, saveBookingPolicy } from "../../../../packages/db/src/tennis/booking-policy.ts";
 import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -33,6 +34,7 @@ import {
 } from "../../../../packages/db/src/tennis/views.ts";
 import {
   createCourt,
+  saveCourt,
   createVenue,
   listDiscounts,
   saveDiscount,
@@ -52,6 +54,7 @@ import {
 import {
   createCustomer,
   registerBookingCustomer,
+  completeBookingCustomerContact,
   isCustomerActor,
   requireCustomer,
   searchCustomers,
@@ -210,10 +213,13 @@ const messages: Record<string, string> = {
   AFFECTED_OCCUPANCIES: "此修改会影响已有预约，请先处理相关预约。",
   DISCOUNT_OVERLAP: "折扣与已有规则重叠，请调整日期、时间或球场范围。",
   PRICE_NOT_CONFIGURED: "请先配置球场单价、营业时间及最短可售时长。",
+  COURT_DETAILS_INCOMPLETE: "请补齐球场名称、小时价格、场地环境、材质和规格后再保存或预订。",
   BELOW_MINIMUM_DURATION: "选择的时长短于场馆最短可售时长。",
   OUTSIDE_OPENING_HOURS: "选择的时间不在营业时段内。",
   IDEMPOTENCY_KEY_REUSED: "该操作编号已用于其他内容，请先核实原操作结果。",
   PHONE_ALREADY_EXISTS: "该手机号已有客户档案，请搜索后选择。",
+  BOOKING_PHONE_REQUIRED: "预订需要有效的中国大陆 11 位手机号，请先补齐预订人手机号。",
+  BOOKING_PHONE_ALREADY_SET: "该客户已登记手机号，预订入口不能替换已有号码，请核对所选客户。",
   INVALID_DATE: "请选择有效日期。",
   INVALID_TOPUP_QUERY: "充值查询条件无效，请检查状态和每页条数。",
   INVALID_TOPUP_CURSOR: "充值列表位置已失效，请返回首页重新查询。",
@@ -482,13 +488,13 @@ export async function buildTennisServer(options: TennisServerOptions) {
     (request, input) => updateVenue(db, staff(request), { ...input, id: params(request).id! }),
   );
   get("/venues/:id/courts", (request) => accessibleCourts(db, actor(request), params(request).id!));
-  write("POST", "/venues/:id/courts", obj({ name, indoor: Type.Boolean(), surface: Type.Optional(Type.Union([Type.Literal("UNSPECIFIED"), Type.Literal("CLAY")])) }), (request, input) =>
+  write("POST", "/venues/:id/courts", obj({ ...courtAssetProperties, hourlyPriceCents: Type.Optional(courtPriceSchema) }), (request, input) =>
     createCourt(db, staff(request), { ...input, venueId: params(request).id! }),
   );
   write(
     "PATCH",
     "/venues/:venueId/courts/:id",
-    obj({ expectedRevision: revision, name, indoor: Type.Boolean(), surface: Type.Optional(Type.Union([Type.Literal("UNSPECIFIED"), Type.Literal("CLAY")])), active: Type.Boolean() }),
+    obj({ expectedRevision: revision, ...courtAssetProperties }),
     (request, input) =>
       updateCourt(db, staff(request), { ...input, id: params(request).id!, venueId: params(request).venueId! }),
   );
@@ -498,6 +504,10 @@ export async function buildTennisServer(options: TennisServerOptions) {
     obj({ expectedRevision: revision, hourlyPriceCents: cents }),
     (request, input) =>
       setCourtPrice(db, staff(request), { ...input, courtId: params(request).id!, venueId: params(request).venueId! }),
+  );
+  write("PATCH", "/venues/:venueId/courts/:id/profile",
+    obj({ expectedRevision: revision, assets: Type.Optional(obj(courtAssetProperties)), hourlyPriceCents: Type.Optional(courtPriceSchema) }),
+    (request, input) => saveCourt(db, staff(request), { ...input, id: params(request).id!, venueId: params(request).venueId! }),
   );
   get("/venues/:id/discounts", (request) => listDiscounts(db, staff(request), params(request).id!));
   const discountRule = obj({
@@ -533,6 +543,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
   write("POST", "/venues/:id/booking-customers",
     obj({ commandKey, nickname: name, phone: Type.Optional(Type.Union([Type.String({ maxLength: 30 }), Type.Null()])) }),
     (request, input) => registerBookingCustomer(db, staff(request), { ...input, venueId: params(request).id! }),
+  );
+  write("POST", "/venues/:id/booking-customers/:customerId/contact",
+    obj({ commandKey, phone: Type.String({ maxLength: 30 }) }),
+    (request, input) => completeBookingCustomerContact(db, staff(request), {
+      ...input, venueId: params(request).id!, customerId: params(request).customerId!,
+    }),
   );
   get("/customers", async (request) => {
     const principal = actor(request);
