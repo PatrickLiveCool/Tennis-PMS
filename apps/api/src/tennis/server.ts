@@ -1,6 +1,7 @@
 import { courtAssetProperties, courtPriceSchema } from "./court-schema.ts";
 import { getBookingPolicy, saveBookingPolicy } from "../../../../packages/db/src/tennis/booking-policy.ts";
 import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
+import { getMemberProfile, listMemberDirectory } from "../../../../packages/db/src/tennis/member-directory.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
@@ -223,6 +224,8 @@ const messages: Record<string, string> = {
   INVALID_DATE: "请选择有效日期。",
   INVALID_TOPUP_QUERY: "充值查询条件无效，请检查状态和每页条数。",
   INVALID_TOPUP_CURSOR: "充值列表位置已失效，请返回首页重新查询。",
+  INVALID_MEMBER_QUERY: "会员查询条件无效，请检查关键词或每页条数。",
+  INVALID_MEMBER_CURSOR: "会员列表位置已失效，请重新查询。",
   INVALID_ORDER_QUERY: "订单查询条件无效，请检查关键词、状态、日期或每页条数。",
   INVALID_ORDER_CURSOR: "订单翻页位置已失效，请返回第一页重试。",
   INVALID_HOLD: "保留预约需要未来的付款截止时间和原因。",
@@ -558,6 +561,8 @@ export async function buildTennisServer(options: TennisServerOptions) {
       ]);
     return searchCustomers(db, principal, query(request).q ?? "");
   });
+  get("/customers/directory", (request) => listMemberDirectory(db, staff(request), request.query));
+  get("/customers/:id", (request) => getMemberProfile(db, staff(request), params(request).id!));
   write(
     "POST",
     "/customers",

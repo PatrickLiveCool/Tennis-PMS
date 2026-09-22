@@ -131,7 +131,7 @@ const navigation = [
   { id: "booking", name: "场地排期", icon: CalendarDays },
   { id: "today", name: "经营概览", icon: LayoutDashboard },
   { id: "orders", name: "预订订单", icon: ClipboardList },
-  { id: "members", name: "会员储值", icon: Users },
+  { id: "members", name: "会员管理", icon: Users },
   { id: "settings", name: "场地与定价", icon: Settings },
 ];
 function Workspace({

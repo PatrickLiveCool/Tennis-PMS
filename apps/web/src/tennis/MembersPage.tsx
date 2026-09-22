@@ -5,7 +5,7 @@ import { Plus, Wallet as WalletIcon } from "lucide-react";
 import type { TennisApi } from "./api";
 import type { CustomerRecord, Session, TopupOffer, TopupPayment, TopupQuote, VenueRecord, Wallet } from "./types";
 import { permits } from "./types";
-import { CustomerPicker } from "./CustomerPicker";
+import { MemberDirectory } from "./MemberDirectory";
 import { PaymentChannelPanel } from "./PaymentChannelPanel";
 import {
   Badge,
@@ -26,19 +26,40 @@ import {
   useLoad,
 } from "./components";
 
-export function MembersPage({
-  api,
-  session,
-  venue,
-  scope,
-}: {
-  api: TennisApi;
-  session: Session;
-  venue: VenueRecord;
-  scope: string;
-}) {
-  const [customer, setCustomer] = useDraft<CustomerRecord | null>(`tennis:member:${scope}`, null);
+type MembersProps = { api: TennisApi; session: Session; venue: VenueRecord; scope: string };
+
+export function MembersPage(props: MembersProps) {
+  return <MemberManagement key={props.scope} {...props} />;
+}
+
+function MemberManagement({ api, session, venue, scope }: MembersProps) {
+  const [customer, setCustomer] = useState<CustomerRecord | null>(null);
+  const [, saveCustomer] = useDraft<CustomerRecord | null>(`tennis:member:${scope}`, null);
+  const [revision, setRevision] = useState(0);
   const customerId = session.customerId ?? customer?.id;
+  return <>
+    <PageHeading title="会员管理">
+      <RefreshButton onClick={() => setRevision((value) => value + 1)} />
+    </PageHeading>
+    <div className="tennis-members-layout">
+      {session.kind !== "customer" && <MemberDirectory api={api} scope={scope} revision={revision}
+        selected={customer} onSelect={(selected) => {
+          setCustomer(selected);
+          if (selected) saveCustomer(selected);
+        }} />}
+      <div className="tennis-member-detail" aria-label="会员详情">
+        {customerId ? <MemberWallet key={customerId} api={api} session={session} venue={venue} scope={scope}
+          customerId={customerId} customer={customer} revision={revision} /> : <Panel>
+          <EmptyState title="会员详情" detail="选择左侧会员，查看资料和账户明细。" />
+        </Panel>}
+      </div>
+    </div>
+  </>;
+}
+
+function MemberWallet({ api, session, venue, scope, customerId, customer, revision }: MembersProps & {
+  customerId: string; customer: CustomerRecord | null; revision: number;
+}) {
   const [historyCursors, setHistoryCursors] = useDraft<string[]>(
     `tennis:wallet-pages:${scope}:${customerId ?? "none"}`,
     [],
@@ -51,7 +72,7 @@ export function MembersPage({
             `/customers/${customerId}/wallet?pageSize=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
           )
         : Promise.resolve(null),
-    [api, customerId, cursor],
+    [api, customerId, cursor, revision],
   );
   const [topupRevision, setTopupRevision] = useState(0);
   const refreshWallet = () => {
@@ -62,131 +83,113 @@ export function MembersPage({
   const [topup, setTopup] = useState(false);
   return (
     <>
-      <PageHeading title="会员储值">
-        <RefreshButton onClick={refreshWallet} busy={wallet.busy} />
-      </PageHeading>
-      <div className="tennis-members-layout">
-        {session.kind !== "customer" && (
-          <Panel title="客户档案">
-            <CustomerPicker
-              api={api}
-              value={customer}
-              onChange={setCustomer}
-              canCreate={permits(session, "manage_members")}
-            />
+      <ErrorNotice error={wallet.error} retry={() => void wallet.refresh()} />
+      {wallet.busy && !wallet.data ? (
+        <LoadingBlock />
+      ) : wallet.data ? (
+        <>
+          <Panel
+            title={customer?.nickname ?? "我的余额"}
+            action={
+              <button className="button button-primary" onClick={() => setTopup(true)}>
+                <Plus size={16} />
+                充值
+              </button>
+            }
+          >
+            {customer && <div className="tennis-member-profile">
+              <span>手机号</span><strong>{customer.phone ?? "未登记"}</strong>
+            </div>}
+            <div className="tennis-balance">
+              <WalletIcon size={22} />
+              <div>
+                <span>可用余额 <InfoHint label="余额使用说明">同一商家的各场馆通用。先使用较早充值的余额，每次按该笔充值的本金和赠送比例扣除。会员身份不额外打折。</InfoHint></span>
+                <strong>{money(wallet.data.balance.availableCents)}</strong>
+              </div>
+            </div>
+            <div className="tennis-stats">
+              <div>
+                <span>账户总额</span>
+                <strong>{money(wallet.data.balance.totalCents)}</strong>
+              </div>
+              <div>
+                <span>付款预留</span>
+                <strong>{money(wallet.data.balance.reservedCents)}</strong>
+              </div>
+              <div>
+                <span>剩余本金</span>
+                <strong>{money(wallet.data.balance.principalCents)}</strong>
+              </div>
+              <div>
+                <span>剩余赠送</span>
+                <strong>{money(wallet.data.balance.giftCents)}</strong>
+              </div>
+            </div>
           </Panel>
-        )}
-        <div>
-          <ErrorNotice error={wallet.error} retry={() => void wallet.refresh()} />
-          {!customerId ? (
-            <Panel>
-              <EmptyState title="选择一个客户" detail="可按姓名或手机号查找，查看余额、充值和消费流水。" />
-            </Panel>
-          ) : wallet.busy && !wallet.data ? (
-            <LoadingBlock />
-          ) : wallet.data ? (
-            <>
-              <Panel
-                title={customer?.nickname ?? "我的余额"}
-                action={
-                  <button className="button button-primary" onClick={() => setTopup(true)}>
-                    <Plus size={16} />
-                    充值
-                  </button>
-                }
+          <TopupHistoryPanel
+            api={api}
+            session={session}
+            venue={venue}
+            scope={scope}
+            customerId={customerId}
+            revision={revision + topupRevision}
+            onChanged={refreshWallet}
+          />
+          <Panel title="资金明细" action={<InfoHint label="资金明细说明">每笔金额分为本金和赠送。付款预留期间，这部分余额暂时不能使用；释放后恢复可用。</InfoHint>}>
+            {wallet.data.entries.length === 0 ? (
+              <EmptyState title="暂无资金明细" detail="充值、付款预留、扣款和退款会在这里记录。" />
+            ) : (
+              <div className="tennis-table-scroll">
+                <table className="tennis-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>事项</th>
+                      <th>本金</th>
+                      <th>赠送</th>
+                      <th>合计</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wallet.data.entries.map((entry) => (
+                      <tr key={entry.id}>
+                        <td>{dateTime(entry.createdAt, venue.timezone)}</td>
+                        <td>
+                          {label(entry.kind)}
+                          <small>记录 {entry.sourceId.slice(0, 8)}</small>
+                        </td>
+                        <td className="tennis-numeric">{money(entry.principalCents)}</td>
+                        <td className="tennis-numeric">{money(entry.giftCents)}</td>
+                        <td className="tennis-numeric">{money(entry.principalCents + entry.giftCents)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="tennis-actions">
+              <button
+                className="button button-secondary"
+                disabled={wallet.busy || historyCursors.length === 0}
+                onClick={() => setHistoryCursors((previous) => previous.slice(0, -1))}
               >
-                <div className="tennis-balance">
-                  <WalletIcon size={22} />
-                  <div>
-                    <span>可用余额 <InfoHint label="余额使用说明">同一商家的各场馆通用。先使用较早充值的余额，每次按该笔充值的本金和赠送比例扣除。会员身份不额外打折。</InfoHint></span>
-                    <strong>{money(wallet.data.balance.availableCents)}</strong>
-                  </div>
-                </div>
-                <div className="tennis-stats">
-                  <div>
-                    <span>账户总额</span>
-                    <strong>{money(wallet.data.balance.totalCents)}</strong>
-                  </div>
-                  <div>
-                    <span>付款预留</span>
-                    <strong>{money(wallet.data.balance.reservedCents)}</strong>
-                  </div>
-                  <div>
-                    <span>剩余本金</span>
-                    <strong>{money(wallet.data.balance.principalCents)}</strong>
-                  </div>
-                  <div>
-                    <span>剩余赠送</span>
-                    <strong>{money(wallet.data.balance.giftCents)}</strong>
-                  </div>
-                </div>
-              </Panel>
-              <TopupHistoryPanel
-                api={api}
-                session={session}
-                venue={venue}
-                scope={scope}
-                customerId={customerId}
-                revision={topupRevision}
-                onChanged={refreshWallet}
-              />
-              <Panel title="资金明细" action={<InfoHint label="资金明细说明">每笔金额分为本金和赠送。付款预留期间，这部分余额暂时不能使用；释放后恢复可用。</InfoHint>}>
-                {wallet.data.entries.length === 0 ? (
-                  <EmptyState title="暂无资金明细" detail="充值、付款预留、扣款和退款会在这里记录。" />
-                ) : (
-                  <div className="tennis-table-scroll">
-                    <table className="tennis-table">
-                      <thead>
-                        <tr>
-                          <th>时间</th>
-                          <th>事项</th>
-                          <th>本金</th>
-                          <th>赠送</th>
-                          <th>合计</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {wallet.data.entries.map((entry) => (
-                          <tr key={entry.id}>
-                            <td>{dateTime(entry.createdAt, venue.timezone)}</td>
-                            <td>
-                              {label(entry.kind)}
-                              <small>记录 {entry.sourceId.slice(0, 8)}</small>
-                            </td>
-                            <td className="tennis-numeric">{money(entry.principalCents)}</td>
-                            <td className="tennis-numeric">{money(entry.giftCents)}</td>
-                            <td className="tennis-numeric">{money(entry.principalCents + entry.giftCents)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                <div className="tennis-actions">
-                  <button
-                    className="button button-secondary"
-                    disabled={wallet.busy || historyCursors.length === 0}
-                    onClick={() => setHistoryCursors((previous) => previous.slice(0, -1))}
-                  >
-                    上一页
-                  </button>
-                  <span className="tennis-muted">第 {historyCursors.length + 1} 页</span>
-                  <button
-                    className="button button-secondary"
-                    disabled={wallet.busy || !wallet.data.nextCursor}
-                    onClick={() => {
-                      const next = wallet.data?.nextCursor;
-                      if (next) setHistoryCursors((previous) => [...previous, next]);
-                    }}
-                  >
-                    更早明细
-                  </button>
-                </div>
-              </Panel>
-            </>
-          ) : null}
-        </div>
-      </div>
+                上一页
+              </button>
+              <span className="tennis-muted">第 {historyCursors.length + 1} 页</span>
+              <button
+                className="button button-secondary"
+                disabled={wallet.busy || !wallet.data.nextCursor}
+                onClick={() => {
+                  const next = wallet.data?.nextCursor;
+                  if (next) setHistoryCursors((previous) => [...previous, next]);
+                }}
+              >
+                更早明细
+              </button>
+            </div>
+          </Panel>
+        </>
+      ) : null}
       {topup && customerId && (
         <TopupDialog
           api={api}
