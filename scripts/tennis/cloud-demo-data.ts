@@ -125,8 +125,11 @@ export async function buildCloudDemoData(db: pg.Pool, passwords: CloudDemoPasswo
     await verifyManifest(db, previous.manifest);
     return { created: false, manifest: previous.manifest };
   }
+  // Migration 005 creates this system principal even in a freshly migrated DB.
+  // Only that exact migration-owned subject is compatible with an empty demo.
   const existing = await db.query<{ occupied: boolean }>(
-    `SELECT EXISTS(SELECT 1 FROM tennis.tenants) OR EXISTS(SELECT 1 FROM tennis.subjects)
+    `SELECT EXISTS(SELECT 1 FROM tennis.tenants) OR EXISTS(SELECT 1 FROM tennis.subjects
+      WHERE id <> 'system:tennis' OR display_name <> '网球系统任务')
       OR EXISTS(SELECT 1 FROM tennis.local_accounts) AS occupied`);
   if (existing.rows[0]?.occupied)
     throw new Error("First cloud demo initialization requires an empty tennis database; existing records were left untouched");

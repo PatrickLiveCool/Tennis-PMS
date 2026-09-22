@@ -24,7 +24,7 @@ function fixtureClient(tx: pg.PoolClient, failOnPayment = false): pg.PoolClient 
     get(target, property) {
       if (property !== "query") return Reflect.get(target, property);
       return async (sql: string, values?: unknown[]) => {
-        if (sql.includes("OR EXISTS(SELECT 1 FROM tennis.subjects)"))
+        if (sql.startsWith("SELECT EXISTS(SELECT 1 FROM tennis.tenants)"))
           return { command: "SELECT", rowCount: 1, rows: [{ occupied: false }], fields: [] };
         if (failOnPayment && sql.includes("INSERT INTO tennis.payment_attempts")) return target.query("SELECT 1/0");
         return target.query(sql, values);
