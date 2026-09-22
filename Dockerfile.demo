@@ -10,6 +10,7 @@ COPY scripts scripts
 COPY deploy/release-policy.json deploy/release-policy.json
 COPY docs/releases docs/releases
 RUN npm ci --ignore-scripts
+COPY tsconfig.base.json ./
 RUN npm run build && node scripts/build-runtime.mjs --source-root /app --output /app/runtime --demo-tools
 
 FROM ${NODE_IMAGE} AS runtime
