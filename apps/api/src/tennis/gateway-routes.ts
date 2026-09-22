@@ -6,15 +6,18 @@ import {
   completeGatewayMessage,
   createGatewayBinding,
   createGatewayIntegration,
+  createTenantGatewayIntegration,
   gatewayBindingTargets,
   grantGatewayMessage,
   listGatewayBindings,
   listPlatformGateways,
+  listTenantGatewayIntegrations,
   receiveGatewayMessage,
   requireGatewayConversation,
   resolveGatewayIdentity,
   revokeGatewayBinding,
   revokeGatewayIntegration,
+  updateTenantGatewayIntegration,
   type GatewayPrincipal,
 } from "../../../../packages/db/src/tennis/gateway.ts";
 import { GatewayAccessError } from "../../../../packages/db/src/tennis/gateway-guard.ts";
@@ -54,6 +57,23 @@ export function registerGatewayRoutes(
   );
   post("/platform/gateways/:id/revoke", obj({ reason }), (r, b) =>
     revokeGatewayIntegration(db, input.subject(r), params(r).id!, b.reason),
+  );
+  // Deliberately outside /gateway/: these operations require a human admin session,
+  // CSRF and the current workspace, never a channel or delegated bearer token.
+  const expiresInDays = Type.Optional(Type.Integer({ minimum: 1, maximum: 365 }));
+  const expectedRevision = Type.Integer({ minimum: 1 });
+  app.get(base + "/gateway-integrations", { schema: { querystring: obj({}) } }, (r) =>
+    listTenantGatewayIntegrations(db, input.actor(r)),
+  );
+  post("/gateway-integrations", obj({ name: id, expiresInDays }), (r, b) =>
+    createTenantGatewayIntegration(db, input.actor(r), b),
+  );
+  for (const action of ["pause", "resume", "revoke"] as const)
+    post(`/gateway-integrations/:id/${action}`, obj({ expectedRevision, reason }), (r, b) =>
+      updateTenantGatewayIntegration(db, input.actor(r), params(r).id!, { ...b, action }),
+    );
+  post("/gateway-integrations/:id/rotate", obj({ expectedRevision, reason, expiresInDays }), (r, b) =>
+    updateTenantGatewayIntegration(db, input.actor(r), params(r).id!, { ...b, action: "rotate" }),
   );
   app.get(base + "/gateway-bindings", (r) => listGatewayBindings(db, input.actor(r)));
   app.get(base + "/gateway-binding-targets", (r) => gatewayBindingTargets(db, input.actor(r), query(r).q ?? ""));

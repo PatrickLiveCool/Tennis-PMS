@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canManageTenant, ManagementPage } from "../../apps/web/src/tennis/ManagementPage";
 import type { Session } from "../../apps/web/src/tennis/types";
 
-const { staffPanel, gatewayPanel } = vi.hoisted(() => ({
+const { staffPanel, gatewayPanel, agentAccessPanel } = vi.hoisted(() => ({
   staffPanel: vi.fn((_props: unknown) => null),
   gatewayPanel: vi.fn((_props: unknown) => null),
+  agentAccessPanel: vi.fn((_props: unknown) => null),
 }));
 vi.mock("../../apps/web/src/tennis/StaffPanel", () => ({ StaffPanel: staffPanel }));
-vi.mock("../../apps/web/src/tennis/GatewayPanel", () => ({ TenantGatewayPanel: gatewayPanel }));
+vi.mock("../../apps/web/src/tennis/GatewayPanel", () => ({ TenantGatewayPanel: gatewayPanel, TenantAgentAccessPanel: agentAccessPanel }));
 
 const admin: Session = {
   subjectId: "operator", displayName: "合成管理员", csrfToken: "synthetic", tenantId: "current-tenant",
@@ -57,6 +58,7 @@ describe("tenant management access and restored navigation", () => {
     expect(html).toContain("仅管理员可访问系统管理");
     expect(staffPanel).not.toHaveBeenCalled();
     expect(gatewayPanel).not.toHaveBeenCalled();
+    expect(agentAccessPanel).not.toHaveBeenCalled();
   });
 
   it("opens staff management for the current tenant admin without requiring a venue", () => {
@@ -74,5 +76,15 @@ describe("tenant management access and restored navigation", () => {
     expect(staffPanel).not.toHaveBeenCalled();
     expect(gatewayPanel).toHaveBeenCalledOnce();
     expect(gatewayPanel.mock.calls[0]?.[0]).toEqual({ api, scope: legacyScope });
+  });
+
+  it("restores the agent access tab within the current administrator workspace", () => {
+    const api = vi.fn();
+    stored.set(`tennis:management-tab:${legacyScope}`, JSON.stringify("agent-access"));
+    renderToStaticMarkup(createElement(ManagementPage, { api, session: admin }));
+    expect(staffPanel).not.toHaveBeenCalled();
+    expect(gatewayPanel).not.toHaveBeenCalled();
+    expect(agentAccessPanel).toHaveBeenCalledOnce();
+    expect(agentAccessPanel.mock.calls[0]?.[0]).toEqual({ api, scope: legacyScope });
   });
 });

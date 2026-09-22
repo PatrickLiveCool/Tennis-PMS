@@ -63,7 +63,7 @@ const venue: VenueRecord = {
   timezone: "Asia/Shanghai", active: true, openingHours: [], minimumBookingMinutes: 15, catalogRevision: 1,
 };
 const settingTabs = ["球场资料", "时段折扣", "预订期限", "充值方案"];
-const managementTabs = ["员工权限", "渠道账号绑定"];
+const managementTabs = ["员工权限", "智能体接入", "渠道账号绑定"];
 const settingsCases = [
   ["球场资料", "场馆营业设置"],
   ["时段折扣", "分时折扣"],
@@ -95,6 +95,7 @@ beforeEach(() => {
     if (path === "/booking-policy") return { quoteMinutes: 5, paymentHoldMinutes: 10, revision: 1 };
     if (path === "/staff") return [{ subjectId: session.subjectId, displayName: session.displayName, role: "ADMIN", active: true, allVenues: true, venueIds: [], permissions: [] }];
     if (path === "/gateway-bindings") return { integrations: [], bindings: [] };
+    if (path === "/gateway-integrations") return [];
     if (path.startsWith("/gateway-binding-targets?")) return [];
     throw new Error(`Unexpected navigation request: ${method} ${path}`);
   });
@@ -150,6 +151,9 @@ describe("workspace navigation DOM lifecycle", () => {
       await click(main().querySelector(".tennis-tabs")!, "员工权限");
       expect([...main().querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual(["员工与权限"]);
       expect(main().textContent).toContain("合成管理员");
+      await click(main().querySelector(".tennis-tabs")!, "智能体接入");
+      expect([...main().querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual(["智能体接入"]);
+      expect(main().textContent).toContain("暂无智能体接入");
       await click(main().querySelector(".tennis-tabs")!, "渠道账号绑定");
       expect([...main().querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual(["渠道账号绑定"]);
       expect(main().textContent).toContain("暂无启用的渠道接入");
