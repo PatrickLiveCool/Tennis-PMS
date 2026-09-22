@@ -27,7 +27,10 @@ LABEL org.opencontainers.image.revision="${OCI_REVISION}" \
       org.opencontainers.image.source="https://github.com/PatrickLiveCool/Tennis-PMS" \
       org.opencontainers.image.title="Tennis PMS simulation demo"
 COPY --from=build /app/runtime/ ./
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# Reuse the build stage's verified package tarballs without copying its cache or
+# architecture-specific development dependencies into the final image.
+RUN --mount=type=bind,from=build,source=/root/.npm,target=/root/.npm,rw \
+    npm ci --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund
 USER node
 EXPOSE 4200
 CMD ["node", "scripts/tennis/server-entry.mjs"]
