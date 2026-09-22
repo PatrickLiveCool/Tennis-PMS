@@ -1,5 +1,5 @@
 import { InfoHint } from "./InfoHint";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TennisApiError, type TennisApi } from "./api";
 import { dateTime, EmptyState, ErrorNotice, LoadingBlock, money, Panel, RefreshButton, useDraft, useLoad } from "./components";
 import type { Session, VenueRecord } from "./types";
@@ -17,16 +17,16 @@ const errorLabels: Record<string, string> = {
   CHANNEL_TRANSACTION_REUSED: "这笔收款已关联其他记录，请先核对。",
 };
 const resultText = (value: WecomReceipt) => value.state === "EXCEPTION"
-  ? "款项已收到，需核对是否超时或多收。请到“实收待核对”处理。"
+  ? "款项已收到，需核对是否超时或多收。请到“退款与异常”处理。"
   : value.state === "LINKED" ? "收款已关联，资金记录已更新。"
   : value.state === "REVIEW" ? "流水已保存，需要核对关联信息。" : "收款已保存，请核对属于哪笔订单或充值。";
 
-export function WecomReconciliationPanel(props: { api: TennisApi; session: Session; venue: VenueRecord; onChanged: () => Promise<unknown>; openOrder: (id: string) => void }) {
+export function WecomReconciliationPanel(props: { api: TennisApi; session: Session; venue: VenueRecord; onChanged: () => Promise<unknown>; openOrder: (id: string) => void; onPendingChange?: (pending: boolean) => void; onOpenExceptions?: () => void }) {
   const { session, venue } = props;
   if (session.kind !== "staff" || !session.tenants.some(t => t.id === session.tenantId && t.kind === "staff" && t.role === "ADMIN")) return null;
   return <Reconciliation key={`${session.subjectId}:${session.tenantId}:${session.contextVersion}:${venue.id}`} {...props} />;
 }
-function Reconciliation({ api, session, venue, onChanged, openOrder }: Parameters<typeof WecomReconciliationPanel>[0]) {
+function Reconciliation({ api, session, venue, onChanged, openOrder, onPendingChange, onOpenExceptions }: Parameters<typeof WecomReconciliationPanel>[0]) {
   const scope = `${session.subjectId}:${session.tenantId}:${session.contextVersion}:${venue.id}`;
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -49,6 +49,7 @@ function Reconciliation({ api, session, venue, onChanged, openOrder }: Parameter
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState("");
   const pending = pendingLink || pendingDemo;
+  useEffect(() => { onPendingChange?.(Boolean(pending)); }, [Boolean(pending), onPendingChange]);
   const target = targets.data?.find(t => t.operationId === operationId);
   function clearSelection() { if (!pendingLink) { setSelected(null); setOperationId(""); setReason(""); } }
   function resetPage() { setCursors([null]); clearSelection(); }
@@ -102,7 +103,7 @@ function Reconciliation({ api, session, venue, onChanged, openOrder }: Parameter
           <td><span title={receipt.transactionId}>{receipt.transactionId.slice(0, 20)}</span><small title={receipt.id}>流水 {receipt.id.slice(0, 12)}</small><small>商户 {receipt.merchantId}</small></td>
           <td>{states[receipt.state]}{receipt.business && <small>{receipt.business.venueName} · {receipt.business.sourceKind === "ORDER" ? "预订" : "充值"}</small>}</td>
           <td>{receipt.operationId ? <span title={receipt.operationId}>付款 {receipt.operationId.slice(0, 12)}</span> : "尚未关联"}<small>{receipt.linkReason ?? (receipt.trustedOperationId ? "收款附带订单或充值编号" : "请核对付款凭据")}</small>{receipt.lastError && <small>{errorLabels[receipt.lastError] ?? "关联未完成，请核对原付款记录。"}</small>}</td>
-          <td>{["UNMATCHED", "REVIEW"].includes(receipt.state) ? <button type="button" className="button button-secondary button-small" disabled={busy || !!pending} onClick={() => { setSelected(receipt); setOperationId(""); setReason(""); setError(undefined); setNotice(""); }}>核对归属</button> : <><span className="tennis-muted">{receipt.state === "EXCEPTION" ? (receipt.business?.venueId === venue.id ? "在下方实收异常中处理" : `切换至 ${receipt.business?.venueName ?? "原业务场馆"} 的资金核对处理`) : "已完成"}</span>{receipt.business?.venueId === venue.id && receipt.business.orderId && <button type="button" className="button button-secondary button-small" onClick={() => openOrder(receipt.business!.orderId!)}>查看订单</button>}</>}</td>
+          <td>{["UNMATCHED", "REVIEW"].includes(receipt.state) ? <button type="button" className="button button-secondary button-small" disabled={busy || !!pending} onClick={() => { setSelected(receipt); setOperationId(""); setReason(""); setError(undefined); setNotice(""); }}>核对归属</button> : <><span className="tennis-muted">{receipt.state === "EXCEPTION" ? (receipt.business?.venueId === venue.id ? "请到退款与异常处理" : `切换至 ${receipt.business?.venueName ?? "原业务场馆"} 的退款与异常处理`) : "已完成"}</span>{receipt.state === "EXCEPTION" && receipt.business?.venueId === venue.id && onOpenExceptions && <button type="button" className="button button-secondary button-small" onClick={onOpenExceptions}>处理实收异常</button>}{receipt.business?.venueId === venue.id && receipt.business.orderId && <button type="button" className="button button-secondary button-small" onClick={() => openOrder(receipt.business!.orderId!)}>查看订单</button>}</>}</td>
         </tr>)}
       </tbody></table></div>
       <div className="tennis-actions">
