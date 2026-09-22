@@ -3,7 +3,7 @@ import type { TennisApi } from "./api";
 import type { Session } from "./types";
 import { EmptyState, PageHeading, useDraft } from "./components";
 import { StaffPanel } from "./StaffPanel";
-import { TenantGatewayPanel } from "./GatewayPanel";
+import { TenantAgentAccessPanel, TenantGatewayPanel } from "./GatewayPanel";
 
 export function canManageTenant(session: Session) {
   return session.kind === "staff" && session.contextValid !== false && session.tenants.some(
@@ -12,16 +12,16 @@ export function canManageTenant(session: Session) {
 }
 
 export function ManagementPage({ api, session }: { api: TennisApi; session: Session }) {
-  if (!canManageTenant(session)) return <EmptyState title="仅管理员可访问系统管理" detail="请联系商家管理员处理员工权限或渠道账号绑定。" />;
+  if (!canManageTenant(session)) return <EmptyState title="仅管理员可访问系统管理" detail="请联系商家管理员处理员工权限、智能体接入或渠道账号绑定。" />;
   // Keep the existing gateway draft and pending-operation scope across the move.
   const scope = `${session.subjectId}:${session.kind}:${session.tenantId}:${session.contextVersion}`;
   return <TenantManagement key={scope} api={api} scope={scope} />;
 }
 
-const tabs = [{ id: "staff", name: "员工权限" }, { id: "gateway", name: "渠道账号绑定" }] as const;
+const tabs = [{ id: "staff", name: "员工权限" }, { id: "agent-access", name: "智能体接入" }, { id: "gateway", name: "渠道账号绑定" }] as const;
 function TenantManagement({ api, scope }: { api: TennisApi; scope: string }) {
   const [savedTab, setTab] = useDraft(`tennis:management-tab:${scope}`, "staff");
-  const tab = savedTab === "gateway" ? "gateway" : "staff";
+  const tab = savedTab === "gateway" || savedTab === "agent-access" ? savedTab : "staff";
   const id = useId();
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   function navigateTab(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -49,7 +49,7 @@ function TenantManagement({ api, scope }: { api: TennisApi; scope: string }) {
     </div>
     {tabs.map((item) => <section key={item.id} role="tabpanel" hidden={tab !== item.id} tabIndex={0}
       id={`${id}-${item.id}-panel`} aria-labelledby={`${id}-${item.id}-tab`}>
-      {tab === item.id && (item.id === "staff" ? <StaffPanel api={api} /> : <TenantGatewayPanel api={api} scope={scope} />)}
+      {tab === item.id && (item.id === "staff" ? <StaffPanel api={api} /> : item.id === "agent-access" ? <TenantAgentAccessPanel api={api} scope={scope} /> : <TenantGatewayPanel api={api} scope={scope} />)}
     </section>)}
   </>;
 }

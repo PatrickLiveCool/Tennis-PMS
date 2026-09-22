@@ -168,6 +168,7 @@ const messages: Record<string, string> = {
   GATEWAY_IDENTITY_UNBOUND: "此渠道身份尚未由管理员核对绑定。",
   GATEWAY_MESSAGE_CONFLICT: "原渠道消息或绑定已存在，请核对原记录，不要另建交易。",
   GATEWAY_SCOPE_CHANGED: "会话已接管或场馆范围已变更，请先核对原结果。",
+  GATEWAY_CONFIGURATION_CHANGED: "接入状态已变化，请刷新列表后重新核对。",
   GATEWAY_GRANT_CLOSED: "原请求授权已结束，请查询原请求结果，不可重发交易。",
   INVALID_GATEWAY_INPUT: "请检查渠道接入参数。",
   ASSISTANT_NOT_CONFIGURED: "AI 服务尚未配置完成，请联系平台运营管理员。",

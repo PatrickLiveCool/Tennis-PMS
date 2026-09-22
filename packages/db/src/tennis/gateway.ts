@@ -9,7 +9,8 @@ import {
   type AssistantContext,
   type Conversation,
 } from "./external-agent.ts";
-import { bindGatewayIdentity, GatewayAccessError } from "./gateway-guard.ts";
+import { bindGatewayIdentity, GatewayAccessError, isGatewayActor } from "./gateway-guard.ts";
+import { getTrustedDelegationContext } from "./agent-guard.ts";
 import { lockTenantTransactions } from "./transaction-locks.ts";
 
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
@@ -17,7 +18,7 @@ const text = (v: string, max = 200) => {
   if (typeof v !== "string" || !v.trim() || v.length > max) throw new GatewayAccessError("INVALID_GATEWAY_INPUT");
   return v.trim();
 };
-const integrationColumns = `id,tenant_id AS "tenantId",name,active,created_at AS "createdAt",revoked_at AS "revokedAt"`;
+const integrationColumns = `id,tenant_id AS "tenantId",name,active,created_at AS "createdAt",revoked_at AS "revokedAt",paused_at AS "pausedAt",expires_at AS "expiresAt",rotated_at AS "rotatedAt",revision`;
 const bindingColumns = `id,integration_id AS "integrationId",external_subject AS "externalSubjectId",subject_id AS "subjectId",customer_id AS "customerId",actor_kind AS "actorKind",active,reason,created_at AS "createdAt"`;
 const conversationColumns = `id,tenant_id AS "tenantId",venue_id AS "venueId",subject_id AS "subjectId",customer_id AS "customerId",actor_kind AS "actorKind",mode,generation,taken_by AS "takenBy",updated_at AS "updatedAt"`;
 async function transaction<T>(db: pg.Pool, work: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
@@ -47,6 +48,8 @@ async function platform(tx: pg.PoolClient, subjectId: string) {
 async function admin(tx: pg.PoolClient, actor: BookingActor) {
   if (
     isCustomerActor(actor) ||
+    isGatewayActor(actor) ||
+    getTrustedDelegationContext(actor) !== null ||
     (
       await tx.query(
         "SELECT subject_id FROM tennis.tenant_memberships WHERE tenant_id=$1 AND subject_id=$2 AND active AND role='ADMIN' FOR SHARE",
@@ -107,15 +110,129 @@ export async function revokeGatewayIntegration(db: pg.Pool, subjectId: string, i
     await platform(tx, subjectId);
     const item = (
       await tx.query(
-        `UPDATE tennis.gateway_integrations SET active=false,revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE id=$1 RETURNING ${integrationColumns}`,
+        `UPDATE tennis.gateway_integrations SET active=false,revoked_at=coalesce(revoked_at,clock_timestamp()),revision=revision+1 WHERE id=$1 RETURNING ${integrationColumns}`,
         [id],
       )
     ).rows[0];
+    await invalidateIntegrationGrants(tx, row.tenant_id, id);
     await tx.query(
       "INSERT INTO tennis.auth_audit_events(id,subject_id,tenant_id,action,resource_id,details) VALUES($1,$2,$3,'gateway.revoke',$4,$5)",
       [randomUUID(), subjectId, row.tenant_id, id, JSON.stringify({ reason: reason.trim() })],
     );
     return item;
+  });
+}
+function lifetimeDays(days = 90): number {
+  if (!Number.isInteger(days) || days < 1 || days > 365) throw new GatewayAccessError("INVALID_GATEWAY_INPUT");
+  return days;
+}
+
+/** Called under the tenant transaction lock, shared with every delegated business write. */
+async function invalidateIntegrationGrants(tx: pg.PoolClient, tenantId: string, id: string) {
+  await tx.query(
+    `DELETE FROM tennis.agent_delegations d WHERE d.tenant_id=$1 AND EXISTS(
+      SELECT 1 FROM tennis.gateway_conversations g WHERE g.tenant_id=d.tenant_id
+      AND g.conversation_id=d.conversation_id AND g.integration_id=$2)`,
+    [tenantId, id],
+  );
+  await tx.query(
+    `UPDATE tennis.gateway_messages SET encrypted_token=NULL,token_hash=NULL,grant_snapshot=NULL
+      WHERE tenant_id=$1 AND integration_id=$2`,
+    [tenantId, id],
+  );
+  // Keep messages, requests and committed commands. Old messages cannot obtain new grants.
+  // Rotating a credential must not silently clear an unresolved business request.
+  await tx.query(
+    `UPDATE tennis.agent_conversations c SET generation=generation+1,updated_at=clock_timestamp(),
+      mode=CASE WHEN EXISTS(SELECT 1 FROM tennis.agent_message_dispatches d
+        WHERE d.tenant_id=c.tenant_id AND d.conversation_id=c.id AND d.generation=c.generation
+        AND d.status<>'SUCCEEDED') THEN 'HUMAN' ELSE c.mode END
+      WHERE c.tenant_id=$1 AND EXISTS(SELECT 1 FROM tennis.gateway_conversations g
+        WHERE g.tenant_id=c.tenant_id AND g.conversation_id=c.id AND g.integration_id=$2)`,
+    [tenantId, id],
+  );
+  await tx.query(
+    `UPDATE tennis.agent_message_dispatches d SET status='UNCERTAIN',updated_at=clock_timestamp()
+      WHERE d.tenant_id=$1 AND d.status='IN_FLIGHT' AND EXISTS(SELECT 1 FROM tennis.gateway_messages m
+        WHERE m.tenant_id=d.tenant_id AND m.id=d.message_id AND m.integration_id=$2)`,
+    [tenantId, id],
+  );
+}
+
+export async function listTenantGatewayIntegrations(db: pg.Pool, actor: BookingActor) {
+  return withBookingTransaction(db, actor, async (tx) => {
+    await admin(tx, actor);
+    return (await tx.query(
+      `SELECT ${integrationColumns} FROM tennis.gateway_integrations WHERE tenant_id=$1 ORDER BY created_at DESC,id`,
+      [actor.tenantId],
+    )).rows;
+  });
+}
+
+export async function createTenantGatewayIntegration(
+  db: pg.Pool,
+  actor: BookingActor,
+  input: { name: string; expiresInDays?: number },
+) {
+  const name = text(input.name), days = lifetimeDays(input.expiresInDays);
+  return withBookingTransaction(db, actor, async (tx) => {
+    await admin(tx, actor);
+    const token = randomBytes(32).toString("base64url"), id = randomUUID();
+    const item = (await tx.query(
+      `INSERT INTO tennis.gateway_integrations(id,tenant_id,name,token_hash,created_by,expires_at)
+        VALUES($1,$2,$3,$4,$5,clock_timestamp()+$6*interval '1 day') RETURNING ${integrationColumns}`,
+      [id, actor.tenantId, name, hash(token), actor.subjectId, days],
+    )).rows[0];
+    await recordTenantAudit(tx, actor, "gateway.create", id, { name, expiresInDays: days, revision: item.revision });
+    return { ...item, token };
+  });
+}
+
+export async function updateTenantGatewayIntegration(
+  db: pg.Pool,
+  actor: BookingActor,
+  id: string,
+  input: { action: "pause" | "resume" | "revoke" | "rotate"; expectedRevision: number; reason: string; expiresInDays?: number },
+) {
+  const reason = text(input.reason, 2000), days = lifetimeDays(input.expiresInDays);
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 ||
+      !["pause", "resume", "revoke", "rotate"].includes(input.action))
+    throw new GatewayAccessError("INVALID_GATEWAY_INPUT");
+  return withBookingTransaction(db, actor, async (tx) => {
+    await admin(tx, actor);
+    const current = (await tx.query<{ active: boolean; revision: number; paused: boolean; expired: boolean }>(
+      `SELECT active,revision,paused_at IS NOT NULL AS paused,
+        coalesce(expires_at<=clock_timestamp(),false) AS expired
+        FROM tennis.gateway_integrations WHERE tenant_id=$1 AND id=$2 FOR UPDATE`,
+      [actor.tenantId, id],
+    )).rows[0];
+    if (!current) throw new TenantAccessError("RESOURCE_NOT_FOUND");
+    if (!current.active || current.revision !== input.expectedRevision ||
+        (input.action === "pause" && current.paused) ||
+        (input.action === "resume" && (!current.paused || current.expired)))
+      throw new GatewayAccessError("GATEWAY_CONFIGURATION_CHANGED");
+    let token: string | undefined;
+    let changes: string;
+    const values: unknown[] = [actor.tenantId, id];
+    switch (input.action) {
+      case "pause": changes = "paused_at=clock_timestamp()"; break;
+      case "resume": changes = "paused_at=NULL"; break;
+      case "revoke": changes = "active=false,revoked_at=clock_timestamp()"; break;
+      case "rotate":
+        token = randomBytes(32).toString("base64url");
+        changes = "token_hash=$3,rotated_at=clock_timestamp(),expires_at=clock_timestamp()+$4*interval '1 day'";
+        values.push(hash(token), days);
+        break;
+    }
+    const item = (await tx.query(
+      `UPDATE tennis.gateway_integrations SET ${changes},revision=revision+1 WHERE tenant_id=$1 AND id=$2 RETURNING ${integrationColumns}`,
+      values,
+    )).rows[0];
+    await invalidateIntegrationGrants(tx, actor.tenantId, id);
+    await recordTenantAudit(tx, actor, `gateway.${input.action}`, id, {
+      reason, revision: item.revision, ...(token ? { expiresInDays: days } : {}),
+    });
+    return token ? { ...item, token } : item;
   });
 }
 export async function listGatewayBindings(db: pg.Pool, actor: BookingActor) {
@@ -180,7 +297,7 @@ export async function createGatewayBinding(db: pg.Pool, actor: BookingActor, inp
     await admin(tx, actor);
     if (
       (
-        await tx.query("SELECT id FROM tennis.gateway_integrations WHERE tenant_id=$1 AND id=$2 AND active FOR SHARE", [
+        await tx.query("SELECT id FROM tennis.gateway_integrations WHERE tenant_id=$1 AND id=$2 AND active AND paused_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE", [
           actor.tenantId,
           integrationId,
         ])
@@ -294,7 +411,7 @@ export async function resolveGatewayIdentity(
       customerId: string | null;
       actorKind: string;
     }>(
-      `SELECT b.id,b.integration_id AS "integrationId",b.tenant_id AS "tenantId",b.subject_id AS "subjectId",b.customer_id AS "customerId",b.actor_kind AS "actorKind" FROM tennis.gateway_integrations i JOIN tennis.gateway_bindings b ON b.integration_id=i.id AND b.tenant_id=i.tenant_id WHERE i.token_hash=$1 AND i.active AND b.external_subject=$2 AND b.active`,
+      `SELECT b.id,b.integration_id AS "integrationId",b.tenant_id AS "tenantId",b.subject_id AS "subjectId",b.customer_id AS "customerId",b.actor_kind AS "actorKind" FROM tennis.gateway_integrations i JOIN tennis.gateway_bindings b ON b.integration_id=i.id AND b.tenant_id=i.tenant_id WHERE i.token_hash=$1 AND i.active AND i.paused_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp()) AND b.external_subject=$2 AND b.active`,
       [hash(token), externalSubjectId.trim()],
     )
   ).rows[0];
