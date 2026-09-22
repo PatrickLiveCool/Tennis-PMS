@@ -440,6 +440,41 @@ describe("trusted Tennis authentication and tenant administration", () => {
       code: "RESOURCE_NOT_FOUND",
     });
   });
+  it("keeps reconciliation opt-in for staff and refreshes existing sessions when it is granted or revoked", async () => {
+    const staff = await createTenantStaff(db, first.actor, {
+      username: newUsername(),
+      password,
+      displayName: "收款核对员工",
+      ...staffGrant,
+      venueIds: [first.venueId],
+    });
+    subjects.push(staff.subjectId);
+    const signedIn = await login(db, { username: staff.username!, password });
+    expect(signedIn.session.permissions).not.toContain("reconcile_payments");
+    await updateTenantStaff(db, first.actor, staff.subjectId, {
+      ...staffGrant,
+      permissions: ["read", "reconcile_payments"],
+      venueIds: [first.venueId],
+    });
+    const granted = await authenticate(db, signedIn.token);
+    expect(granted.permissions).toEqual(["read", "reconcile_payments"]);
+    expect(granted.venueIds).toEqual([first.venueId]);
+    expect(granted.contextVersion).toBe(signedIn.session.contextVersion + 1);
+    await expect(updateTenantStaff(db, first.actor, staff.subjectId, {
+      ...staffGrant,
+      role: "VIEWER",
+      permissions: ["read", "reconcile_payments"],
+    })).rejects.toMatchObject({ code: "INVALID_STAFF_GRANT" });
+    await updateTenantStaff(db, first.actor, staff.subjectId, {
+      ...staffGrant,
+      venueIds: [first.venueId],
+    });
+    const revoked = await authenticate(db, signedIn.token);
+    expect(revoked.permissions).not.toContain("reconcile_payments");
+    expect(revoked.contextVersion).toBe(granted.contextVersion + 1);
+    const admin = await account({ tenantId: first.actor.tenantId, role: "ADMIN" });
+    expect((await login(db, { username: admin.username, password })).session.permissions).toContain("reconcile_payments");
+  });
   it("rejects cross-tenant venue grants and prevents concurrent removal of the final live administrator", async () => {
     await expect(
       createTenantStaff(db, first.actor, {

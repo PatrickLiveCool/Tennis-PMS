@@ -14,7 +14,8 @@ export type TenantPermission =
   | "manage_prices"
   | "refund"
   | "hold_unpaid"
-  | "manage_members";
+  | "manage_members"
+  | "reconcile_payments";
 interface Membership {
   role: "ADMIN" | "STAFF" | "VIEWER";
   all_venues: boolean;

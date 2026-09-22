@@ -420,6 +420,11 @@ export async function getCommandReceipt(
       if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
       await requireBookingVenue(tx, actor, row.venue_id, "book");
     }
+    if (row.command_type === "wecom.receipt.link") {
+      if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+      await requireBookingVenue(tx, actor, row.venue_id, "reconcile_payments");
+      await requireBookingVenue(tx, actor, row.venue_id, typeof row.result.topupId === "string" ? "manage_members" : "book");
+    }
     if (isCustomerActor(actor)) {
       // A subject may also have an employee role. Switching to customer context
       // must not reveal their earlier staff commands for other customers.

@@ -534,6 +534,17 @@ export async function getConversationRequest(
     const commands: AgentCommandSummary[] = [];
     let restrictedCommandCount = 0;
     for (const receipt of receipts) {
+      if (receipt.commandType === "wecom.receipt.link") {
+        try {
+          if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+          await requireBookingVenue(tx, actor, conv.venueId, "reconcile_payments");
+          await requireBookingVenue(tx, actor, conv.venueId, typeof receipt.result.topupId === "string" ? "manage_members" : "book");
+        } catch (error) {
+          if (!(error instanceof TenantAccessError)) throw error;
+          restrictedCommandCount++;
+          continue;
+        }
+      }
       if (!isCustomerActor(actor) && /^(topup|wallet)\./.test(receipt.commandType)) {
         try {
           await requireBookingVenue(tx, actor, conv.venueId, "manage_members");

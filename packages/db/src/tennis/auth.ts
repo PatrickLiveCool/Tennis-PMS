@@ -14,6 +14,7 @@ const permissions: TenantPermission[] = [
   "refund",
   "hold_unpaid",
   "manage_members",
+  "reconcile_payments",
 ];
 export interface SessionTenant {
   id: string;

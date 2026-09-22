@@ -3,6 +3,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { assertLocalTennisDatabaseUrl, localTennisTestDatabaseUrl } from "../../packages/db/src/tennis/local-config.ts";
 import { migrateTennis } from "../../packages/db/src/tennis/migrate.ts";
+import { requireTenantPermission, withTenantTransaction } from "../../packages/db/src/tennis/access.ts";
 import {
   findCourtConflicts,
   occupyCourt,
@@ -66,6 +67,32 @@ afterAll(async () => {
 });
 
 describe("tenant and venue isolation", () => {
+  it("requires an explicit reconciliation grant for staff without granting booking or member access", async () => {
+    const allowed = () => withTenantTransaction(db, first.actor, (tx) =>
+      requireTenantPermission(tx, first.actor, "reconcile_payments"),
+    );
+    await expect(allowed()).resolves.toBeUndefined();
+    await db.query(
+      "UPDATE tennis.tenant_memberships SET role='STAFF', permissions=ARRAY['read','book','manage_members'] WHERE tenant_id=$1",
+      [first.actor.tenantId],
+    );
+    await expect(allowed()).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    await db.query(
+      "UPDATE tennis.tenant_memberships SET permissions=ARRAY['read','reconcile_payments'] WHERE tenant_id=$1",
+      [first.actor.tenantId],
+    );
+    await expect(allowed()).resolves.toBeUndefined();
+    for (const permission of ["book", "manage_members"] as const) {
+      await expect(withTenantTransaction(db, first.actor, (tx) =>
+        requireTenantPermission(tx, first.actor, permission),
+      )).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    }
+    await expect(withTenantTransaction(db, { ...first.actor, tenantId: second.actor.tenantId }, (tx) =>
+      requireTenantPermission(tx, { ...first.actor, tenantId: second.actor.tenantId }, "reconcile_payments"),
+    )).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+    await db.query("UPDATE tennis.tenant_memberships SET role='VIEWER' WHERE tenant_id=$1", [first.actor.tenantId]);
+    await expect(allowed()).rejects.toMatchObject({ code: "TENANT_ACCESS_DENIED" });
+  });
   it("keeps identically named courts and overlapping times independent across tenants", async () => {
     const a = request(firstCourt);
     const b = request(secondCourt);

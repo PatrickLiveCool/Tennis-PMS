@@ -12,6 +12,7 @@ const permissionNames: Record<string, string> = {
   refund: "退款",
   hold_unpaid: "保留未付款",
   manage_members: "会员管理",
+  reconcile_payments: "收款核对",
 };
 export function StaffPanel({ api }: { api: TennisApi }) {
   const staff = useLoad(() => api<StaffView[]>("/staff"), [api]);
@@ -167,7 +168,7 @@ function StaffEditor({
         </label>
         {draft.role === "STAFF" && (
           <fieldset>
-            <legend>业务权限</legend>
+            <legend>业务权限 <InfoHint label="收款核对权限说明">收款核对可查询本租户尚未关联的收款。关联订场还需预订权限，关联充值还需会员管理权限，并受场馆范围限制。</InfoHint></legend>
             <div className="tennis-check-group">
               {Object.entries(permissionNames).map(([key, name]) => (
                 <label key={key} className="tennis-check">

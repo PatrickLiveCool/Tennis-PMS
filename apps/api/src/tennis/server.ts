@@ -435,9 +435,9 @@ export async function buildTennisServer(options: TennisServerOptions) {
       setPlatformTenantStatus(db, session(request).subjectId, { ...input, tenantId: params(request).id! }),
   );
   const permission = Type.Union(
-    ["read", "book", "manage_assets", "manage_prices", "refund", "hold_unpaid", "manage_members"].map((value) =>
+    ["read", "book", "manage_assets", "manage_prices", "refund", "hold_unpaid", "manage_members", "reconcile_payments"].map((value) =>
       Type.Literal(
-        value as "read" | "book" | "manage_assets" | "manage_prices" | "refund" | "hold_unpaid" | "manage_members",
+        value as "read" | "book" | "manage_assets" | "manage_prices" | "refund" | "hold_unpaid" | "manage_members" | "reconcile_payments",
       ),
     ),
   );
