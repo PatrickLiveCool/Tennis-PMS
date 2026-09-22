@@ -44,7 +44,7 @@ vi.mock("../../apps/web/src/tennis/OrdersPage", async () => {
 });
 vi.mock("../../apps/web/src/tennis/MembersPage", async () => {
   const { createElement } = await import("react");
-  return { MembersPage: () => createElement("h1", null, "会员储值") };
+  return { MembersPage: () => createElement("h1", null, "会员管理") };
 });
 vi.mock("../../apps/web/src/tennis/OverviewPage", async () => {
   const { createElement } = await import("react");
@@ -162,7 +162,7 @@ describe("workspace navigation DOM lifecycle", () => {
       await click(main().querySelector(".tennis-tabs")!, "球场资料");
       expect(main().textContent).toContain("球场与小时价");
 
-      for (const destination of ["场地排期", "预订订单", "会员储值", "经营概览"]) {
+      for (const destination of ["场地排期", "预订订单", "会员管理", "经营概览"]) {
         await navigate(destination);
         expectPage(destination, []);
         await navigate("系统管理");
