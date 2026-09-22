@@ -59,7 +59,7 @@ await page
   .getByRole("button", { name: "经营概览", exact: true })
   .click();
 await page.reload();
-await expect(page.getByRole("heading", { name: "今日工作台", exact: true })).toBeVisible();
+await expect(page.getByRole("heading", { name: "经营概览", exact: true })).toBeVisible();
 await page
   .getByRole("navigation", { name: "主导航", exact: true })
   .getByRole("button", { name: "场地排期", exact: true })
