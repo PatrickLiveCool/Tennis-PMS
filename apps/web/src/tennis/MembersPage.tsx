@@ -1,11 +1,12 @@
 import { InfoHint } from "./InfoHint";
 import { TopupHistoryPanel } from "./TopupHistoryPanel";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Wallet as WalletIcon } from "lucide-react";
 import type { TennisApi } from "./api";
 import type { CustomerRecord, Session, TopupOffer, TopupPayment, TopupQuote, VenueRecord, Wallet } from "./types";
 import { permits } from "./types";
 import { MemberDirectory } from "./MemberDirectory";
+import { CustomerContactCorrection } from "./CustomerContactCorrection";
 import { PaymentChannelPanel } from "./PaymentChannelPanel";
 import {
   Badge,
@@ -37,6 +38,19 @@ function MemberManagement({ api, session, venue, scope }: MembersProps) {
   const [, saveCustomer] = useDraft<CustomerRecord | null>(`tennis:member:${scope}`, null);
   const [revision, setRevision] = useState(0);
   const customerId = session.customerId ?? customer?.id;
+  function corrected(next: CustomerRecord) {
+    setCustomer(next);
+    saveCustomer(next);
+    setRevision((value) => value + 1);
+  }
+  useEffect(() => {
+    const recovered = (event: Event) => {
+      const detail = (event as CustomEvent<{ scope: string; customer: CustomerRecord }>).detail;
+      if (detail?.scope === scope) corrected(detail.customer);
+    };
+    window.addEventListener("tennis-customer-contact-recovered", recovered);
+    return () => window.removeEventListener("tennis-customer-contact-recovered", recovered);
+  }, [scope]);
   return <>
     <PageHeading title="会员管理">
       <RefreshButton onClick={() => setRevision((value) => value + 1)} />
@@ -49,7 +63,7 @@ function MemberManagement({ api, session, venue, scope }: MembersProps) {
         }} />}
       <div className="tennis-member-detail" aria-label="会员详情">
         {customerId ? <MemberWallet key={customerId} api={api} session={session} venue={venue} scope={scope}
-          customerId={customerId} customer={customer} revision={revision} /> : <Panel>
+          customerId={customerId} customer={customer} revision={revision} onCorrected={corrected} /> : <Panel>
           <EmptyState title="会员详情" detail="选择左侧会员，查看资料和账户明细。" />
         </Panel>}
       </div>
@@ -57,8 +71,8 @@ function MemberManagement({ api, session, venue, scope }: MembersProps) {
   </>;
 }
 
-function MemberWallet({ api, session, venue, scope, customerId, customer, revision }: MembersProps & {
-  customerId: string; customer: CustomerRecord | null; revision: number;
+function MemberWallet({ api, session, venue, scope, customerId, customer, revision, onCorrected }: MembersProps & {
+  customerId: string; customer: CustomerRecord | null; revision: number; onCorrected: (customer: CustomerRecord) => void;
 }) {
   const [historyCursors, setHistoryCursors] = useDraft<string[]>(
     `tennis:wallet-pages:${scope}:${customerId ?? "none"}`,
@@ -81,6 +95,8 @@ function MemberWallet({ api, session, venue, scope, customerId, customer, revisi
     else void wallet.refresh();
   };
   const [topup, setTopup] = useState(false);
+  const [correctContact, setCorrectContact] = useState(() => pendingCommands(scope).some((item) => item.intent === `customer.contact.correct:${customerId}`));
+  const [contactNotice, setContactNotice] = useState("");
   return (
     <>
       <ErrorNotice error={wallet.error} retry={() => void wallet.refresh()} />
@@ -99,7 +115,10 @@ function MemberWallet({ api, session, venue, scope, customerId, customer, revisi
           >
             {customer && <div className="tennis-member-profile">
               <span>手机号</span><strong>{customer.phone ?? "未登记"}</strong>
+              {session.kind === "staff" && permits(session, "manage_members") && <button
+                className="button button-secondary button-small" onClick={() => setCorrectContact(true)}>修改手机号</button>}
             </div>}
+            {contactNotice && <p className="tennis-success" role="status">{contactNotice}</p>}
             <div className="tennis-balance">
               <WalletIcon size={22} />
               <div>
@@ -204,6 +223,11 @@ function MemberWallet({ api, session, venue, scope, customerId, customer, revisi
           onChanged={refreshWallet}
         />
       )}
+      {correctContact && customer && session.kind === "staff" && permits(session, "manage_members") &&
+        <CustomerContactCorrection api={api} scope={scope} venueId={venue.id} customer={customer}
+          onClose={() => setCorrectContact(false)} onCorrected={(updated) => {
+            setCorrectContact(false); setContactNotice("手机号已更新。"); onCorrected(updated);
+          }} />}
     </>
   );
 }

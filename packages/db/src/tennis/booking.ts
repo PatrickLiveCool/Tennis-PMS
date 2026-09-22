@@ -420,6 +420,10 @@ export async function getCommandReceipt(
       if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
       await requireBookingVenue(tx, actor, row.venue_id, "book");
     }
+    if (row.command_type === "customer.contact.correct") {
+      if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+      await requireBookingVenue(tx, actor, row.venue_id, "manage_members");
+    }
     if (row.command_type === "wecom.receipt.link") {
       if (isCustomerActor(actor)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
       await requireBookingVenue(tx, actor, row.venue_id, "reconcile_payments");

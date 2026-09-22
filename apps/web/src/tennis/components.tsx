@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { TennisApiError, errorText, type TennisApi } from "./api";
-import type { CommandReceipt } from "./types";
+import type { CommandReceipt, CustomerRecord } from "./types";
+import { recoverBookingConfirmation } from "./booking-confirmation-recovery";
 export { Modal, LoadingBlock, EmptyState } from "../uiBasic";
 
 export const money = (cents: number | null | undefined) =>
@@ -304,13 +305,37 @@ export function RecoveryNotice({
   const [pending, setPending] = useState(() => pendingCommands(scope));
   const [error, setError] = useState<unknown>();
   const [message, setMessage] = useState("");
+  const [recovering, setRecovering] = useState(false);
+  const runningRecovery = useRef(false);
   useEffect(() => {
     const sync = () => setPending(pendingCommands(scope));
     window.addEventListener("tennis-pending", sync);
     return () => window.removeEventListener("tennis-pending", sync);
   }, [scope]);
   async function recover(item: PendingCommand) {
+    if (runningRecovery.current) return;
+    runningRecovery.current = true;
+    setRecovering(true);
+    setError(undefined);
+    setMessage("");
     try {
+      if (item.intent.startsWith("quote.confirm:")) {
+        const result = await recoverBookingConfirmation(api, item);
+        const key = `tennis:booking:${scope}`;
+        const draft = readStored<Record<string, unknown>>(key, {});
+        if ((draft.quote as { id?: string } | null)?.id === result.quoteId) {
+          writeStored(key, result.kind === "expired"
+            ? { ...draft, quote: null }
+            : { ...draft, lines: [], quote: null, staffHold: false, until: "", reason: "" });
+        }
+        forgetCommand(scope, item.key);
+        window.dispatchEvent(new CustomEvent("tennis-booking-confirmation-recovered", { detail: { scope, ...result } }));
+        setMessage(result.kind === "expired"
+          ? "原预订未建立，报价已过期。已保留客户和时段，请重新核价。"
+          : "已恢复原预订，请查看订单的最新状态。");
+        if (result.kind === "confirmed") openOrder(result.orderId);
+        return;
+      }
       if (/^(payment|refund|topup)\.simulate:/.test(item.intent)) {
         const [kind, id] = item.intent.split(":");
         const path = kind === "payment.simulate" ? "payments" : kind === "refund.simulate" ? "refunds" : "topups";
@@ -328,6 +353,13 @@ export function RecoveryNotice({
       const receipt = await api<CommandReceipt | null>(`/receipts/${encodeURIComponent(item.key)}`);
       if (!receipt) {
         setMessage("暂时查不到办理结果，请回到刚才的表单重试，不要另建一笔。");
+        return;
+      }
+      if (receipt.commandType === "customer.contact.correct" && typeof receipt.result.customerId === "string") {
+        const customer = await api<CustomerRecord>(`/customers/${encodeURIComponent(receipt.result.customerId)}`);
+        window.dispatchEvent(new CustomEvent("tennis-customer-contact-recovered", { detail: { scope, customer } }));
+        forgetCommand(scope, item.key);
+        setMessage("手机号修改已完成，请核对最新客户资料。");
         return;
       }
       if (receipt.commandType === "booking.customer" && receipt.result.customer) {
@@ -360,6 +392,9 @@ export function RecoveryNotice({
       }
     } catch (next) {
       setError(next);
+    } finally {
+      runningRecovery.current = false;
+      setRecovering(false);
     }
   }
   if (!pending.length && !message && !error) return null;
@@ -369,8 +404,8 @@ export function RecoveryNotice({
         <>
           <strong>{pending.length} 笔办理结果待确认</strong>
           {pending.map((p) => (
-            <button key={p.key} className="button button-secondary button-small" onClick={() => void recover(p)}>
-              查看办理结果 · {dateTime(p.createdAt)}
+            <button key={p.key} className="button button-secondary button-small" disabled={recovering} onClick={() => void recover(p)}>
+              {p.intent.startsWith("quote.confirm:") ? "核对并恢复预订" : "查看办理结果"} · {dateTime(p.createdAt)}
             </button>
           ))}
         </>
