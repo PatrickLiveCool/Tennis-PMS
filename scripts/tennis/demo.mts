@@ -57,9 +57,11 @@ try {
     throw new Error("Demo account collides with an unrelated account");
   const report: Record<string, unknown> = { credentialsPath, tenants: [] };
   for (const spec of [
-    { username: "demo.green", name: "格林网球（模拟租户）", courtCount: 4 },
+    { username: "demo.green", name: "格林网球", courtCount: 4 },
     { username: "demo.second", name: "第二租户（隔离演示）", courtCount: 2 },
   ]) {
+    const legacyName = spec.username === "demo.green" ? "格林网球（模拟租户）" : spec.name;
+    const venueName = spec.username === "demo.green" ? "省体校区" : "省体校区（模拟）";
     let admin = await account(spec.username);
     if (!admin) {
       await provisionTenant(db, operator.subjectId, {
@@ -76,12 +78,16 @@ try {
         [admin!.subjectId],
       )
     ).rows[0]!;
-    if (tenant.name !== spec.name) throw new Error("Synthetic tenant mismatch");
+    if (tenant.name !== spec.name && tenant.name !== legacyName) throw new Error("Synthetic tenant mismatch");
+    if (tenant.name !== spec.name) {
+      await db.query("UPDATE tennis.tenants SET name=$1 WHERE id=$2 AND name=$3", [spec.name, tenant.id, legacyName]);
+      tenant.name = spec.name;
+    }
     const actor = { tenantId: tenant.id, subjectId: admin!.subjectId };
-    let venue = (await listVenues(db, actor)).find((value) => value.name === "省体校区（模拟）");
+    let venue = (await listVenues(db, actor)).find((value) => value.name === venueName || value.name === "省体校区（模拟）");
     if (!venue)
       venue = await createVenue(db, actor, {
-        name: "省体校区（模拟）",
+        name: venueName,
         address: "模拟地址 · 仅用于本地验收",
         timezone: "Asia/Shanghai",
       });
@@ -89,13 +95,16 @@ try {
       venue = await updateVenue(db, actor, {
         id: venue.id,
         expectedRevision: venue.catalogRevision,
-        name: venue.name,
+        name: venueName,
         address: venue.address,
         timezone: venue.timezone,
         active: true,
         openingHours: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMinute: 420, endMinute: 1380 })),
         minimumBookingMinutes: 30,
       });
+    else if (venue.name !== venueName)
+      venue = await updateVenue(db, actor, { ...venue, name: venueName,
+        expectedRevision: venue.catalogRevision, minimumBookingMinutes: venue.minimumBookingMinutes });
     let courts = await listCourts(db, actor, venue.id);
     for (let index = 1; index <= spec.courtCount; index++) {
       let court = courts.find((value) => value.name === `${index} 号场`);
@@ -137,7 +146,7 @@ try {
         await createLocalAccount(db, {
           username: "demo.staff",
           password,
-          displayName: "演示前台（模拟）",
+          displayName: "演示前台",
           tenantId: tenant.id,
           role: "STAFF",
           allVenues: true,

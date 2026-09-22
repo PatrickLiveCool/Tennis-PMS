@@ -71,7 +71,7 @@ try {
   await m.getByRole("button", { name: "1 号场 10:00 选场", exact: true }).tap();
   await m.getByLabel("姓名", { exact: true }).fill("手机冲突草稿保留");
   const session = await (await m.request.get("/api/tennis/session")).json();
-  const venueId = await m.getByLabel("切换场馆", { exact: true }).inputValue();
+  const venueId = await m.getByLabel("切换校区", { exact: true }).inputValue();
   const headers = { origin: "http://127.0.0.1:4273", "x-csrf-token": session.csrfToken, "x-workspace-version": String(session.contextVersion) };
   const lines = await m.evaluate(() => JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find((k) => k.startsWith("tennis:booking:")))).lines);
   const competingCustomer = { commandKey: crypto.randomUUID(), nickname: "手机竞争占用合成客", phone: reserveSyntheticPhone() };

@@ -62,7 +62,7 @@ export function MembersPage({
   const [topup, setTopup] = useState(false);
   return (
     <>
-      <PageHeading title="客户与余额">
+      <PageHeading title="会员储值">
         <RefreshButton onClick={refreshWallet} busy={wallet.busy} />
       </PageHeading>
       <div className="tennis-members-layout">

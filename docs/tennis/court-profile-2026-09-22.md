@@ -47,6 +47,10 @@
 
 ## 验证记录
 
+新 PR 提交前完整复验：`npm run test:integration` 27 文件／344 项全部通过，包含场地保存必填、可售查询、新报价和已有订单兼容；历史 catalog 夹具列名修复后已完成全套复验。日志为 `.local-workspace/court-calendar-pr-20260922/integration.log`。沿用最新界面检查的类型检查、83 文件／1469 项单测及构建结果；PR 格式校验另有 8 项通过。
+
+本地模拟补全后的浏览器复核：原 1–4 号场重新出现可选空档；停用场地缺项或清空价格仍不能保存，资料完整且明确填 0 元可以保存。仅编辑并关闭未保存的临时草稿，没有额外创建场地或订单。本地 API 与预览均已更新；本线程 catalog 定点复验日志为 `catalog-rerun.log`。以下较早记录保留当时事实，其中分步新建、缺项保存和清空价格的旧行为已由最新规则取代。
+
 保存必填规则提交前复核：类型检查、构建及 81 文件／1457 项单元测试通过。最新完整集成首跑 343／344 项通过，唯一失败为历史场地测试夹具错误写入不存在的 `environment` 数据库列；改回已有的 `indoor` 列后，所在 catalog 集成文件 12／12 项复验通过。日志见本机忽略目录 `.local-workspace/court-required-save-20260922/`，保留首跑结果和 `catalog-commit-recheck.log`，未将首跑写成全绿。
 
 本次可售必填与紧凑展示补充：`npm run typecheck`、`npm test`（81 文件／1457 项）、`npm run test:integration`（仅 tennis_test，27 文件／343 项）、`npm run build` 全部通过；最终修正后 15 项展示与必填定点测试通过。日志保存在本机忽略目录 `.local-workspace/court-purchase-20260922/`。本地 API 与 4273 预览已更新。

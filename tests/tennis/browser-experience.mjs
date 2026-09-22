@@ -127,7 +127,7 @@ console.log("three simultaneous courts booked");
 await day(testDate(2));
 await drag(slot(1, "09:00"), slot(3, "09:45"));
 const session = await (await page.request.get("/api/tennis/session")).json();
-const venueId = await page.getByLabel("切换场馆", { exact: true }).inputValue();
+const venueId = await page.getByLabel("切换校区", { exact: true }).inputValue();
 const draft = await page.evaluate(() => {
   const key = Object.keys(sessionStorage).find((k) => k.startsWith("tennis:booking:"));
   return JSON.parse(sessionStorage.getItem(key));

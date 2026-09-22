@@ -1,4 +1,5 @@
 import { SCHEDULE_COURT_WIDTH } from "./schedule-layout";
+import { scheduleTimeAxis } from "./schedule-time-axis";
 import { matchesCourtFilter } from "../../../../packages/domain/src/tennis-court-profile";
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -62,11 +63,7 @@ export function ScheduleBoard({
     observer.observe(board);
     return () => observer.disconnect();
   }, [scrollRef]);
-  // Keep complete clock labels readable on narrow boards and long operating days.
-  const labelEvery = Math.max(
-    1,
-    Math.ceil(((ticks.length / 4) * 40) / Math.max(1, boardWidth - SCHEDULE_COURT_WIDTH)),
-  );
+  const timePoints = scheduleTimeAxis(ticks, boardWidth - SCHEDULE_COURT_WIDTH);
   return (
     <div
       ref={scrollRef}
@@ -88,25 +85,20 @@ export function ScheduleBoard({
         }}
       >
         <div className="tennis-grid-corner">{dateNavigation}</div>
-        {ticks.map(
-          (t, index) =>
-            index % (4 * labelEvery) === 0 && (
+        {timePoints.length > 0 && (
+          <div className="tennis-time-axis" role="group" aria-label="时间刻度" style={{ gridColumn: "2 / -1" }}>
+            {timePoints.map((point) => (
               <div
-                key={t}
-                className="tennis-grid-time is-hour"
-                data-slot-start={index}
-                style={{
-                  gridColumn: `span ${Math.min(4 * labelEvery, ticks.length - index)}`,
-                }}
+                key={point.minute}
+                className={`tennis-time-tick${point.hour ? " is-hour" : ""}${point.edge ? ` is-${point.edge}` : ""}`}
+                data-slot-start={point.slot}
+                data-time-minute={point.minute}
+                style={{ left: `${point.fraction * 100}%` }}
               >
-                {((ticks.length - index) / ticks.length) * (boardWidth - SCHEDULE_COURT_WIDTH) >=
-                34 ? (
-                  <span>{minuteLabel(t)}</span>
-                ) : (
-                  ""
-                )}
+                {point.label && <span className="tennis-time-label">{minuteLabel(point.minute)}</span>}
               </div>
-            ),
+            ))}
+          </div>
         )}
       </div>
       {emptyState ?? dates.map((date) => {

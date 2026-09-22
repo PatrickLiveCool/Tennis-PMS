@@ -29,6 +29,16 @@ interface Gesture {
   moved: boolean;
   resize?: { index: number; edge: "start" | "end" };
 }
+function occupancyDetails(occupancy: Schedule["occupancies"][number]) {
+  const state = occupancy.kind === "COURSE" ? "course"
+    : occupancy.kind === "MAINTENANCE" ? "maintenance"
+      : occupancy.kind === "BOOKING" ? occupancy.status === "HELD" ? "held" : "booked"
+        : "blocked";
+  const status = state === "course" ? "课程" : state === "maintenance" ? "维护"
+    : state === "held" ? "待付款" : state === "booked" ? "已预订" : "占用";
+  const customerName = state === "held" || state === "booked" ? occupancy.customerName?.trim() : undefined;
+  return { state, status, primary: customerName || status };
+}
 export function ScheduleGrid({
   schedule,
   venue,
@@ -342,11 +352,7 @@ export function ScheduleGrid({
                       w.endMinute >= t + 15,
                   );
                 const state = occupancy
-                  ? occupancy.kind === "BOOKING"
-                    ? occupancy.status === "HELD"
-                      ? "held"
-                      : "booked"
-                    : "blocked"
+                  ? occupancyDetails(occupancy).state
                   : open
                     ? "free"
                     : "closed";
@@ -374,36 +380,23 @@ export function ScheduleGrid({
                   const left = Math.max(from, minuteOf(o.startAt)),
                     end = Math.min(from + ticks.length * 15, minuteOf(o.endAt));
                   if (end <= left) return null;
-                  const status =
-                    o.kind === "COURSE"
-                      ? "课程"
-                      : o.kind === "MAINTENANCE"
-                        ? "维护"
-                        : o.status === "HELD"
-                          ? "待付款"
-                          : "已预订";
+                  const { state, status, primary } = occupancyDetails(o);
+                  const time = `${clock(o.startAt, venue.timezone)}–${clock(o.endAt, venue.timezone)}`;
                   return (
                     <button
                       key={o.id}
-                      className={`tennis-schedule-block is-${o.kind !== "BOOKING" ? "blocked" : o.status === "HELD" ? "held" : "booked"}`}
+                      className={`tennis-schedule-block is-${state}`}
                       style={{
                         left: slotLeft((left - from) / 15),
                         width: slotWidth((end - left) / 15),
                       }}
                       disabled={!o.orderId}
                       onClick={() => o.orderId && openOrder(o.orderId)}
-                      title={`${o.customerName ?? status} · ${clock(o.startAt, venue.timezone)}–${clock(o.endAt, venue.timezone)} · ${status}`}
+                      title={[primary, primary !== status ? status : "", time].filter(Boolean).join(" · ")}
                     >
-                      <strong>{o.customerName ?? status}</strong>
-                      <span>
-                        {status === "待付款"
-                          ? "待付"
-                          : status === "已预订"
-                            ? "已订"
-                            : status}{" "}
-                        · {clock(o.startAt, venue.timezone)}–
-                        {clock(o.endAt, venue.timezone)}
-                      </span>
+                      <strong>{primary}</strong>
+                      {primary !== status && <span className="tennis-occupancy-status">{status}</span>}
+                      <span className="tennis-occupancy-time">{time}</span>
                     </button>
                   );
                 })}
@@ -540,10 +533,13 @@ export function ScheduleGrid({
                         w.startMinute <= t &&
                         w.endMinute > t,
                     );
+                  const occupancy = occupied ? occupancyDetails(occupied) : undefined;
+                  const state = occupancy?.state ?? (open ? "free" : "closed");
+                  const selectedConflict = selected >= 0 && Boolean(blocked(lines[selected]!));
                   return (
                     <button
                       key={t}
-                      className="button button-secondary"
+                      className={`button is-${state}${selected >= 0 ? " is-selected" : ""}${selectedConflict ? " has-conflict" : ""}`}
                       aria-label={`${court.name} ${minuteLabel(t)} ${selected >= 0 ? "取消已选" : occupied ? "查看占用" : open ? "选场" : "不可售"}`}
                       disabled={selected >= 0 ? disabled :
                         !occupied?.orderId &&
@@ -557,14 +553,14 @@ export function ScheduleGrid({
                             : click(row, (t - from) / 15)
                       }
                     >
-                      {minuteLabel(t)}{" "}
-                      {selected >= 0
-                        ? blocked(lines[selected]!) ? "冲突 · 取消 ×" : "已选 ×"
-                        : occupied
-                          ? (occupied.customerName ?? "占用")
+                      <span className="tennis-occupancy-time">{minuteLabel(t)}</span>{" "}
+                      <span className="tennis-occupancy-status">{selected >= 0
+                        ? selectedConflict ? "冲突 · 取消 ×" : "已选 ×"
+                        : occupancy
+                          ? [occupancy.primary, occupancy.primary !== occupancy.status ? occupancy.status : ""].filter(Boolean).join(" · ")
                           : open
                             ? "选场"
-                            : "不可售"}
+                            : "不可售"}</span>
                     </button>
                   );
                 })}

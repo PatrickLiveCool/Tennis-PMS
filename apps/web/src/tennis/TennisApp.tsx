@@ -8,6 +8,7 @@ import {
   MessagesSquare,
   Settings,
   Sparkles,
+  UserRound,
   Users,
   PanelLeftClose,
   PanelLeftOpen,
@@ -137,7 +138,7 @@ const navigation = [
   { id: "booking", name: "场地排期", icon: CalendarDays },
   { id: "today", name: "经营概览", icon: LayoutDashboard },
   { id: "orders", name: "预订订单", icon: ClipboardList },
-  { id: "members", name: "客户与余额", icon: Users },
+  { id: "members", name: "会员储值", icon: Users },
   { id: "settings", name: "场地与定价", icon: Settings },
 ];
 function Workspace({
@@ -152,7 +153,7 @@ function Workspace({
   const api = useMemo(() => createApi(session), [session]);
   const identityScope = `${session.subjectId}:${session.kind}:${session.tenantId}:${session.customerId ?? "staff"}`;
   const venues = useLoad(
-    () => (session.kind === "platform" ? Promise.resolve([]) : api<VenueRecord[]>("/venues")),
+    () => (session.kind === "platform" || session.contextValid === false ? Promise.resolve([]) : api<VenueRecord[]>("/venues")),
     [api],
   );
   const [selectedVenue, setSelectedVenue] = useDraft(`tennis:venue:${identityScope}`, "");
@@ -172,6 +173,8 @@ function Workspace({
   const [businessConversationsOpen, setBusinessConversationsOpen] = useState(false);
   const [creatingVenue, setCreatingVenue] = useState(false);
   const venue = venues.data?.find((v) => v.id === selectedVenue) ?? venues.data?.[0];
+  const tenant = session.tenants.find((item) => item.id === session.tenantId && item.kind === session.kind);
+  const workspaceName = session.kind === "platform" ? "平台运营" : tenant?.name ?? "工作空间";
   const assistantScope = `${identityScope}:${session.contextVersion}:${venue?.id}`;
   useEffect(() => {
     setAssistantOrderId(null); setAssistantOpen(false);
@@ -206,6 +209,17 @@ function Workspace({
       setBusy(false);
     }
   }
+  async function refreshSession() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      onSession(await api<Session>("/session"));
+    } catch (next) {
+      setError(next);
+    } finally {
+      setBusy(false);
+    }
+  }
   const entries = navigation
     .filter((item) => item.id !== "members" || session.kind === "customer" || permits(session, "manage_members"))
     .filter((item) => item.id !== "settings" || session.kind === "staff");
@@ -225,6 +239,12 @@ function Workspace({
           <span>{item.name}</span>
         </button>
       ))}
+      {mobile && session.platformOperator && session.kind !== "platform" && session.contextValid !== false && (
+        <button className="nav-link" disabled={busy} onClick={() => void context("platform:")}>
+          <Building2 size={19} aria-hidden="true" />
+          <span>平台运营</span>
+        </button>
+      )}
     </nav>
   );
   return (
@@ -258,23 +278,37 @@ function Workspace({
           </div>
         )}
         <div className="sidebar-utilities">
-          {session.kind === "staff" && permits(session, "book") && (
-            <button className="nav-link" onClick={() => setBusinessConversationsOpen(true)}>
-              <MessagesSquare size={19} />
-              <span>咨询与协助</span>
-            </button>
+          {session.platformOperator && session.kind !== "platform" && session.contextValid !== false && (
+            <div className="tennis-sidebar-utility-slot">
+              <button className="tennis-sidebar-utility-trigger" aria-label="平台运营" title="平台运营" disabled={busy} onClick={() => void context("platform:")}>
+                <Building2 size={18} aria-hidden="true" />
+                <span>平台运营</span>
+              </button>
+            </div>
           )}
-          <button
-            disabled={session.kind !== "customer" && !permits(session, "read")}
-            className="nav-link tennis-assistant-trigger"
-            aria-controls="ai-assistant-panel" aria-expanded={assistantOpen}
-            onClick={() => setAssistantOpen(!assistantOpen)}
-          >
-            <Sparkles size={19} />
-            <span>AI 助手</span>
-          </button>
+          {session.kind === "staff" && permits(session, "book") && (
+            <div className="tennis-sidebar-utility-slot">
+              <button className="tennis-sidebar-utility-trigger" aria-label="咨询与协助" title="咨询与协助" onClick={() => setBusinessConversationsOpen(true)}>
+                <MessagesSquare size={18} aria-hidden="true" />
+                <span>咨询与协助</span>
+              </button>
+            </div>
+          )}
+          <div className="tennis-sidebar-utility-slot">
+            <button
+              disabled={session.kind !== "customer" && !permits(session, "read")}
+              className="tennis-sidebar-utility-trigger"
+              aria-label="AI 助手" title="AI 助手"
+              aria-controls="ai-assistant-panel" aria-expanded={assistantOpen}
+              onClick={() => setAssistantOpen(!assistantOpen)}
+            >
+              <Sparkles size={18} aria-hidden="true" />
+              <span>AI 助手</span>
+            </button>
+          </div>
           <div className="sidebar-user">
-            <div>
+            <UserRound size={18} aria-hidden="true" />
+            <div title={session.displayName}>
               <strong>{session.displayName}</strong>
               <span>
                 {session.kind === "platform" ? "平台运营方" : session.kind === "customer" ? "客户" : "工作人员"}
@@ -282,7 +316,7 @@ function Workspace({
             </div>
             <button
               className="icon-button"
-              title="退出登录"
+              title={`退出登录 · ${session.displayName}`}
               aria-label="退出登录"
               disabled={busy}
               onClick={() => void logout()}
@@ -295,53 +329,33 @@ function Workspace({
       <div className="tennis-main-shell">
         <header className="tennis-workspace-header">
           <div className="tennis-workspace-select">
-            <Building2 size={18} />
-            <select
-              aria-label="切换商家与身份"
-              value={session.contextValid === false ? "" : `${session.kind}:${session.tenantId ?? ""}`}
-              onChange={(e) => void context(e.target.value)}
-              disabled={busy}
-            >
-              {session.contextValid === false && (
-                <option value="" disabled>
-                  请选择工作空间
-                </option>
-              )}
-              {session.platformOperator && <option value="platform:">平台运营</option>}
-              {session.tenants.map((t) => (
-                <option value={`${t.kind}:${t.id}`} key={`${t.kind}:${t.id}`}>
-                  {t.name}
-                  {t.kind === "customer" ? " · 客户" : ""}
-                </option>
-              ))}
-            </select>
-            {session.kind !== "platform" && (
-              <select
-                aria-label="切换场馆"
-                value={venue?.id ?? ""}
-                onChange={(e) => {
-                  setSelectedVenue(e.target.value);
-                  setAssistantOpen(false);
-                }}
-                disabled={busy || venues.busy}
-              >
-                {venues.data?.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
+            <div className="tennis-tenant-name">
+              <Building2 size={18} aria-hidden="true" />
+              <strong>{workspaceName}</strong>
+            </div>
+            {session.kind !== "platform" && session.contextValid !== false && (
+              <label className="tennis-campus-switch">
+                <select
+                  aria-label="切换校区"
+                  value={venue?.id ?? ""}
+                  onChange={(e) => {
+                    setSelectedVenue(e.target.value);
+                    setAssistantOpen(false);
+                    setBusinessConversationsOpen(false);
+                  }}
+                  disabled={busy || venues.busy || !venues.data?.length}
+                >
+                  {!venue && <option value="">{venues.busy ? "正在加载校区…" : "暂无可访问校区"}</option>}
+                  {venues.data?.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
           </div>
           <div className="tennis-header-tools">
-            <button
-              className="icon-button"
-              title="刷新登录与工作空间"
-              aria-label="刷新登录与工作空间"
-              onClick={() => void api<Session>("/session").then(onSession).catch(setError)}
-            >
-              ↻
-            </button>
             {session.localSimulation && <span className="tennis-demo-badge">本地模拟</span>}
             {session.kind === "staff" && permits(session, "book") && (
               <button className="icon-button" aria-label="打开咨询与协助" title="咨询与协助" onClick={() => setBusinessConversationsOpen(true)}>
@@ -366,10 +380,24 @@ function Workspace({
           <ErrorNotice error={error} />
           {session.contextValid === false ? (
             <Panel>
-              <EmptyState title="当前账号权限有变化" detail="请切换账号或重新登录。" />
+              <EmptyState title="当前工作空间暂不可用" detail={session.platformOperator || session.tenants.length ? "请选择可访问的工作空间继续。" : "请联系管理员恢复权限，或退出后使用其他账号登录。"} />
+              <div className="tennis-workspace-recovery">
+                {(session.platformOperator || session.tenants.length > 0) && (
+                  <WorkspaceChoice session={session} busy={busy} includePlatform onChange={(value) => void context(value)} />
+                )}
+                <button className="button button-secondary" disabled={busy} onClick={() => void refreshSession()}>重新读取登录信息</button>
+                <button className="button button-secondary" disabled={busy} onClick={() => void logout()}>退出登录</button>
+              </div>
             </Panel>
           ) : session.kind === "platform" ? (
-            <PlatformPage api={api} scope={session.subjectId} />
+            <>
+              {session.tenants.length > 0 && (
+                <Panel title="进入业务工作台">
+                  <WorkspaceChoice session={session} busy={busy} onChange={(value) => void context(value)} />
+                </Panel>
+              )}
+              <PlatformPage api={api} scope={session.subjectId} />
+            </>
           ) : !venue ? (
             <Panel>
               <ErrorNotice error={venues.error} retry={() => void venues.refresh()} />
@@ -438,6 +466,24 @@ function Workspace({
       </div>
     </div>
   );
+}
+
+function WorkspaceChoice({ session, busy, includePlatform = false, onChange }: {
+  session: Session;
+  busy: boolean;
+  includePlatform?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return <label className="tennis-workspace-choice">
+    <span>工作空间</span>
+    <select aria-label="选择工作空间" value="" disabled={busy} onChange={(event) => onChange(event.target.value)}>
+      <option value="" disabled>请选择工作空间</option>
+      {includePlatform && session.platformOperator && <option value="platform:">平台运营</option>}
+      {session.tenants.map((item) => <option value={`${item.kind}:${item.id}`} key={`${item.kind}:${item.id}`}>
+        {item.name}{item.kind === "customer" ? " · 客户" : " · 工作人员"}
+      </option>)}
+    </select>
+  </label>;
 }
 
 function BusinessWorkspace({

@@ -16,6 +16,7 @@ import { OccupancyPanel } from "./OccupancyPanel";
 import { BookingCustomer, type GuestDraft } from "./BookingCustomer";
 import { InfoHint } from "./InfoHint";
 import { ScheduleBoard } from "./ScheduleBoard";
+import { ScheduleDatePicker } from "./ScheduleDatePicker";
 import { shiftDate, useScheduleRange } from "./useScheduleRange";
 import { appendSelection } from "./selection";
 import type {
@@ -458,12 +459,14 @@ export function BookingPage({
     }
   }
   const quoteExpired = draft.quote && Date.parse(draft.quote.expiresAt) <= now;
+  const heldOrderCount = new Set(
+    visibleDates.flatMap((date) => range.days[date]?.occupancies
+      .filter((occupancy) => occupancy.status === "HELD" && occupancy.orderId)
+      .map((occupancy) => occupancy.orderId) ?? []),
+  ).size;
   const dateNavigation = (
     <div className="tennis-grid-date-navigation" role="group" aria-label="排场日期导航">
-      <label className="tennis-grid-date-picker">
-        <span className="sr-only">排场日期</span>
-        <input type="date" value={draft.date} onChange={(e) => navigate(e.target.value)} />
-      </label>
+      <ScheduleDatePicker value={draft.date} onChange={navigate} today={dateValue(new Date(now), venue.timezone)} />
       <button type="button" className="tennis-grid-date-previous"
         aria-label={`向前 ${viewDays} 天`} title={`向前 ${viewDays} 天`} onClick={() => moveDate(-viewDays)}>
         <ChevronLeft size={15} aria-hidden="true" />
@@ -477,10 +480,11 @@ export function BookingPage({
   );
   return (
     <>
-      <h1 className="sr-only" tabIndex={-1}>
-        场地排期
-      </h1>
       <div className="tennis-schedule-toolbar">
+        <div className="tennis-schedule-title">
+          <h1 tabIndex={-1}>场地排期</h1>
+          <span>{visibleCourts.length} 片球场</span>
+        </div>
         <div className="tennis-schedule-controls">
           <div
             className="tennis-view-switch"
@@ -534,19 +538,18 @@ export function BookingPage({
         </div>
       </div>
       <div className="tennis-schedule-meta">
-        <span>
-          {visibleCourts.length} 片球场 ·{" "}
-          {
-            new Set(
-              visibleDates.flatMap(
-                (date) =>
-                  range.days[date]?.occupancies
-                    .filter((o) => o.status === "HELD")
-                    .map((o) => o.orderId) ?? [],
-              ),
-            ).size
-          }{" "}
-          笔待付款
+        <div className="tennis-legend">
+          <span className="is-free">可预订</span>
+          <span className="is-held">待付款</span>
+          <span className="is-booked">已预订</span>
+          <span className="is-course">课程</span>
+          <span className="is-maintenance">维护</span>
+          <InfoHint label="排场操作帮助">
+            点击空场选 1 小时，拖动可同时选多片。点已选时段可取消，拖边缘可调整时长；Esc 取消拖动。不同日期分别选，确认预订后才占场。
+          </InfoHint>
+        </div>
+        <div className="tennis-schedule-status">
+          {heldOrderCount > 0 && <span className="tennis-pending-count">{heldOrderCount} 笔待付款</span>}
           <span
             className={`tennis-sync-status ${range.error ? "is-error" : ""}`}
             role="status"
@@ -559,15 +562,6 @@ export function BookingPage({
                   ? "待更新"
                   : "已同步"}
           </span>
-        </span>
-        <div className="tennis-legend">
-          <span className="is-free">可预订</span>
-          <span className="is-held">待付款</span>
-          <span className="is-booked">已预订</span>
-          <span className="is-course">课程 / 维护</span>
-          <InfoHint label="排场操作帮助">
-            点击空场选 1 小时，拖动可同时选多片。点已选时段可取消，拖边缘可调整时长；Esc 取消拖动。不同日期分别选，确认预订后才占场。
-          </InfoHint>
         </div>
       </div>
       <ErrorNotice
