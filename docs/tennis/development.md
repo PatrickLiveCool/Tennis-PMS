@@ -2,6 +2,8 @@
 
 这是网球项目 PMS 组件。当前开发包含独立网球认证/API、交易服务和运营界面；准确验证状态见 [实施状态](implementation-status.md)。Green PMS fork 的住房源码保留供定点复用；本地付款/退款为显式模拟，不能视作真实微信接入。
 
+小量客户线上演示使用独立的 [格林网球云端 Demo](cloud-demo.md)：专用镜像、Compose、数据库、一个租户和两个校区。它使用独立凭据和 HTTPS，仍明确模拟支付，不替代真实生产接入。
+
 ## 首次运行
 
 使用 Node.js 22.x、npm 和 Docker Compose v2+，在仓库根目录执行：

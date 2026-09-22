@@ -19,6 +19,7 @@
     "tennis:web": "vite --config apps/web/vite.tennis.config.ts",
     "tennis:preview": "vite preview --config apps/web/vite.tennis.config.ts",
     "tennis:demo": "node --import tsx scripts/tennis/demo.mts",
+    "tennis:demo:cloud": "node --import tsx scripts/tennis/cloud-demo-init.mts",
     "integration:worker": "node scripts/tennis/legacy-disabled.mjs",
     "wecom:worker": "node scripts/tennis/legacy-disabled.mjs",
     "db:migrate": "npm run tennis:db:migrate",

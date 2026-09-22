@@ -156,6 +156,59 @@ afterAll(async () => {
 });
 
 describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
+  it("supports HTTPS login before AI provider setup and clears the same secure session on logout", async () => {
+    await app.close();
+    const httpsOrigin = "https://tennis.example.com";
+    app = await buildTennisServer({
+      db, gateway, allowSimulation: true, secureCookies: true, origins: [httpsOrigin],
+      trustedProxy: "172.30.42.1", aiEncryptionKey: Buffer.alloc(32, 7),
+    });
+    const credentials = await account({ tenantId: first.actor.tenantId, role: "ADMIN" });
+    const loggedIn = await app.inject({
+      method: "POST", url: "/api/tennis/auth/login", headers: { origin: httpsOrigin },
+      payload: { username: credentials.username, password: credentials.password },
+    });
+    expect(loggedIn.statusCode, loggedIn.body).toBe(200);
+    const cookie = String(loggedIn.headers["set-cookie"]);
+    for (const attribute of ["Path=/", "HttpOnly", "Secure", "SameSite=Strict"])
+      expect(cookie).toContain(attribute);
+    const client: Client = { app, cookie: cookie.split(";")[0]!, session: loggedIn.json() };
+    const headers = { origin: httpsOrigin };
+    expect((await request(client, "GET", "/venues", undefined, headers)).statusCode).toBe(200);
+    const assistant = await request(client, "GET", "/backoffice-assistant/status", undefined, headers);
+    expect(assistant.statusCode, assistant.body).toBe(200);
+    expect(assistant.json()).toMatchObject({ configured: false, connectionAvailable: false });
+    const badCsrf = await request(client, "POST", "/auth/logout", {}, { ...headers, "x-csrf-token": "" });
+    expect(badCsrf.statusCode).toBe(403);
+    expect(badCsrf.json().error.code).toBe("CSRF_REJECTED");
+    const badOrigin = await request(client, "POST", "/auth/logout", {});
+    expect(badOrigin.statusCode).toBe(403);
+    expect(badOrigin.json().error.code).toBe("ORIGIN_REJECTED");
+    const loggedOut = await request(client, "POST", "/auth/logout", {}, headers);
+    expect(loggedOut.statusCode, loggedOut.body).toBe(200);
+    const clearedCookie = String(loggedOut.headers["set-cookie"]);
+    for (const attribute of ["Path=/", "HttpOnly", "Secure", "SameSite=Strict", "Max-Age=0"])
+      expect(clearedCookie).toContain(attribute);
+    expect((await request(client, "GET", "/session", undefined, headers)).statusCode).toBe(401);
+  });
+
+  it("uses forwarded client IPs only from the exact trusted proxy for login rate limits", async () => {
+    await app.close();
+    app = await buildTennisServer({ db, gateway, allowSimulation: true, trustedProxy: "172.30.42.1" });
+    for (let index = 1; index <= 21; index++) {
+      const direct = await app.inject({
+        method: "POST", url: "/api/tennis/auth/login", remoteAddress: "192.0.2.10",
+        headers: { origin, "x-forwarded-for": `198.51.100.${index}` }, payload: {},
+      });
+      expect(direct.statusCode).toBe(index <= 20 ? 400 : 429);
+      const proxied = await app.inject({
+        method: "POST", url: "/api/tennis/auth/login", remoteAddress: "172.30.42.1",
+        headers: { origin, "x-forwarded-for": `198.51.100.${index}` }, payload: {},
+      });
+      expect(proxied.statusCode).toBe(400);
+    }
+  });
+
   it("round-trips the complete court form with an atomic price and rejects invalid attributes", async () => {
     const url = `/venues/${first.venueId}/courts`;
     const missingEnvironment = await request(staff, "POST", url, { name: "未选择环境" });
@@ -325,6 +378,7 @@ describe("authenticated Tennis HTTP boundary with real PostgreSQL", () => {
     expect(loggedIn.statusCode, loggedIn.body).toBe(200);
     expect(loggedIn.headers["set-cookie"]).toContain("HttpOnly");
     expect(loggedIn.headers["set-cookie"]).toContain("SameSite=Strict");
+    expect(loggedIn.headers["set-cookie"]).not.toContain("Secure");
     expect(loggedIn.json()).not.toHaveProperty("token");
     expect(loggedIn.json()).not.toHaveProperty("sessionId");
     expect(loggedIn.json()).not.toHaveProperty("actor");

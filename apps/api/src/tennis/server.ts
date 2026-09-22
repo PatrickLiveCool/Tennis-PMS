@@ -130,6 +130,9 @@ export interface TennisServerOptions {
   gateway: PaymentProviderPort;
   allowSimulation: boolean;
   origins?: string[];
+  secureCookies?: boolean;
+  /** Exact reverse-proxy IP; the deployment must publish its HTTP port only on host loopback. */
+  trustedProxy?: string;
   runExpiryWorker?: boolean;
   logger?: boolean;
   aiEncryptionKey?: Buffer;
@@ -244,6 +247,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
       ? options.gateway.withStore(postgresMockChannelStore(db))
       : options.gateway;
   const app = Fastify({
+    trustProxy: options.trustedProxy ?? false,
     logger: options.logger
       ? {
           redact: [
@@ -263,6 +267,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
   const origins = new Set(
     options.origins ?? ["http://127.0.0.1:4273", "http://localhost:4273", "http://127.0.0.1:4200"],
   );
+  const sessionCookie = { path: "/", httpOnly: true, sameSite: "strict" as const, secure: options.secureCookies ?? false };
   const contexts = new WeakMap<FastifyRequest, AuthContext>();
   const session = (request: FastifyRequest) => {
     const value = contexts.get(request);
@@ -385,10 +390,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
     async (request, reply) => {
       const result = await login(db, request.body);
       reply.setCookie("tennis_session", result.token, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "strict",
-        secure: false,
+        ...sessionCookie,
         maxAge: 8 * 3600,
       });
       return view(result.session);
@@ -412,7 +414,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
   );
   app.post(`${base}/auth/logout`, async (request, reply) => {
     await logout(db, request.cookies.tennis_session!);
-    reply.clearCookie("tennis_session", { path: "/" });
+    reply.clearCookie("tennis_session", sessionCookie);
     return { ok: true };
   });
   get("/platform/tenants", (request) => listPlatformTenants(db, session(request).subjectId));

@@ -1,0 +1,107 @@
+# Dedicated simulation environment. Build images locally; never build on the shared server.
+name: tennis-demo
+
+x-common: &common
+  image: ${TENNIS_DEMO_IMAGE:?Set an immutable demo image}
+  pull_policy: never
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 96
+  mem_limit: 384m
+  memswap_limit: 512m
+  cpus: 1.0
+  logging:
+    driver: json-file
+    options: {max-size: "5m", max-file: "3"}
+
+x-environment: &environment
+  NODE_ENV: development
+  NODE_OPTIONS: --max-old-space-size=256
+  TENNIS_DEMO_MODE: "true"
+  TENNIS_ALLOW_SIMULATION: "true"
+  TENNIS_ALLOW_NONLOCAL_DATABASE: "true"
+  TENNIS_DATABASE_URL: postgres://tennis_demo:${TENNIS_DEMO_DB_PASSWORD:?Set a dedicated database password}@postgres:5432/tennis_demo
+
+services:
+  postgres:
+    image: ${TENNIS_DEMO_POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tennis_demo
+      POSTGRES_PASSWORD: ${TENNIS_DEMO_DB_PASSWORD:?Set a dedicated database password}
+      POSTGRES_DB: tennis_demo
+    command: [postgres, -c, shared_buffers=64MB, -c, max_connections=24, -c, work_mem=2MB, -c, maintenance_work_mem=32MB]
+    shm_size: 64m
+    mem_limit: 256m
+    memswap_limit: 384m
+    cpus: 0.75
+    pids_limit: 96
+    volumes:
+      - tennis-demo-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U tennis_demo -d tennis_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
+
+  migrate:
+    <<: *common
+    profiles: [bootstrap]
+    command: [node, scripts/tennis/database.mjs]
+    environment: *environment
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  seed:
+    <<: *common
+    profiles: [bootstrap]
+    command: [node, scripts/tennis/cloud-demo-init.mjs]
+    environment:
+      <<: *environment
+      TENNIS_DEMO_PLATFORM_PASSWORD: ${TENNIS_DEMO_PLATFORM_PASSWORD:-}
+      TENNIS_DEMO_ADMIN_PASSWORD: ${TENNIS_DEMO_ADMIN_PASSWORD:-}
+      TENNIS_DEMO_STAFF_PASSWORD: ${TENNIS_DEMO_STAFF_PASSWORD:-}
+      TENNIS_DEMO_CUSTOMER_PASSWORD: ${TENNIS_DEMO_CUSTOMER_PASSWORD:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  app:
+    <<: *common
+    restart: unless-stopped
+    environment:
+      <<: *environment
+      TENNIS_HTTP_HOST: 0.0.0.0
+      TENNIS_HTTP_PORT: "4200"
+      TENNIS_WEB_ORIGINS: ${TENNIS_WEB_ORIGINS:?Set the single HTTPS demo origin}
+      TENNIS_TRUSTED_PROXY: 172.30.42.1
+      TENNIS_PAYMENT_SIGNING_KEY: ${TENNIS_PAYMENT_SIGNING_KEY:?Set a dedicated simulation signing key}
+      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:?Set a dedicated AI encryption key}
+    ports:
+      - "127.0.0.1:${TENNIS_DEMO_HOST_PORT:-4200}:4200"
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4200/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 15s
+
+volumes:
+  tennis-demo-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.42.0/24
+          gateway: 172.30.42.1
