@@ -13,6 +13,10 @@
 - 助手侧栏对齐 GreenPMS v1.7.2，支持 Markdown 表格、流式回答、查询进度和停止生成。与订单独立开关，桌面并列、手机上下分屏；关闭保留输入与阅读位置。手机回车换行、桌面回车发送并保护中文输入法。恢复只查询原消息，不自动重复调用模型。
 - `connectionAvailable` 表示传输能力已接入，`configReady` 表示平台配置完整，`configured` 两者同时满足；只有“测试连接”成功才证明当前供应商可用。
 
+## 提问分析（2026-09-23）
+
+后台助手的新提问已接入独立脱敏分析记录、UTC 日汇总和 Codex 只读导出。复用本人回答的“已解决／未解决”反馈，按租户、场馆隔离；分析故障不触发模型重试，分析锁等待有独立短时限。历史聊天不回填。存储、保留、专用账号与导出方法见 [问题分析与 Codex 导出](ai-question-records.md)。
+
 ## HTTP 契约
 
 - `GET/PUT /api/tennis/platform/ai-config`：独立的 `backoffice_ai_config`；GET 返回 enabled/model/baseUrl/hasApiKey/revision/connectionAvailable。PUT 只接受 enabled/model/baseUrl/apiKey?/expectedRevision。省略密钥保持原值，空字符串清空；已有凭证时改变来源域名或清空地址必须显式重新提交/清空凭证。
@@ -20,7 +24,7 @@
 - `GET /api/tennis/backoffice-assistant/status`：员工权限，返回 enabled/configReady/configured/connectionAvailable。
 - `GET/POST /api/tennis/backoffice-assistant/conversations`：按当前员工、租户、场馆隔离；GET query 和 POST body 都用 `{venueId}`。
 - `GET /conversations/:id`：本人会话，最多最近 100 条消息/请求，超时请求变为 FAILED。
-- `POST /conversations/:id/messages`：`{messageId,content,context?:{page,orderId?,date?,viewDays?,selection?}}`，默认返回 JSON 会话详情；`Accept: text/event-stream` 返回 `status/delta/result/error` 事件，最终 result 为同一会话详情。两者复用身份、CSRF、工作空间版本及消息幂等校验。相同 messageId 只执行一次，相同 ID 不同输入拒绝，重试已失败请求须用新 ID。断开流中止本次生成，迟到回答不能落库。
+- `POST /conversations/:id/messages`：`{messageId,content,source?:"USER"|"SUGGESTION"|"UNKNOWN",context?:{page,orderId?,date?,viewDays?,selection?}}`，默认返回 JSON 会话详情；`Accept: text/event-stream` 返回 `status/delta/result/error` 事件，最终 result 为同一会话详情。两者复用身份、CSRF、工作空间版本及消息幂等校验。相同 messageId 只执行一次，相同 ID 不同输入拒绝，重试已失败请求须用新 ID。断开流中止本次生成，迟到回答不能落库。
 - `POST /conversations/:id/messages/:messageId/feedback`：`{resolved}`，仅本人的助手消息。
 
 既有 `/assistant`、`/agent`、`/gateway` 的 Runtime 会话、业务操作、身份及接管保留。迁移 024 不复制原 `platform_ai_config.encrypted_key`：原 Key 属于 Runtime；新模型 Key 使用独立数据表和 AES-GCM 用途标签。

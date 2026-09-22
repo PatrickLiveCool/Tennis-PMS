@@ -46,6 +46,9 @@ export async function removeTenantFixture(db: pg.Pool, fixture: TenantFixture): 
   try {
     await tx.query("BEGIN");
     for (const table of [
+      "ai_question_reader_grants",
+      "ai_question_records",
+      "ai_question_daily",
       "wecom_receipts",
       "backoffice_conversations",
       "cash_refund_transactions",

@@ -6,18 +6,20 @@ import type { BookingActor } from "../../../../packages/db/src/tennis/customers.
 import { backofficeAssistantStatus, createBackofficeConversation, getBackofficeAIConfig, getBackofficeConversation, listBackofficeConversations, saveBackofficeAIConfig, sendBackofficeMessage, setBackofficeMessageFeedback, testBackofficeAIConfig } from "../../../../packages/db/src/tennis/backoffice-assistant.ts";
 import { BackofficeModelConnectionError, backofficeExecutor, testBackofficeModel } from "./backoffice-model.ts";
 import type { ModelTransport } from "../assistant-model.ts";
+import type { QuestionLogger } from "../../../../packages/db/src/tennis/assistant-question-records.ts";
 
 export function registerBackofficeAssistantRoutes(app: FastifyInstance, input: {
   db: pg.Pool; key: Buffer; actor: (request: FastifyRequest) => BookingActor;
   subject: (request: FastifyRequest) => string; modelTransport?: ModelTransport;
 }) {
   const base = "/api/tennis", assistant = `${base}/backoffice-assistant`, connectionAvailable = !!input.modelTransport;
+  const questionLogger: QuestionLogger = (code) => app.log.warn({ code }, "Assistant question analytics unavailable");
   const id = Type.String({ minLength: 1, maxLength: 200 });
   const config = Type.Object({ enabled: Type.Boolean(), model: Type.String({ maxLength: 200 }), baseUrl: Type.String({ maxLength: 2000 }), apiKey: Type.Optional(Type.String({ maxLength: 4096 })), expectedRevision: Type.Integer({ minimum: 1 }) }, { additionalProperties: false });
   const test = Type.Object({ expectedRevision: Type.Integer({ minimum: 1 }) }, { additionalProperties: false });
   const venue = Type.Object({ venueId: id }, { additionalProperties: false });
   const params = Type.Object({ id }, { additionalProperties: false });
-  const message = Type.Object({ messageId: id, content: Type.String({ minLength: 1, maxLength: 8000 }), context: Type.Optional(Type.Object({ page: Type.String({ maxLength: 100 }), orderId: Type.Optional(id), date: Type.Optional(Type.String({ maxLength: 10 })), viewDays: Type.Optional(Type.Integer()), selection: Type.Optional(Type.Array(Type.Object({ courtId: id, startAt: Type.String({ maxLength: 40 }), endAt: Type.String({ maxLength: 40 }) }, { additionalProperties: false }), { maxItems: 32 })) }, { additionalProperties: false })) }, { additionalProperties: false });
+  const message = Type.Object({ messageId: id, source: Type.Optional(Type.Union([Type.Literal("USER"), Type.Literal("SUGGESTION"), Type.Literal("UNKNOWN")])), content: Type.String({ minLength: 1, maxLength: 8000 }), context: Type.Optional(Type.Object({ page: Type.String({ maxLength: 100 }), orderId: Type.Optional(id), date: Type.Optional(Type.String({ maxLength: 10 })), viewDays: Type.Optional(Type.Integer()), selection: Type.Optional(Type.Array(Type.Object({ courtId: id, startAt: Type.String({ maxLength: 40 }), endAt: Type.String({ maxLength: 40 }) }, { additionalProperties: false }), { maxItems: 32 })) }, { additionalProperties: false })) }, { additionalProperties: false });
   const feedback = Type.Object({ resolved: Type.Boolean() }, { additionalProperties: false });
   app.get(`${base}/platform/ai-config`, async (request) => ({ ...await getBackofficeAIConfig(input.db, input.subject(request)), connectionAvailable }));
   app.put<{ Body: Static<typeof config> }>(`${base}/platform/ai-config`, { schema: { body: config } }, async (request) => ({ ...await saveBackofficeAIConfig(input.db, input.subject(request), input.key, request.body), connectionAvailable }));
@@ -37,15 +39,15 @@ export function registerBackofficeAssistantRoutes(app: FastifyInstance, input: {
     const actor = input.actor(request);
     await getBackofficeConversation(input.db, actor, request.params.id);
     const execute = backofficeExecutor(input.db, actor, input.modelTransport);
-    if (!request.headers.accept?.includes("text/event-stream")) return sendBackofficeMessage(input.db, actor, input.key, request.params.id, request.body, execute);
+    if (!request.headers.accept?.includes("text/event-stream")) return sendBackofficeMessage(input.db, actor, input.key, request.params.id, request.body, execute, { questionLogger });
     const stream = new PassThrough(), controller = new AbortController();
     const emit = (event: unknown) => { if (!stream.destroyed) stream.write(`data: ${JSON.stringify(event)}\n\n`); };
     reply.raw.once("close", () => controller.abort());
     reply.type("text/event-stream").header("Cache-Control", "no-cache, no-transform").header("X-Accel-Buffering", "no");
-    void sendBackofficeMessage(input.db, actor, input.key, request.params.id, request.body, execute, { signal: controller.signal, onEvent: emit })
+    void sendBackofficeMessage(input.db, actor, input.key, request.params.id, request.body, execute, { signal: controller.signal, onEvent: emit, questionLogger })
       .then((result) => { emit({ type: "result", result }); stream.end(); })
       .catch((error) => { emit({ type: "error", code: ["ASSISTANT_BUSY", "TENANT_ACCESS_DENIED", "BACKOFFICE_ASSISTANT_NOT_CONFIGURED"].includes(error?.code) ? error.code : "ASSISTANT_UNAVAILABLE" }); stream.end(); });
     return reply.send(stream);
   });
-  app.post<{ Params: { id: string; messageId: string }; Body: Static<typeof feedback> }>(`${assistant}/conversations/:id/messages/:messageId/feedback`, { schema: { params: Type.Object({ id, messageId: id }, { additionalProperties: false }), body: feedback } }, (request) => setBackofficeMessageFeedback(input.db, input.actor(request), request.params.id, request.params.messageId, request.body.resolved));
+  app.post<{ Params: { id: string; messageId: string }; Body: Static<typeof feedback> }>(`${assistant}/conversations/:id/messages/:messageId/feedback`, { schema: { params: Type.Object({ id, messageId: id }, { additionalProperties: false }), body: feedback } }, (request) => setBackofficeMessageFeedback(input.db, input.actor(request), request.params.id, request.params.messageId, request.body.resolved, questionLogger));
 }

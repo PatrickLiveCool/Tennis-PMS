@@ -1,3 +1,4 @@
+import { maintainAssistantQuestions } from "../../../../packages/db/src/tennis/assistant-question-records.ts";
 import { courtAssetProperties, courtPriceSchema } from "./court-schema.ts";
 import { getBookingPolicy, saveBookingPolicy } from "../../../../packages/db/src/tennis/booking-policy.ts";
 import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
@@ -878,6 +879,20 @@ export async function buildTennisServer(options: TennisServerOptions) {
       actor,
       subject: (request) => session(request).subjectId,
     });
+  let questionWorker: ReturnType<typeof setInterval> | undefined;
+  let questionMaintenance: Promise<void> | undefined;
+  const maintainQuestions = () => {
+    questionMaintenance ??= maintainAssistantQuestions(db, (code) => app.log.warn({ code }, "Assistant question retention unavailable"))
+      .finally(() => { questionMaintenance = undefined; });
+    return questionMaintenance;
+  };
+  if (options.runExpiryWorker) {
+    app.addHook("onReady", async () => {
+      void maintainQuestions();
+      questionWorker = setInterval(() => { void maintainQuestions(); }, 60 * 60 * 1000);
+      questionWorker.unref();
+    });
+  }
   let ticking = false;
   if (options.runExpiryWorker) {
     worker = setInterval(() => {
@@ -895,6 +910,8 @@ export async function buildTennisServer(options: TennisServerOptions) {
   }
   app.addHook("onClose", async () => {
     if (worker) clearInterval(worker);
+    if (questionWorker) clearInterval(questionWorker);
+    await questionMaintenance;
   });
   return app;
 }
