@@ -1,5 +1,5 @@
 import { InfoHint } from "./InfoHint";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TennisApi } from "./api";
 import type { TopupPayment, Session, VenueRecord } from "./types";
 import { permits } from "./types";
@@ -17,6 +17,7 @@ import {
   useCommand,
   useDraft,
   useLoad,
+  writeStored,
 } from "./components";
 import { PaymentChannelPanel } from "./PaymentChannelPanel";
 
@@ -176,6 +177,10 @@ function TopupRecord({
       throw new Error("当前场馆无法查看这笔充值，请重新打开记录。");
     return row;
   }, [api, topupId, venue.id]);
+  useEffect(() => {
+    if (payment.data?.id === topupId && !payment.error)
+      writeStored(`tennis:member-context:${scope}`, payment.data.customerId);
+  }, [payment.data, payment.error, topupId, scope]);
   const command = useCommand(scope);
   const simulating = useRef(false);
   const [unknown, setUnknown] = useState(() =>

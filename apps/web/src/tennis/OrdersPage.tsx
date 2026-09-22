@@ -168,6 +168,10 @@ export function OrderDialog({
   onChanged: () => void;
 }) {
   const detail = useLoad(() => api<OrderDetail>(`/orders/${orderId}`), [api, orderId]);
+  useEffect(() => {
+    if (detail.data?.id === orderId && !detail.error)
+      writeStored(`tennis:member-context:${scope}`, detail.data.customerId);
+  }, [detail.data, detail.error, orderId, scope]);
   const courts = useLoad(() => api<CourtRecord[]>(`/venues/${venue.id}/courts`), [api, venue.id]);
   const [action, setAction] = useState<"pay" | "cancel" | "refund" | "free" | null>(null);
   const [reason, setReason] = useState("");

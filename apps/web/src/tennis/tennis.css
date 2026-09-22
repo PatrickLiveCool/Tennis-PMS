@@ -631,13 +631,65 @@
 }
 .tennis-members-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 .tennis-members-layout > div:first-child:last-child {
   grid-column: 1/-1;
 }
+.tennis-member-directory {
+  position: sticky;
+  top: 20px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tennis-member-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px;
+}
+.tennis-member-list-heading h2 { margin: 0; font-size: 15px; }
+.tennis-member-list-heading .button { white-space: nowrap; }
+.tennis-member-search { padding: 0 14px 14px; border-bottom: 1px solid var(--border); }
+.tennis-member-search .tennis-search { position: relative; width: 100%; min-width: 0; }
+.tennis-member-search .tennis-search input { padding-right: 32px; }
+.tennis-member-search .tennis-search .icon-button { position: absolute; right: 3px; width: 30px; height: 30px; }
+.tennis-member-list-scroll { max-height: calc(100dvh - 280px); min-height: 240px; overflow-y: auto; overscroll-behavior-y: contain; }
+.tennis-member-list { margin: 0; padding: 0; list-style: none; }
+.tennis-member-list > li { border-bottom: 1px solid var(--border); }
+.tennis-member-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 6px 10px;
+  width: 100%;
+  min-height: 74px;
+  padding: 14px 16px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.tennis-member-list-item strong { font-size: 14px; overflow-wrap: anywhere; }
+.tennis-member-list-item > span { grid-column: 1 / -1; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.tennis-member-list-item:hover { background: var(--surface-muted); }
+.tennis-member-list-item[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); }
+.tennis-member-list-item:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
+.tennis-member-list-item:disabled { cursor: default; opacity: .6; }
+.tennis-member-load-more { display: flex; margin: 14px auto; }
+.tennis-member-directory .inline-error { margin: 12px; }
+.tennis-member-detail { min-width: 0; }
+.tennis-member-profile { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; font-size: 13px; }
+.tennis-member-profile span { color: var(--muted); }
+.tennis-member-profile strong { font-weight: 500; }
 .tennis-balance {
   display: flex;
   gap: 14px;
@@ -847,8 +899,10 @@
   }
   .tennis-members-layout {
     grid-template-columns: 1fr;
-    gap: 0;
+    gap: 16px;
   }
+  .tennis-member-directory { position: static; }
+  .tennis-member-list-scroll { max-height: 240px; min-height: 120px; }
   .tennis-two {
     gap: 10px;
   }
