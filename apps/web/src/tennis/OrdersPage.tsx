@@ -17,6 +17,15 @@ import type {
 import { PaymentChannelPanel } from "./PaymentChannelPanel";
 import { OrderPagination, useOrderDirectory } from "./OrderDirectory";
 import { AmendmentPanel } from "./AmendmentPanel";
+import {
+  newRefundDraftLines,
+  prepareRefundLines,
+  refundInventorySummary,
+  refundLineCancellation,
+  refundResultNotice,
+  refundSubmitLabel,
+  type RefundInventorySummary,
+} from "./refund-form";
 import { permits } from "./types";
 import {
   Badge,
@@ -206,7 +215,7 @@ export function OrderDialog({
       setAction(null); setAmendPrepared((n) => n + 1);
     } else if (prep.kind === "refund") {
       const key = `tennis:refund:${scope}:${order.id}`;
-      const prior = readStored(key, { reason: "", lines: order.lines.map((l) => ({ lineId: l.id, selected: false, amount: "0.00", cancel: order.paymentStatus === "REFUNDED" })) });
+      const prior = readStored(key, { reason: "", lines: newRefundDraftLines(order) });
       writeStored(key, { ...prior, reason: prep.reason ?? prior.reason });
       setFormPreparationVersion((n) => n + 1);
       setAction("refund");
@@ -417,10 +426,8 @@ export function OrderDialog({
                 venue={venue}
                 courts={courts.data ?? []}
                 order={order}
-                onDone={(refund) => {
-                  setNotice(
-                    refund.status === "SUCCEEDED" ? "退款已按原支付来源退回。" : "退款已申请，正在等待到账结果。",
-                  );
+                onDone={(refund, inventory) => {
+                  setNotice(refundResultNotice(refund, inventory));
                   void changed();
                 }}
                 onClose={() => setAction(null)}
@@ -720,32 +727,37 @@ function RefundForm({
   venue: VenueRecord;
   courts: CourtRecord[];
   order: OrderDetail;
-  onDone: (refund: RefundGroupRecord) => void;
+  onDone: (refund: RefundGroupRecord, inventory: RefundInventorySummary) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useDraft(`tennis:refund:${scope}:${order.id}`, {
     reason: "",
-    lines: order.lines.map((line) => ({
-      lineId: line.id,
-      selected: false,
-      amount: "0.00",
-      cancel: order.paymentStatus === "REFUNDED",
-    })),
+    lines: newRefundDraftLines(order),
   });
   const command = useCommand(scope);
+  const selected = draft.lines.filter((line) => line.selected);
+  const missingChoice = selected.some((line) => refundLineCancellation(order, line) === null);
+  const previewLines = selected.flatMap((line) => {
+    const cancel = refundLineCancellation(order, line);
+    if (cancel === null) return [];
+    let refundCents = 0;
+    try { refundCents = cents(line.amount); } catch { /* Submission retains the exact amount error. */ }
+    return [{ lineId: line.lineId, refundCents, cancel }];
+  });
+  const inventory = refundInventorySummary(order, previewLines);
+  const amountCents = previewLines.reduce((sum, line) => sum + line.refundCents, 0);
+  const lineLabel = (lineId: string) => {
+    const line = order.lines.find((item) => item.id === lineId)!;
+    return `${courts.find((court) => court.id === line.courtId)?.name ?? "球场"} · ${dateTime(line.startAt, venue.timezone)}–${clock(line.endAt, venue.timezone)}`;
+  };
   async function refund() {
     try {
       const payload = {
         expectedRevision: order.revision,
         reason: draft.reason,
-        lines: draft.lines
-          .filter((l) => l.selected)
-          .map((l) => ({
-            lineId: l.lineId,
-            refundCents: cents(l.amount),
-            cancel: order.paymentStatus === "REFUNDED" ? true : l.cancel,
-          })),
+        lines: prepareRefundLines(order, draft.lines),
       };
+      const submittedInventory = refundInventorySummary(order, payload.lines);
       const result = await command.execute(`order.refund:${order.id}`, payload, (key) =>
         api<RefundGroupRecord>(`/orders/${order.id}/refunds`, "POST", { ...payload, commandKey: key }),
       );
@@ -753,20 +765,20 @@ function RefundForm({
         setDraft((current) => ({
           ...current,
           reason: "",
-          lines: current.lines.map((line) => ({ ...line, selected: false, amount: "0.00", cancel: false })),
+          lines: newRefundDraftLines(order),
         }));
-        onDone(result);
+        onDone(result, submittedInventory);
       }
     } catch (next) {
       command.setError(next);
     }
   }
   return (
-    <Panel title="按明细确认退款" action={<InfoHint label="退款去向说明">余额退回时会恢复原来的本金和赠送金额，微信付款原路退回。</InfoHint>}>
+    <Panel title="按时段办理退款 / 取消" action={<InfoHint label="退款去向说明">余额退回时会恢复原来的本金和赠送金额，微信付款原路退回。</InfoHint>}>
       <div className="tennis-form">
         <ErrorNotice error={command.error} />
         <p className="tennis-note">
-          请与客户确认退款金额；勾选取消的时段会重新开放预订。退款原路退回。
+          选择时段后，请确认退款金额和处理方式。取消的时段将重新开放预订。
         </p>
         {draft.lines.map((line, i) => {
           const original = order.lines.find((l) => l.id === line.lineId);
@@ -799,15 +811,25 @@ function RefundForm({
                       onChange={(e) => update({ amount: e.target.value })}
                     />
                   </label>
-                  <label className="tennis-check">
-                    <input
-                      type="checkbox"
-                      checked={order.paymentStatus === "REFUNDED" || line.cancel}
-                      disabled={Boolean(original.cancelledAt) || order.paymentStatus === "REFUNDED"}
-                      onChange={(e) => update({ cancel: e.target.checked })}
-                    />
-                    同时取消该时段
-                  </label>
+                  {original.cancelledAt ? (
+                    <p className="tennis-muted">该时段已取消，本次只办理退款。</p>
+                  ) : order.paymentStatus === "REFUNDED" ? (
+                    <p className="tennis-muted">款项已退清，本次取消该时段并释放场地。</p>
+                  ) : (
+                    <label>
+                      处理方式
+                      <select
+                        value={refundLineCancellation(order, line) === null ? "" : refundLineCancellation(order, line) ? "cancel" : "retain"}
+                        onChange={(e) => update({ cancel: e.target.value === "" ? null : e.target.value === "cancel" })}
+                        disabled={command.busy}
+                        required
+                      >
+                        <option value="" disabled>请选择处理方式</option>
+                        <option value="cancel">{(original.remainingRefundCents ?? 0) === 0 ? "取消时段（无需再退款）" : "取消时段并退款"}</option>
+                        <option value="retain">仅退款，保留预订</option>
+                      </select>
+                    </label>
+                  )}
                 </div>
               )}
             </div>
@@ -821,16 +843,24 @@ function RefundForm({
             maxLength={2000}
           />
         </label>
+        {selected.length > 0 && (
+          <div className="tennis-note" aria-live="polite">
+            {inventory.cancelled.length > 0 && <p>将释放：{inventory.cancelled.map(lineLabel).join("；")}。</p>}
+            {inventory.retained.length > 0 && <p>保留预订：{inventory.retained.map(lineLabel).join("；")}。</p>}
+            {inventory.alreadyCancelled.length > 0 && <p>此前已取消：{inventory.alreadyCancelled.map(lineLabel).join("；")}。</p>}
+            {missingChoice && <p>请为所选时段选择处理方式。</p>}
+          </div>
+        )}
         <div className="tennis-actions">
           <button className="button button-secondary" disabled={command.busy} onClick={onClose}>
             返回
           </button>
           <button
             className="button button-danger"
-            disabled={command.busy || !draft.reason.trim() || !draft.lines.some((l) => l.selected)}
+            disabled={command.busy || !draft.reason.trim() || selected.length === 0 || missingChoice}
             onClick={() => void refund()}
           >
-            {command.busy ? "正在办理…" : "确认退款与取消明细"}
+            {command.busy ? "正在办理…" : selected.length === 0 || missingChoice ? "确认办理" : refundSubmitLabel(amountCents, inventory)}
           </button>
         </div>
       </div>
