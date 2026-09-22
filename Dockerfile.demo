@@ -1,5 +1,7 @@
 ARG NODE_IMAGE=node:22-bookworm-slim
-FROM ${NODE_IMAGE} AS build
+# Vite/esbuild compile portable JavaScript on the builder's native architecture.
+# Only the final runtime and its production dependencies use the target platform.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json CHANGELOG.md ./
 COPY apps apps
