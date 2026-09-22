@@ -8,17 +8,10 @@ import pg from "pg";
 import { tennisModelTransport } from "../../apps/api/src/tennis/model-transport.ts";
 import { buildTennisServer } from "../../apps/api/src/tennis/server.ts";
 import { LocalMockPaymentGateway } from "../../packages/db/src/tennis/mock-payments.ts";
+import { readTennisRuntimeConfig } from "./runtime-config.mts";
 
-if (process.env.NODE_ENV === "production" || process.env.TENNIS_ALLOW_SIMULATION !== "true") {
-  throw new Error("Tennis has only a local payment adapter. A real provider must be integrated before production startup; use explicit development simulation for local verification.");
-}
-const databaseUrl = process.env.TENNIS_DATABASE_URL;
-if (!databaseUrl) throw new Error("TENNIS_DATABASE_URL is required");
-if (process.env.NODE_ENV !== "development" && process.env.TENNIS_ALLOW_NONLOCAL_DATABASE !== "true") {
-  throw new Error("TENNIS_ALLOW_NONLOCAL_DATABASE=true is required for a non-local database");
-}
-
-const db = new pg.Pool({ connectionString: databaseUrl, max: 12, connectionTimeoutMillis: 5000 });
+const config = readTennisRuntimeConfig(process.env);
+const db = new pg.Pool({ connectionString: config.databaseUrl, max: config.databasePoolMax, connectionTimeoutMillis: 5000 });
 try {
   // Read-only readiness: schema changes require a separate, explicitly run migration.
   const directory = resolve("packages/db/src/tennis/migrations");
@@ -35,20 +28,14 @@ try {
   throw error;
 }
 
-const signingKey = process.env.TENNIS_PAYMENT_SIGNING_KEY;
-if (!signingKey || signingKey.length < 32) throw new Error("TENNIS_PAYMENT_SIGNING_KEY must contain at least 32 characters");
-const encryptionKey = process.env.TENNIS_AI_ENCRYPTION_KEY
-  ? Buffer.from(process.env.TENNIS_AI_ENCRYPTION_KEY, "base64")
-  : undefined;
-if (encryptionKey && (encryptionKey.length !== 32 || encryptionKey.toString("base64") !== process.env.TENNIS_AI_ENCRYPTION_KEY))
-  throw new Error("TENNIS_AI_ENCRYPTION_KEY must be canonical Base64 encoding of 32 bytes");
-const origins = process.env.TENNIS_WEB_ORIGINS?.split(",").map((value) => value.trim()).filter(Boolean);
 const app = await buildTennisServer({
   db,
-  gateway: new LocalMockPaymentGateway(signingKey, "local-simulation"),
-  allowSimulation: process.env.TENNIS_ALLOW_SIMULATION === "true",
-  ...(origins?.length ? { origins } : {}),
-  ...(encryptionKey ? { aiEncryptionKey: encryptionKey } : {}),
+  gateway: new LocalMockPaymentGateway(config.signingKey, "local-simulation"),
+  allowSimulation: true,
+  secureCookies: config.secureCookies,
+  ...(config.trustedProxy ? { trustedProxy: config.trustedProxy } : {}),
+  ...(config.origins?.length ? { origins: config.origins } : {}),
+  ...(config.encryptionKey ? { aiEncryptionKey: config.encryptionKey } : {}),
   modelTransport: tennisModelTransport,
   runExpiryWorker: true,
   logger: true,
@@ -86,6 +73,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
   });
 
 await web.listen({
-  host: process.env.TENNIS_HTTP_HOST ?? "0.0.0.0",
-  port: Number(process.env.TENNIS_HTTP_PORT ?? "4200"),
+  host: config.httpHost,
+  port: config.httpPort,
 });

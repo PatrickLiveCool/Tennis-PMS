@@ -1,0 +1,36 @@
+ARG NODE_IMAGE=node:22-bookworm-slim
+# Vite/esbuild compile portable JavaScript on the builder's native architecture.
+# Only the final runtime and its production dependencies use the target platform.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json CHANGELOG.md ./
+COPY apps apps
+COPY packages packages
+COPY scripts scripts
+COPY deploy/release-policy.json deploy/release-policy.json
+COPY docs/releases docs/releases
+RUN npm ci --ignore-scripts
+COPY tsconfig.base.json ./
+RUN npm run build && node scripts/build-runtime.mjs --source-root /app --output /app/runtime --demo-tools
+
+FROM ${NODE_IMAGE} AS runtime
+WORKDIR /app
+ARG OCI_REVISION
+ARG OCI_CREATED
+ENV NODE_ENV=development \
+    TENNIS_DEMO_MODE=true \
+    TENNIS_ALLOW_SIMULATION=true \
+    TENNIS_RELEASE_VERSION=1.4.3-demo \
+    TENNIS_RELEASE_REVISION=${OCI_REVISION}
+LABEL org.opencontainers.image.revision="${OCI_REVISION}" \
+      org.opencontainers.image.created="${OCI_CREATED}" \
+      org.opencontainers.image.source="https://github.com/PatrickLiveCool/Tennis-PMS" \
+      org.opencontainers.image.title="Tennis PMS simulation demo"
+COPY --from=build /app/runtime/ ./
+# Reuse the build stage's verified package tarballs without copying its cache or
+# architecture-specific development dependencies into the final image.
+RUN --mount=type=bind,from=build,source=/root/.npm,target=/root/.npm,rw \
+    npm ci --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund
+USER node
+EXPOSE 4200
+CMD ["node", "scripts/tennis/server-entry.mjs"]

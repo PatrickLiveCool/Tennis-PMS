@@ -18,13 +18,15 @@ function parseOptions() {
   const { values } = parseArgs({
     options: {
       output: { type: "string", default: "runtime" },
+      "demo-tools": { type: "boolean", default: false },
       "source-root": { type: "string", default: process.cwd() }
     },
     allowPositionals: false
   });
   return {
     root: resolve(values["source-root"]),
-    output: resolve(values.output)
+    output: resolve(values.output),
+    demoTools: values["demo-tools"]
   };
 }
 
@@ -33,7 +35,8 @@ function assertOutputIsSeparate(root, output) {
 }
 
 function rewriteTypeScriptSpecifiers(code) {
-  return code.replace(/(\b(?:from|import)\s*(?:\(\s*)?)(["'])([^"']+)\.ts\2/gu, "$1$2$3.js$2");
+  return code.replace(/(\b(?:from|import)\s*(?:\(\s*)?)(["'])([^"']+)\.(mts|ts)\2/gu,
+    (_match, prefix, quote, path, extension) => `${prefix}${quote}${path}.${extension === "mts" ? "mjs" : "js"}${quote}`);
 }
 
 function runtimePackageJson(packageJson, relativePath) {
@@ -75,7 +78,7 @@ async function writeRuntimePackageJson(root, output, relativePath) {
   await writeFile(target, runtimePackageJson(await readFile(source, "utf8"), relativePath));
 }
 
-async function transformTree(root, output, sourceRelative, outputRelative, packageVersion) {
+async function transformTree(root, output, sourceRelative, outputRelative, packageVersion, demoTools) {
   const sourceDirectory = resolve(root, sourceRelative);
   const outputDirectory = resolve(output, outputRelative);
 
@@ -89,8 +92,12 @@ async function transformTree(root, output, sourceRelative, outputRelative, packa
         continue;
       }
       if (!entry.isFile() || !sourceFilePattern.test(entry.name) || testFilePattern.test(entry.name)) continue;
-      if (sourceRelative === "scripts/tennis" && entry.name !== "server-entry.mts") continue;
-      if (sourceRelative === "packages/db/src" && excludedRuntimeFiles.has(entry.name)) continue;
+      if (sourceRelative === "scripts/tennis" && !new Set([
+        "server-entry.mts", "runtime-config.mts",
+        ...(demoTools ? ["database.mts", "cloud-demo-init.mts", "cloud-demo-data.ts"] : [])
+      ]).has(entry.name)) continue;
+      if (sourceRelative === "packages/db/src" && excludedRuntimeFiles.has(entry.name)
+        && !(demoTools && relative(sourceDirectory, sourcePath) === "tennis/migrate.ts")) continue;
 
       const extension = extname(entry.name);
       const source = rewriteRuntimeJsonImports(await readFile(sourcePath, "utf8"), packageVersion);
@@ -109,14 +116,14 @@ async function transformTree(root, output, sourceRelative, outputRelative, packa
 }
 
 async function main() {
-  const { root, output } = parseOptions();
+  const { root, output, demoTools } = parseOptions();
   assertOutputIsSeparate(root, output);
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 
   for (const [sourceRelative, outputRelative] of runtimeTrees) {
-    await transformTree(root, output, sourceRelative, outputRelative, packageJson.version);
+    await transformTree(root, output, sourceRelative, outputRelative, packageJson.version, demoTools);
   }
 
   await cp(resolve(root, "packages/db/src/tennis/migrations"), resolve(output, "packages/db/src/tennis/migrations"), { recursive: true });

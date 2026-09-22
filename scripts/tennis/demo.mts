@@ -12,7 +12,7 @@ import {
   saveCourt,
   updateVenue,
 } from "../../packages/db/src/tennis/catalog.ts";
-import { createCustomer, searchCustomers } from "../../packages/db/src/tennis/customers.ts";
+import { completeBookingCustomerContact, createCustomer, searchCustomers } from "../../packages/db/src/tennis/customers.ts";
 import { recordOfflineTopup } from "../../packages/db/src/tennis/wallet.ts";
 import { saveTopupOffer, listTopupOffers } from "../../packages/db/src/tennis/topups.ts";
 import { confirmQuote, createQuote, listOrders } from "../../packages/db/src/tennis/booking.ts";
@@ -124,7 +124,11 @@ try {
     }
     courts = await listCourts(db, actor, venue.id);
     let customer = (await searchCustomers(db, actor, "演示球友")).find((value) => value.nickname === "演示球友");
-    if (!customer) customer = await createCustomer(db, actor, { nickname: "演示球友" });
+    if (!customer) customer = await createCustomer(db, actor, { nickname: "演示球友", phone: "19900000001" });
+    else if (!customer.phone)
+      await completeBookingCustomerContact(db, actor, {
+        venueId: venue.id, customerId: customer.id, phone: "19900000001", commandKey: "demo-customer-contact-v1",
+      });
     await recordOfflineTopup(db, actor, {
       venueId: venue.id,
       customerId: customer.id,
