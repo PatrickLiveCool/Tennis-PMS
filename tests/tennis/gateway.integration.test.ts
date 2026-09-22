@@ -369,7 +369,7 @@ describe("trusted gateway boundary and recoverable delivery", () => {
     await revokeGatewayIntegration(db, first.actor.subjectId, integration.id, "停用合成渠道");
     await expect(
       confirmQuote(db, resolved.actor, { quoteId: quote.id, commandKey: randomUUID() }),
-    ).rejects.toMatchObject({ code: "GATEWAY_ACCESS_REVOKED" });
+    ).rejects.toMatchObject({ code: "AGENT_DELEGATION_REVOKED" });
     await expect(resolveGatewayIdentity(db, integration.token, "verified-channel-user")).rejects.toMatchObject({
       code: "GATEWAY_IDENTITY_UNBOUND",
     });

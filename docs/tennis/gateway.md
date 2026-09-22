@@ -4,11 +4,11 @@ PMS 不实现微信协议或 Agent Runtime。本文是外部渠道适配器接�
 
 ## 身份与人工绑定
 
-平台运营人员在 `/platform/gateways` 为一个租户创建集成凭据。随机 token 仅创建响应展示一次，数据库只保存 SHA-256；丢失时先核对已有集成并撤销，再创建新凭据。列表、审计和浏览器持久缓存不包含 token。集成停用后不能恢复，避免旧凭据重新生效。
+租户管理员在“系统管理 → 智能体接入”（`/gateway-integrations`）为当前租户创建集成凭据；平台原 `/platform/gateways` 入口保留。随机 token 仅创建或更换响应展示一次，数据库只保存 SHA-256，列表、审计和浏览器持久缓存不包含 token。新租户凭据默认 90 天有效，可设 1–365 天；支持暂停/恢复、更换及永久撤销，详见 [接入管理规格](agent-access-management.md)。遗失密钥先核对已有接入，再更换凭据。
 
 租户管理员在“系统管理 → 渠道账号绑定”选择一个已有 PMS 客户或员工主体，填写经过渠道核验的 `externalSubjectId` 和核验依据，建立绑定。此编号用于识别渠道用户，与接入凭据分开管理。此处不按手机号/昵称自动注册、合并客户或授予余额权限。同一集成一个外部主体只允许一个有效绑定；变更身份必须撤销后重新人工绑定。旧消息和会话仍属于旧绑定，不能被新身份继承。
 
-员工继续受原租户、场馆与业务权限约束；客户只能操作本人档案和资金。绑定被撤销、集成停用、账号停用或租户停用后，即使请求先前已解析出身份，也会在实际业务事务内重新检查。撤销与业务命令使用同一租户事务锁；已在撤销之前提交的订单仍按真实业务结果处理。
+员工继续受原租户、场馆与业务权限约束；客户只能操作本人档案和资金。绑定被撤销、集成暂停/撤销/到期、密钥更换、账号停用或租户停用后，即使请求先前已解析出身份，也会在实际业务事务内重新检查。生命周期更新与业务命令使用同一租户事务锁；已提交的订单仍按真实业务结果处理。旧短授权与排队消息不因恢复接入而复活；未决请求保留并转人工核对。
 
 ## 鉴权与路径
 
@@ -21,6 +21,12 @@ Gateway 必须先验证真实渠道来源和用户身份，再填该标识。PMS
 
 | 管理接口 | 输入/用途 |
 | --- | --- |
+| `GET /gateway-integrations` | 当前租户管理员查询接入，无凭据 |
+| `POST /gateway-integrations` | `{name,expiresInDays?}`，当前租户创建并一次返回 token |
+| `POST /gateway-integrations/:id/pause` | `{expectedRevision,reason}`，暂停 |
+| `POST /gateway-integrations/:id/resume` | `{expectedRevision,reason}`，恢复未到期接入 |
+| `POST /gateway-integrations/:id/rotate` | `{expectedRevision,reason,expiresInDays?}`，更换凭据并一次返回 token，保留绑定 |
+| `POST /gateway-integrations/:id/revoke` | `{expectedRevision,reason}`，永久撤销 |
 | `GET /platform/gateways?tenantId=...` | 平台查询一个租户的集成，无凭据 |
 | `POST /platform/gateways` | `{tenantId,name}`，创建并一次返回 token |
 | `POST /platform/gateways/:id/revoke` | `{reason}`，撤销 |

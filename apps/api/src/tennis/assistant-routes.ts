@@ -43,6 +43,7 @@ import { AgentAccessError } from "../../../../packages/db/src/tennis/agent-guard
 import { discoverAgentVenues } from "../../../../packages/db/src/tennis/agent-discovery.ts";
 import { registerBackofficeAssistantRoutes } from "./backoffice-assistant-routes.ts";
 import type { ModelTransport } from "../assistant-model.ts";
+import { listStaffWecomReceipts, listStaffWecomPaymentTargets, linkStaffWecomReceipt } from "../../../../packages/db/src/tennis/wecom-reconciliation.ts";
 
 export function registerAssistantRoutes(
   app: FastifyInstance,
@@ -130,7 +131,7 @@ export function registerAssistantRoutes(
       ),
   );
 
-  // This surface deliberately omits refunds, manual receipts, asset changes and simulation.
+  // Staff may associate authenticated collections; self-reported money, refunds and simulation remain unavailable.
   // Tenant/subject identity comes only from an ephemeral PMS-issued bearer token.
   const principals = new WeakMap<FastifyRequest, Awaited<ReturnType<typeof resolveDelegation>>>();
   const auth = async (request: FastifyRequest) => {
@@ -188,6 +189,26 @@ export function registerAssistantRoutes(
     }),
   );
   agentGet("/receipts/:id", (request) => getCommandReceipt(db, agent(request), param(request)));
+  const collectionQuery = obj({
+    amountCents: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    paidFrom: Type.Optional(Type.String({ minLength: 17, maxLength: 40 })),
+    paidTo: Type.Optional(Type.String({ minLength: 17, maxLength: 40 })),
+    q: Type.Optional(Type.String({ maxLength: 200 })),
+    cursor: Type.Optional(Type.String({ maxLength: 1000 })),
+  });
+  app.get<{ Querystring: Static<typeof collectionQuery> }>(base + "/agent/wecom/receipts",
+    { onRequest: auth, schema: { querystring: collectionQuery } },
+    request => listStaffWecomReceipts(db, agent(request), { ...request.query, venueId: venue(request) }));
+  const targetQuery = obj({
+    sourceKind: Type.Union([Type.Literal("ORDER"), Type.Literal("TOPUP")]),
+    orderId: Type.Optional(id), customerId: Type.Optional(id), operationId: Type.Optional(id),
+    q: Type.Optional(Type.String({ maxLength: 200 })), cursor: Type.Optional(Type.String({ maxLength: 1000 })),
+  });
+  app.get<{ Querystring: Static<typeof targetQuery> }>(base + "/agent/wecom/payment-targets",
+    { onRequest: auth, schema: { querystring: targetQuery } },
+    request => listStaffWecomPaymentTargets(db, agent(request), { ...request.query, venueId: venue(request) }));
+  agentPost("/wecom/receipts/:id/link", obj({ operationId: id, reason, commandKey }), (request, body) =>
+    linkStaffWecomReceipt(db, agent(request), { ...body, receiptId: param(request), venueId: venue(request) }));
   agentPost(
     "/quotes",
     obj({

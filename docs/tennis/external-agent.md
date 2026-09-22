@@ -51,7 +51,9 @@ PMS 向配置的 `externalAgentUrl` POST JSON（`protocol: tennis-agent/v1`）�
 | `POST /topup-quotes/:id/confirm`、`GET /topups/:id` | 确认充值、查询到账 |
 | `GET /receipts/:commandKey` | 网络结果不明时查原命令回执 |
 
-工具面没有退款、人工记账、资产配置、接管或模拟到账命令。退改费用须授权员工办理。外部 Runtime 必须在执行确认预订、使用余额等动作前完成用户确认，并为同一业务意图保持同一 `commandKey`；失败重试先查询原命令结果。
+另有工作人员专用的 `GET /wecom/receipts`、`GET /wecom/payment-targets` 和 `POST /wecom/receipts/:id/link`，用于员工在对话中指定真实收款归属。需要独立“收款核对”权限及目标业务权限，客户不可用；资金、流水关联与请求回执同事务提交。输入、候选歧义、权限和恢复规则见 [工作人员智能体收款核对](staff-agent-reconciliation.md)。
+
+工具面没有退款、自报到账、资产配置、接管或模拟到账命令。退改费用须授权员工办理。外部 Runtime 必须在执行确认预订、使用余额等动作前完成用户确认，并为同一业务意图保持同一 `commandKey`；失败重试先查询原命令结果。
 
 ## 业务会话体验与反馈
 
