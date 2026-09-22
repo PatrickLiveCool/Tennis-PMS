@@ -134,7 +134,7 @@ const navigation = [
   { id: "today", name: "经营概览", icon: LayoutDashboard },
   { id: "orders", name: "预订订单", icon: ClipboardList },
   { id: "members", name: "会员储值", icon: Users },
-  { id: "settings", name: "场地与定价", icon: Settings },
+  { id: "settings", name: "场地设置", icon: Settings },
   { id: "management", name: "系统管理", icon: ShieldCheck },
 ];
 function Workspace({

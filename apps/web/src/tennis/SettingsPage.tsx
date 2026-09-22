@@ -62,7 +62,7 @@ export function SettingsPage({
   const admin = session.tenants.some((t) => t.id === session.tenantId && t.kind === "staff" && t.role === "ADMIN");
   return (
     <>
-      <PageHeading title="场地与定价">
+      <PageHeading title="场地设置">
         {canAssets && (
           <button className="button button-secondary" onClick={() => setNewVenue(true)}>
             <Plus size={16} />

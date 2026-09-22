@@ -140,8 +140,8 @@ describe("workspace navigation DOM lifecycle", () => {
     await click(assistant!, "助手草稿 0");
 
     for (let round = 0; round < 3; round++) {
-      await navigate("场地与定价");
-      expectPage("场地与定价", settingTabs);
+      await navigate("场地设置");
+      expectPage("场地设置", settingTabs);
       await click(main().querySelector(".tennis-tabs")!, tab);
       expect([...main().querySelectorAll("h2")].map((heading) => heading.textContent)).toContain(panelTitle);
 
@@ -155,8 +155,8 @@ describe("workspace navigation DOM lifecycle", () => {
       expect(main().textContent).toContain("暂无启用的渠道接入");
       expect(main().querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("渠道账号绑定");
 
-      await navigate("场地与定价");
-      expectPage("场地与定价", settingTabs);
+      await navigate("场地设置");
+      expectPage("场地设置", settingTabs);
       await click(main().querySelector(".tennis-tabs")!, "时段折扣");
       expect(main().textContent).toContain("尚未设置时段折扣");
       await click(main().querySelector(".tennis-tabs")!, "球场资料");

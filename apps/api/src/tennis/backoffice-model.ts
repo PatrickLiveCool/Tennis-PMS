@@ -99,7 +99,7 @@ export function backofficeExecutor(db: pg.Pool, actor: BookingActor, transport?:
           if (args.page === "orders" && run.context.orderId) await currentOrder();
           if (args.page === "members" || args.page === "settings") await withBookingTransaction(db, actor, (tx) => requireTenantPermission(tx, actor, args.page === "members" ? "manage_members" : "manage_assets", args.page === "settings" ? run.venue.id : undefined));
           const page = args.page as BackofficeAction["page"];
-          const action: BackofficeAction = { page, ...(page === "orders" && run.context.orderId ? { orderId: run.context.orderId } : {}), label: page === "orders" && run.context.orderId ? "查看订单详情" : ({ schedule: "打开排场", orders: "打开订单", members: "打开会员", settings: "打开场馆设置" })[page] };
+          const action: BackofficeAction = { page, ...(page === "orders" && run.context.orderId ? { orderId: run.context.orderId } : {}), label: page === "orders" && run.context.orderId ? "查看订单详情" : ({ schedule: "打开排场", orders: "打开订单", members: "打开会员", settings: "打开场地设置" })[page] };
           if (!actions.some((item) => item.page === action.page && item.orderId === action.orderId)) actions.push(action);
           return { page: action.page, label: action.label, submitted: false };
         }

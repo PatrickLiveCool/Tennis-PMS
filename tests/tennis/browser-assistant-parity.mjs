@@ -23,7 +23,7 @@ async function login(account, viewport = { width: 1440, height: 900 }) {
 try {
   const admin = await login("demo.green");
   const p = admin.page;
-  await p.getByRole("navigation", { name: "主导航", exact: true }).getByRole("button", { name: "场地与定价", exact: true }).click();
+  await p.getByRole("navigation", { name: "主导航", exact: true }).getByRole("button", { name: "场地设置", exact: true }).click();
   const venueId = await p.getByLabel("切换校区", { exact: true }).inputValue();
   const courts = await (await p.request.get(`/api/tennis/venues/${venueId}/courts`)).json();
   if (!courts.some((court) => court.name === courtName)) {
