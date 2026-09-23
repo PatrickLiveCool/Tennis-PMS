@@ -2,6 +2,18 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.5.1](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.5.0...v1.5.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* show Tennis version beneath sidebar branding ([#15](https://github.com/PatrickLiveCool/Tennis-PMS/issues/15)) ([b5366f0](https://github.com/PatrickLiveCool/Tennis-PMS/commit/b5366f0c3ff7f51a3cb41d76fc28c6ff2b3f3389))
+
+
+### Documentation
+
+* record Tennis cloud deployment and database adoption ([#13](https://github.com/PatrickLiveCool/Tennis-PMS/issues/13)) ([77654ca](https://github.com/PatrickLiveCool/Tennis-PMS/commit/77654ca5e450636320b7f61423809f911c024f51))
+
 ## [1.5.0](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.4.3...v1.5.0) (2026-09-23)
 
 
