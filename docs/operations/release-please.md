@@ -24,6 +24,7 @@ gh pr list --repo PatrickLiveCool/Tennis-PMS --state open
 ## 版本与 CI
 
 - 继续使用继承的 `1.4.3` 作为版本起点，不补造上游标签或历史 Release。`bootstrap-sha` 指向 GreenPMS fork 基线 `47eb658a20aee5fc469a6ecbb17444999385da6a`，首次只扫描它之后的 Tennis 提交，后续发布由 Release Please 自身跟踪。
+- 首次发布前需检查 CHANGELOG 和版本 PR 正文的比较链接：当前仓库没有 `v1.4.3` 标签，而固定版本的 Release Please 会以该版本号生成上一标签链接。首版 PR 最后一次自动更新后，将 `compare/v1.4.3...` 的起点改为上述 fork SHA；这不影响版本计算，也无需补造历史标签。首个 Tennis 标签生成后，后续版本使用真实标签比较。
 - 自动同步根 `package.json`、`package-lock.json`、`CHANGELOG.md`、`.release-please-manifest.json` 和 `deploy/release-policy.json` 的版本。版本号由 Conventional Commits 计算，以生成的版本 PR 为准。
 - 现有 CI 的类型检查、单测、构建、PostgreSQL 集成测试全部保留，额外执行版本工作流契约检查；自动 PR 的标题和正文满足现有格式规则。
 - 新工作流仅在目标仓库的 `main` push 或手动运行时执行，使用独立并发组，固定 Release Please Action 提交。它不需要 COS、SSH 或 `production` Environment。
