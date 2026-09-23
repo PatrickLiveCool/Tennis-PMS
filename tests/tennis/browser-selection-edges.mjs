@@ -44,18 +44,45 @@ try {
   await expect(page.locator(".tennis-selection")).toHaveCount(0);
   await expect(page.getByLabel("姓名", { exact: true })).toHaveValue("取消边界草稿");
   console.log("PASS Escape on the focused draft removes only that selection");
-  // An invalid manual time remains editable in the side panel and must not
-  // paint across the fixed court labels or beyond the time axis.
+  // Increasing the duration must replace a late start that no longer fits,
+  // and the resulting valid selection must stay inside the calendar axis.
   await page.getByRole("button", { name: "预订", exact: true }).click();
   if (await page.locator(".tennis-manual-selection").getAttribute("open") === null) {
     await page.locator(".tennis-manual-selection summary").click();
   }
-  await page.locator(".tennis-manual-selection").getByLabel("开始时间").selectOption("1320");
-  await page.locator(".tennis-manual-selection").getByLabel("预订时长").selectOption("240");
-  await page.getByRole("button", { name: "添加时段", exact: true }).click();
-  await check("An out-of-hours draft is clipped to the calendar without losing its details", async () => {
+  await check("A longer manual duration offers only valid starts and stays inside the calendar", async () => {
+    const manual = page.locator(".tennis-manual-selection");
+    const start = manual.getByLabel("开始时间");
+    await manual.getByLabel("预订时长").selectOption("60");
+    const lateStart = await start.locator("option").last().getAttribute("value");
+    expect(lateStart).not.toBeNull();
+    await start.selectOption(lateStart);
+    await manual.getByLabel("预订时长").selectOption("240");
+    await expect(start.locator(`option[value="${lateStart}"]`)).toHaveCount(0);
+    const selectedStart = await start.inputValue();
+    expect(Number(selectedStart)).toBeLessThan(Number(lateStart));
+    await expect(start.locator(`option[value="${selectedStart}"]`)).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "添加时段", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: "添加时段", exact: true }).click();
     await expect(page.locator(".tennis-selection")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "核对场地与报价", exact: true })).toBeDisabled();
+    await expect(page.locator(".tennis-selection .is-warning")).toHaveCount(0);
+    const venueId = await page.getByLabel("切换校区", { exact: true }).inputValue();
+    const schedule = await (await page.request.get(`/api/tennis/venues/${venueId}/schedule?date=${date}`)).json();
+    const [line] = await page.evaluate(() => JSON.parse(sessionStorage.getItem(
+      Object.keys(sessionStorage).find((key) => key.startsWith("tennis:booking:")),
+    )).lines);
+    expect((Date.parse(line.endAt) - Date.parse(line.startAt)) / 60_000).toBe(240);
+    const formatter = new Intl.DateTimeFormat("en", {
+      timeZone: schedule.venue.timezone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    });
+    for (let instant = Date.parse(line.startAt); instant < Date.parse(line.endAt); instant += 15 * 60_000) {
+      const local = Object.fromEntries(formatter.formatToParts(new Date(instant)).map((part) => [part.type, part.value]));
+      const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(local.weekday);
+      const minute = Number(local.hour) * 60 + Number(local.minute);
+      expect(schedule.venue.openingHours.some((window) =>
+        window.weekday === weekday && minute >= window.startMinute && minute + 15 <= window.endMinute,
+      )).toBe(true);
+    }
     const bounds = await page.locator(".tennis-draft-block").evaluate((el) => {
       const block = el.getBoundingClientRect(), row = el.parentElement.getBoundingClientRect();
       return { left: block.left - row.left, right: block.right - row.right };
@@ -63,7 +90,7 @@ try {
     expect(bounds.left).toBeGreaterThanOrEqual(103);
     expect(bounds.right).toBeLessThanOrEqual(1);
   });
-  await page.screenshot({ path: `${out}/out-of-hours-draft.png`, fullPage: true });
+  await page.screenshot({ path: `${out}/manual-duration-boundary.png`, fullPage: true });
   await context.close();
 
   const mobile = await login({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

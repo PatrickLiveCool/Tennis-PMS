@@ -1,7 +1,9 @@
+import { maintainAssistantQuestions } from "../../../../packages/db/src/tennis/assistant-question-records.ts";
 import { courtAssetProperties, courtPriceSchema } from "./court-schema.ts";
 import { getBookingPolicy, saveBookingPolicy } from "../../../../packages/db/src/tennis/booking-policy.ts";
 import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
 import { getMemberProfile, listMemberDirectory } from "../../../../packages/db/src/tennis/member-directory.ts";
+import { correctCustomerContact } from "../../../../packages/db/src/tennis/customer-contact-correction.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
@@ -223,6 +225,9 @@ const messages: Record<string, string> = {
   OUTSIDE_OPENING_HOURS: "选择的时间不在营业时段内。",
   IDEMPOTENCY_KEY_REUSED: "该操作编号已用于其他内容，请先核实原操作结果。",
   PHONE_ALREADY_EXISTS: "该手机号已有客户档案，请搜索后选择。",
+  INVALID_CONTACT_CORRECTION: "请填写有效的 11 位中国大陆手机号，并填写修改原因。",
+  STALE_CUSTOMER_CONTACT: "手机号已被其他工作人员修改，请刷新当前手机号后重新核对。",
+  CUSTOMER_CONTACT_UNCHANGED: "新手机号与当前号码相同，无需修改。",
   BOOKING_PHONE_REQUIRED: "预订需要有效的中国大陆 11 位手机号，请先补齐预订人手机号。",
   BOOKING_PHONE_ALREADY_SET: "该客户已登记手机号，预订入口不能替换已有号码，请核对所选客户。",
   INVALID_DATE: "请选择有效日期。",
@@ -566,6 +571,11 @@ export async function buildTennisServer(options: TennisServerOptions) {
   });
   get("/customers/directory", (request) => listMemberDirectory(db, staff(request), request.query));
   get("/customers/:id", (request) => getMemberProfile(db, staff(request), params(request).id!));
+  write("POST", "/customers/:id/contact-corrections",
+    obj({ venueId: id, commandKey, expectedPhone: Type.Union([Type.String({ maxLength: 30 }), Type.Null()]),
+      phone: Type.String({ minLength: 1, maxLength: 30 }), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+    (request, input) => correctCustomerContact(db, staff(request), { ...input, customerId: params(request).id! }),
+  );
   write(
     "POST",
     "/customers",
@@ -869,6 +879,20 @@ export async function buildTennisServer(options: TennisServerOptions) {
       actor,
       subject: (request) => session(request).subjectId,
     });
+  let questionWorker: ReturnType<typeof setInterval> | undefined;
+  let questionMaintenance: Promise<void> | undefined;
+  const maintainQuestions = () => {
+    questionMaintenance ??= maintainAssistantQuestions(db, (code) => app.log.warn({ code }, "Assistant question retention unavailable"))
+      .finally(() => { questionMaintenance = undefined; });
+    return questionMaintenance;
+  };
+  if (options.runExpiryWorker) {
+    app.addHook("onReady", async () => {
+      void maintainQuestions();
+      questionWorker = setInterval(() => { void maintainQuestions(); }, 60 * 60 * 1000);
+      questionWorker.unref();
+    });
+  }
   let ticking = false;
   if (options.runExpiryWorker) {
     worker = setInterval(() => {
@@ -886,6 +910,8 @@ export async function buildTennisServer(options: TennisServerOptions) {
   }
   app.addHook("onClose", async () => {
     if (worker) clearInterval(worker);
+    if (questionWorker) clearInterval(questionWorker);
+    await questionMaintenance;
   });
   return app;
 }

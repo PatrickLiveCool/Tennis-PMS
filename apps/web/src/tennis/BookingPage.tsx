@@ -19,6 +19,7 @@ import { ScheduleBoard } from "./ScheduleBoard";
 import { ScheduleDatePicker } from "./ScheduleDatePicker";
 import { shiftDate, useScheduleRange } from "./useScheduleRange";
 import { appendSelection } from "./selection";
+import { manualBookingDurations, manualBookingStartMinutes } from "./manualBookingTime";
 import type {
   CustomerRecord,
   OrderRecord,
@@ -101,6 +102,20 @@ export function BookingPage({
   const selectionVersion = useRef(0);
   const gridRef = useRef<HTMLDivElement>(null);
   const command = useCommand(scope);
+  useEffect(() => {
+    const recover = (event: Event) => {
+      const detail = (event as CustomEvent<{ scope: string; quoteId: string; kind: "confirmed" | "expired" }>).detail;
+      if (detail.scope !== scope) return;
+      setDraft((current) => current.quote?.id !== detail.quoteId ? current : detail.kind === "expired"
+        ? { ...current, quote: null }
+        : { ...current, lines: [], quote: null, staffHold: false, until: "", reason: "" });
+      selectionVersion.current++;
+      setError(undefined);
+      command.setError(undefined);
+    };
+    window.addEventListener("tennis-booking-confirmation-recovered", recover);
+    return () => window.removeEventListener("tennis-booking-confirmation-recovered", recover);
+  }, [scope]);
   useEffect(() => {
     const recover = (event: Event) => {
       const detail = (
@@ -247,6 +262,36 @@ export function BookingPage({
       ),
     [fromMinute, toMinute],
   );
+  const manualDurations = useMemo(
+    () => manualBookingDurations(venue.minimumBookingMinutes),
+    [venue.minimumBookingMinutes],
+  );
+  const manualDuration = manualDurations.includes(duration)
+    ? duration
+    : manualDurations.find((minutes) => minutes >= duration) ?? manualDurations[0];
+  const manualStarts = useMemo(
+    () => manualBookingStartMinutes(
+      manualDate,
+      manualDuration ?? 0,
+      venue.minimumBookingMinutes,
+      venue.timezone,
+      venue.openingHours,
+    ),
+    [manualDate, manualDuration, venue.minimumBookingMinutes, venue.timezone, venue.openingHours],
+  );
+  const manualStart = manualStarts.includes(startMinute) ? startMinute : manualStarts[0];
+  const manualClosed = !venue.openingHours.some(
+    (window) => window.weekday === new Date(`${manualDate}T12:00:00Z`).getUTCDay(),
+  );
+  const manualUnavailable = !manualDate
+    ? "请选择预订日期。"
+    : !manualDurations.length
+      ? "请先设置场馆最短可售时长。"
+      : manualClosed
+        ? "当天不营业，请选择其他日期。"
+        : !manualStarts.length
+          ? "当天没有满足此时长的营业时段，请缩短时长或选择其他日期。"
+          : "";
   function update(patch: Partial<BookingDraft>) {
     if (patch.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(patch.date))
       return;
@@ -296,10 +341,12 @@ export function BookingPage({
   }
   function addLine(id: string, minute: number) {
     try {
+      if (manualDuration === undefined || !manualStarts.includes(minute))
+        throw new Error(manualUnavailable || "请选择可预订的开始时间。");
       const line = {
         courtId: id,
         startAt: atVenueTime(manualDate, minute, venue.timezone),
-        endAt: atVenueTime(manualDate, minute + duration, venue.timezone),
+        endAt: atVenueTime(manualDate, minute + manualDuration, venue.timezone),
       };
       if (
         draft.lines.some(
@@ -686,12 +733,14 @@ export function BookingPage({
                         <label>
                           开始时间
                           <select
-                            value={startMinute}
+                            value={manualStart ?? ""}
                             onChange={(e) =>
                               setStartMinute(Number(e.target.value))
                             }
+                            disabled={!manualStarts.length}
                           >
-                            {ticks.map((t) => (
+                            {!manualStarts.length && <option value="">暂无可选时间</option>}
+                            {manualStarts.map((t) => (
                               <option key={t} value={t}>
                                 {minuteLabel(t)}
                               </option>
@@ -701,12 +750,14 @@ export function BookingPage({
                         <label>
                           预订时长
                           <select
-                            value={duration}
+                            value={manualDuration ?? ""}
                             onChange={(e) =>
                               setDuration(Number(e.target.value))
                             }
+                            disabled={!manualDurations.length}
                           >
-                            {[15, 30, 45, 60, 90, 120, 180, 240].map((m) => (
+                            {!manualDurations.length && <option value="">尚未设置</option>}
+                            {manualDurations.map((m) => (
                               <option key={m} value={m}>
                                 {m === 60 ? "1 小时（常用）" : `${m} 分钟`}
                               </option>
@@ -714,13 +765,14 @@ export function BookingPage({
                           </select>
                         </label>
                       </div>
+                      {manualUnavailable && <p className="tennis-note">{manualUnavailable}</p>}
                       <button
                         type="button"
                         className="button button-secondary"
                         disabled={
-                          !courtId || !manualDate || !canBook || command.busy
+                          !courtId || manualStart === undefined || !canBook || command.busy
                         }
-                        onClick={() => addLine(courtId, startMinute)}
+                        onClick={() => manualStart !== undefined && addLine(courtId, manualStart)}
                       >
                         <Plus size={16} />
                         添加时段

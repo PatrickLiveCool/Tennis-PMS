@@ -42,7 +42,7 @@ interface ConversationView {
 }
 interface MessageDraft {
   content: string;
-  pending: { messageId: string; content: string; context: BackofficeContext } | null;
+  pending: { messageId: string; content: string; context: BackofficeContext; source?: "USER" | "SUGGESTION" } | null;
 }
 const base = "/backoffice-assistant";
 
@@ -158,7 +158,7 @@ function Workspace({ api, session, venue, scope, context, onClose, onNavigate, o
     setError(undefined);
     setNotice("");
     const conversationId = selected;
-    const request = draft.pending ?? { messageId: crypto.randomUUID(), content: (prompt ?? draft.content).trim(), context: workContext() };
+    const request = draft.pending ?? { messageId: crypto.randomUUID(), content: (prompt ?? draft.content).trim(), context: workContext(), source: prompt === undefined ? "USER" as const : "SUGGESTION" as const };
     const isCurrent = () => mounted.current && active.current === conversationId;
     setDraft({ content: "", pending: request });
     setPartial(""); setProgress("正在思考…"); followResponse.current = true;

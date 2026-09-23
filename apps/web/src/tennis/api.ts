@@ -2,6 +2,9 @@ import type { Session } from "./types";
 
 const messages: Record<string, string> = {
   PHONE_ALREADY_EXISTS: "这个手机号已有客户档案，请选择已有客户。",
+  INVALID_CONTACT_CORRECTION: "请填写有效的 11 位中国大陆手机号，并填写修改原因。",
+  STALE_CUSTOMER_CONTACT: "手机号已被其他工作人员修改，请刷新当前手机号后重新核对。",
+  CUSTOMER_CONTACT_UNCHANGED: "新手机号与当前号码相同，无需修改。",
   INVALID_CUSTOMER: "请填写可辨认的姓名，并检查手机号格式。",
   BOOKING_PHONE_REQUIRED: "请补充有效的 11 位手机号，再核对报价。",
   BOOKING_PHONE_ALREADY_SET: "这位客户已留手机号，请重新选择；如需改号，请联系管理员。",

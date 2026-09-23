@@ -3,6 +3,7 @@ import type pg from "pg";
 import { recordTenantAudit, requireTenantPermission, requireVenuePermission, TenantAccessError } from "./access.ts";
 import { isCustomerActor, withBookingTransaction, type BookingActor } from "./customers.ts";
 import { AgentAccessError } from "./agent-guard.ts";
+import { assistantQuestionError, beginAssistantQuestion, feedbackAssistantQuestion, finishAssistantQuestion, questionToolNames, type QuestionLogger, type QuestionSource } from "./assistant-question-records.ts";
 
 export interface BackofficeAIConfig {
   enabled: boolean;
@@ -74,6 +75,7 @@ export interface BackofficeRun {
   authorize: () => Promise<void>;
   signal: AbortSignal;
   onEvent?: (event: BackofficeStreamEvent) => void;
+  onTool?: (name: string) => void;
 }
 export type BackofficeStreamEvent = { type: "status"; phase: "thinking" | "tool" } | { type: "delta"; text: string };
 export type BackofficeExecutor = (run: BackofficeRun) => Promise<{ content: string; actions: BackofficeAction[] }>;
@@ -234,20 +236,23 @@ export async function validateAssistantSelection(tx: pg.PoolClient, actor: Booki
     if (found.rowCount !== 1) throw new TenantAccessError("RESOURCE_NOT_FOUND");
   }
 }
-export async function setBackofficeMessageFeedback(db: pg.Pool, actor: BookingActor, conversationId: string, id: string, resolved: boolean) {
+export async function setBackofficeMessageFeedback(db: pg.Pool, actor: BookingActor, conversationId: string, id: string, resolved: boolean, log?: QuestionLogger) {
   return withBookingTransaction(db, actor, async (tx) => {
     await ownedConversation(tx, actor, conversationId);
-    const row = (await tx.query<{ id: string; resolved: boolean }>(`UPDATE tennis.backoffice_messages SET resolved=$1 WHERE tenant_id=$2 AND conversation_id=$3 AND id=$4 AND role='ASSISTANT' RETURNING id,resolved`, [resolved, actor.tenantId, conversationId, id])).rows[0];
+    const row = (await tx.query<{ id: string; resolved: boolean; request_id: string }>(`UPDATE tennis.backoffice_messages SET resolved=$1 WHERE tenant_id=$2 AND conversation_id=$3 AND id=$4 AND role='ASSISTANT' RETURNING id,resolved,request_id`, [resolved, actor.tenantId, conversationId, id])).rows[0];
     if (!row) throw new TenantAccessError("RESOURCE_NOT_FOUND");
-    return row;
+    await feedbackAssistantQuestion(tx, actor.tenantId, row.request_id, resolved, log);
+    return { id: row.id, resolved: row.resolved };
   });
 }
 
 export async function sendBackofficeMessage(db: pg.Pool, actor: BookingActor, key: Buffer, conversationId: string,
-  input: { messageId: string; content: string; context?: BackofficeContext }, execute: BackofficeExecutor,
-  options: { timeoutMs?: number; signal?: AbortSignal; onEvent?: (event: BackofficeStreamEvent) => void } = {}): Promise<BackofficeDetail> {
+  input: { messageId: string; content: string; context?: BackofficeContext; source?: QuestionSource }, execute: BackofficeExecutor,
+  options: { timeoutMs?: number; signal?: AbortSignal; onEvent?: (event: BackofficeStreamEvent) => void; questionLogger?: QuestionLogger } = {}): Promise<BackofficeDetail> {
   options.signal?.throwIfAborted();
   if (!input.messageId.trim() || input.messageId.length > 200 || !input.content.trim() || input.content.length > 8000) throw new AgentAccessError("INVALID_AGENT_MESSAGE");
+  if (input.source !== undefined && !["USER", "SUGGESTION", "UNKNOWN"].includes(input.source)) throw new AgentAccessError("INVALID_AGENT_MESSAGE");
+  const startedAt = Date.now();
   const claimed = await withBookingTransaction(db, actor, async (tx) => {
     const conversation = await ownedConversation(tx, actor, conversationId);
     const context = await contextInTransaction(tx, actor, conversation.venueId, input.context);
@@ -268,6 +273,8 @@ export async function sendBackofficeMessage(db: pg.Pool, actor: BookingActor, ke
     history.push({ role: "user", content: input.content });
     await tx.query("INSERT INTO tennis.backoffice_requests(id,tenant_id,conversation_id,message_id,input_hash,status,config_revision,context) VALUES($1,$2,$3,$4,$5,'RUNNING',$6,$7::jsonb)", [requestId, actor.tenantId, conversationId, input.messageId, hash, config.revision, JSON.stringify(context)]);
     await tx.query("INSERT INTO tennis.backoffice_messages(id,tenant_id,conversation_id,request_id,role,content) VALUES($1,$2,$3,$4,'USER',$5)", [randomUUID(), actor.tenantId, conversationId, requestId, input.content]);
+    await beginAssistantQuestion(tx, { id: requestId, tenantId: actor.tenantId, venueId: conversation.venueId, conversationId,
+      content: input.content, page: context.page, ...(input.source === undefined ? {} : { source: input.source }), secrets: [modelConfig.apiKey] }, options.questionLogger);
     await tx.query("UPDATE tennis.backoffice_conversations SET updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2", [actor.tenantId, conversationId]);
     const venue = (await tx.query<{ id: string; name: string; timezone: string }>("SELECT id,name,timezone FROM tennis.venues WHERE tenant_id=$1 AND id=$2", [actor.tenantId, conversation.venueId])).rows[0]!;
     await recordTenantAudit(tx, actor, "backoffice_assistant.request", requestId, { conversationId });
@@ -276,6 +283,8 @@ export async function sendBackofficeMessage(db: pg.Pool, actor: BookingActor, ke
   if (claimed.replay) return claimed.replay;
   const requestId = claimed.requestId!;
   const controller = new AbortController();
+  const toolsUsed = new Set<string>();
+  let interruption: "ASSISTANT_TIMEOUT" | "REQUEST_INTERRUPTED" | undefined;
   let buffered = "";
   // Retain a suffix so a provider cannot leak a credential split across chunks.
   const onEvent = options.onEvent ? (event: BackofficeStreamEvent) => {
@@ -303,10 +312,11 @@ export async function sendBackofficeMessage(db: pg.Pool, actor: BookingActor, ke
   let cancel: (() => void) | undefined;
   try {
     const result = await Promise.race([
-      execute({ config: claimed.config!, history: claimed.history!, context: claimed.context!, venue: claimed.venue!, authorize, signal: controller.signal, ...(onEvent ? { onEvent } : {}) }),
-      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(new AgentAccessError("ASSISTANT_UNAVAILABLE")); }, timeoutMs); }),
+      execute({ config: claimed.config!, history: claimed.history!, context: claimed.context!, venue: claimed.venue!, authorize, signal: controller.signal,
+        onTool: (name) => { if (!controller.signal.aborted && questionToolNames.has(name)) toolsUsed.add(name); }, ...(onEvent ? { onEvent } : {}) }),
+      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { interruption = "ASSISTANT_TIMEOUT"; controller.abort(); reject(new AgentAccessError("ASSISTANT_UNAVAILABLE")); }, timeoutMs); }),
       new Promise<never>((_resolve, reject) => {
-        cancel = () => { controller.abort(); reject(new AgentAccessError("ASSISTANT_UNAVAILABLE")); };
+        cancel = () => { interruption = "REQUEST_INTERRUPTED"; controller.abort(); reject(new AgentAccessError("ASSISTANT_UNAVAILABLE")); };
         if (options.signal?.aborted) cancel(); else options.signal?.addEventListener("abort", cancel, { once: true });
       }),
     ]);
@@ -344,11 +354,15 @@ export async function sendBackofficeMessage(db: pg.Pool, actor: BookingActor, ke
       }
       await tx.query("INSERT INTO tennis.backoffice_messages(id,tenant_id,conversation_id,request_id,role,content,actions) VALUES($1,$2,$3,$4,'ASSISTANT',$5,$6::jsonb)", [randomUUID(), actor.tenantId, conversationId, requestId, content, JSON.stringify(actions)]);
       await tx.query("UPDATE tennis.backoffice_requests SET status='SUCCEEDED',completed_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2", [actor.tenantId, requestId]);
+      await finishAssistantQuestion(tx, { id: requestId, tenantId: actor.tenantId, outcome: "ANSWERED", errorCode: null, tools: toolsUsed, startedAt }, options.questionLogger);
       await tx.query("UPDATE tennis.backoffice_conversations SET updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2", [actor.tenantId, conversationId]);
     });
-  } catch {
+  } catch (error) {
     // An access/config revocation must still terminate the claimed request; no sensitive error text is persisted.
     await db.query("UPDATE tennis.backoffice_requests SET status='FAILED',error_code='ASSISTANT_UNAVAILABLE',completed_at=clock_timestamp() WHERE tenant_id=$1 AND conversation_id=$2 AND id=$3 AND status='RUNNING'", [actor.tenantId, conversationId, requestId]);
+    // Authorization may have been revoked. Only close this already-claimed event; no text is returned.
+    await transaction(db, (tx) => finishAssistantQuestion(tx, { id: requestId, tenantId: actor.tenantId,
+      outcome: interruption === "REQUEST_INTERRUPTED" ? "INTERRUPTED" : "FAILED", errorCode: interruption ?? assistantQuestionError(error), tools: toolsUsed, startedAt }, options.questionLogger));
   } finally {
     clearTimeout(timer);
     if (cancel) options.signal?.removeEventListener("abort", cancel);

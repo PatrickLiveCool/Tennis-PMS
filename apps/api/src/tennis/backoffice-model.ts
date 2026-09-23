@@ -134,6 +134,7 @@ export function backofficeExecutor(db: pg.Pool, actor: BookingActor, transport?:
         for (const call of response.tool_calls) {
           calls++;
           await run.authorize();
+          run.onTool?.(call.function.name);
           let result: unknown;
           try { result = await tool(call.function.name, parseBackofficeToolArguments(call.function.name, call.function.arguments)); }
           catch (error) { result = { error: error instanceof TenantAccessError ? error.code : "QUERY_UNAVAILABLE", message: "未取得可用结果，请检查条件或使用页面入口，不要猜测业务状态。" }; }
