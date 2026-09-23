@@ -1,6 +1,6 @@
 {
   "application": "tennis-green-pms",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "rollbackCompatibility": {
     "mode": "forward-only",
     "reason": "Tennis fork 的业务及迁移基线独立于住房版本；当前尚无经过验收的 Tennis 回退镜像，保持 forward-only。生产启动仅核对 Tennis SQL 校验和，数据库迁移和恢复必须另行授权并验收。"

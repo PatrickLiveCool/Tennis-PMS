@@ -2,6 +2,55 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.5.0](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.4.3...v1.5.0) (2026-09-23)
+
+
+### Features
+
+* add isolated Green Tennis cloud demo deployment ([f0bb16f](https://github.com/PatrickLiveCool/Tennis-PMS/commit/f0bb16fbf52e9edc52f4c84f68dc43d9e837a858))
+* add isolated Green Tennis customer demo deployment ([28c193e](https://github.com/PatrickLiveCool/Tennis-PMS/commit/28c193e746814a65e75fe941ba0f14bbd07a3ae3))
+* add searchable member management directory and contextual selection ([#6](https://github.com/PatrickLiveCool/Tennis-PMS/issues/6)) ([b874ba3](https://github.com/PatrickLiveCool/Tennis-PMS/commit/b874ba3b1fe4a3b765cab14213c94c428932ec5a))
+* add tenant agent access and staff receipt reconciliation ([51bc16a](https://github.com/PatrickLiveCool/Tennis-PMS/commit/51bc16a187e939297c42b02ff97a3e0025cf28ce))
+* enable staff agents to reconcile WeCom receipts ([14fc75c](https://github.com/PatrickLiveCool/Tennis-PMS/commit/14fc75cda54905f5c9dcc90e09ac6400df540eff))
+* let tenant admins manage agent access keys ([34407ff](https://github.com/PatrickLiveCool/Tennis-PMS/commit/34407ff869dd05d29bd319736b5702c2e3aa748f))
+* organize operations overview into task tabs ([e30e3a6](https://github.com/PatrickLiveCool/Tennis-PMS/commit/e30e3a6c5dab0a51e8d60b5b022f95fec255e661))
+* **release:** align Tennis deployment infrastructure with GreenPMS ([#12](https://github.com/PatrickLiveCool/Tennis-PMS/issues/12)) ([d49909b](https://github.com/PatrickLiveCool/Tennis-PMS/commit/d49909bce79c184210df5deb5f71ee054734551c))
+* **tennis:** 完善场地必填规则、排场日历与侧栏体验 ([#2](https://github.com/PatrickLiveCool/Tennis-PMS/issues/2)) ([ef7a777](https://github.com/PatrickLiveCool/Tennis-PMS/commit/ef7a77792453e1aeffc7ca16690dab21c4ac3aed))
+* **tennis:** 建立多租户 PMS、排场工作台与 AI 助手 ([62d0d1e](https://github.com/PatrickLiveCool/Tennis-PMS/commit/62d0d1e991ea38344542f401ef16e102dcbdedc6))
+* 优化经营概览标签与收款查询 ([d266291](https://github.com/PatrickLiveCool/Tennis-PMS/commit/d2662915a35070cb835c92b93949b174e6b9287f))
+* 完善预订恢复与助手问题分析闭环 ([0b6632b](https://github.com/PatrickLiveCool/Tennis-PMS/commit/0b6632b9566ae0f5010f530d4879079988145972))
+
+
+### Bug Fixes
+
+* allow the migration system actor in empty demo databases ([eb207b1](https://github.com/PatrickLiveCool/Tennis-PMS/commit/eb207b18adc380eb14bea65bb3213e8976da447b))
+* compile demo assets on the native build platform ([78e92d9](https://github.com/PatrickLiveCool/Tennis-PMS/commit/78e92d92eeb2cadc3caf77cd892e1d9481e8e84a))
+* include shared TypeScript config in demo image build ([dbd23d3](https://github.com/PatrickLiveCool/Tennis-PMS/commit/dbd23d33b8f347736e9133ac167135a87cde7496))
+* integrate management navigation with current member workspace ([2f57220](https://github.com/PatrickLiveCool/Tennis-PMS/commit/2f572208c38af53cd8d4a0c181b38d497c6b86a1))
+* preserve correct workspace lifecycle during management navigation ([7f80708](https://github.com/PatrickLiveCool/Tennis-PMS/commit/7f80708f4650c820184467f0148048d5c385af64))
+* rename court pricing workspace to court settings ([7a8cb72](https://github.com/PatrickLiveCool/Tennis-PMS/commit/7a8cb72bbde895aefb666fd7b84644f15848dcbe))
+* reuse verified package cache for demo runtime dependencies ([c80696a](https://github.com/PatrickLiveCool/Tennis-PMS/commit/c80696a6d34cf12efeedaaf8307daecd1f0658aa))
+* separate tenant administration from court pricing ([e8f8b83](https://github.com/PatrickLiveCool/Tennis-PMS/commit/e8f8b83a978cd0acd79f8c6c5a47fc79a8e95ba9))
+* **tennis:** distinguish refunds from booking cancellation ([1d8d5cc](https://github.com/PatrickLiveCool/Tennis-PMS/commit/1d8d5cc199c21be70d1c07d95f32c67355ab5d3c))
+* **tennis:** 明确退款与取消时段，避免误判库存释放 ([367d477](https://github.com/PatrickLiveCool/Tennis-PMS/commit/367d47739f17b84f4c4d3333fd8360c104d150ce))
+* 分离系统管理入口并修复切页残留 ([68f5169](https://github.com/PatrickLiveCool/Tennis-PMS/commit/68f5169c13fe47914bf624395052c7448fdeb589))
+
+
+### CI / Deployment
+
+* enable Tennis release pull requests ([#10](https://github.com/PatrickLiveCool/Tennis-PMS/issues/10)) ([dfb52fc](https://github.com/PatrickLiveCool/Tennis-PMS/commit/dfb52fce2b3c15509877890bdbcabb35a77e2072))
+
+
+### Documentation
+
+* record staff reconciliation validation and integration contract ([2e9564e](https://github.com/PatrickLiveCool/Tennis-PMS/commit/2e9564ee6885d25b2d1612e6ea1d32e5a306bc51))
+
+
+### Maintenance
+
+* sync operations overview with merged refund and member changes ([cf363ba](https://github.com/PatrickLiveCool/Tennis-PMS/commit/cf363ba3b8ee46320e2f7b25a5f972c68cd19569))
+* sync refund fix with current main ([51bfb60](https://github.com/PatrickLiveCool/Tennis-PMS/commit/51bfb60bbb40c38da1bec003466682ff4e1cbc3f))
+
 ## [1.4.3](https://github.com/qintopia-agent-studio/GreenPMS/compare/v1.4.2...v1.4.3) (2026-09-17)
 
 
