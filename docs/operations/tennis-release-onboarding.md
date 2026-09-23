@@ -1,18 +1,18 @@
 # Tennis 发布接入与现有 Demo 首次接管
 
-2026-09-23：仓库已提供版本 PR → Draft Release → Publish → 不可变镜像/COS → 受限 SSH → 健康检查 → 保留清理的实现。**本轮只做本地代码、合成演练和准备材料；没有设置真实 Secret、安装线上服务、迁移线上数据或触发部署。** 首次窗口仍需用户确认。
+2026-09-23：本文件保留首次接管操作顺序与恢复契约。真实资源、迁移及验证记录见 [首次接管执行记录](tennis-adoption-2026-09-23.md)。后续执行必须先查现场状态，不能重跑创建账号、建库或首次数据恢复。
 
 ## 资源与隔离
 
 | 对象 | 现状 / 目标 |
 | --- | --- |
 | 共用主机 | `122.51.77.220`，Tennis 仅绑定 `127.0.0.1:4200`，HTTPS 反代保持现有入口 |
-| 共用 COS | `greenpms-release-1305166808` / `ap-shanghai`；只允许 `tennis-green-pms/releases/`，不使用住房 `greenpms/releases/` |
+| 独立 COS | `tennis-pms-release-1305166808` / `ap-shanghai`；私有、SSE-COS、全球加速；只允许 `tennis-green-pms/releases/` |
 | 旧项目 | `tennis-demo`；app `tennis-demo-app-1`；DB `tennis-demo-postgres-1`（PG16.14） |
 | 旧数据 | volume `tennis-demo_tennis-demo-data`；镜像 `tennis-demo:c80696a`（以现场完整 tag/ID 为准）；全部保留至验证和单独清理确认后 |
 | 目标项目 | `tennis-green-pms`；容器 `tennis-green-pms-app`；配置 `/etc/tennis-green-pms/`；状态 `/var/lib/tennis-green-pms-release/` |
 | 受限发布身份 | `tennis-green-pms-deploy`，forced-command + 固定 sudo entry；不能任意执行 shell / 迁移 / seed |
-| 外部数据库 | 现有实例 `10.80.0.15`（PG18.4），新建独立 `tennis_demo` 库和 `tennis_demo` 登录角色；本轮核对时尚不存在 |
+| 外部数据库 | 现有实例 `10.80.0.15`（PG18.4），新建独立 `tennis_demo` 库和 `tennis_demo` 登录角色；已创建并完成数据迁移 |
 
 住房库 `qintopia_pms_prod` 和账号 `qintopia_runtime` 不得作为网球目标或迁移管理员；后者本来没有 CREATEDB/CREATEROLE。日常网球角色保持 NOSUPERUSER NOCREATEDB NOCREATEROLE，不给应用永久集群管理权限。服务器 59G、已用 44G、余 14G 是本轮快照，不是窗口容量保证；上线前核算旧镜像、目标解压包、备份、数据库空间并留余量，禁止全机 prune。
 
@@ -20,23 +20,23 @@
 
 ```bash
 python3 scripts/release/setup.py \
-  --bucket greenpms-release-1305166808 --region ap-shanghai \
+  --bucket tennis-pms-release-1305166808 --region ap-shanghai \
   --public-host tennis.qintopia.cn \
   --output .local-workspace/tennis-onboarding-NEW
 ```
 
-`--public-host` 使用已核对的现有 Demo HTTPS 主机名，不修改 DNS。生成目录必须不存在。产物为 `deploy.json` 与 upload / retention / reader 三份 CAM policy，不含密钥。已生成的本轮材料位于忽略目录 `.local-workspace/tennis-onboarding-20260923`，执行前按真实入口复核。
+`--public-host` 使用已核对的现有 Demo HTTPS 主机名，不修改 DNS。生成目录必须不存在。产物为 `deploy.json` 与 upload / retention / reader 三份 CAM policy，不含密钥。当前独立桶材料位于忽略目录 `.local-workspace/tennis-dedicated-bucket`；旧 `.local-workspace/tennis-onboarding-20260923` 指向共用桶，不再用于安装。
 
 沿用同一个 `production` GitHub Environment（这里是发布环境名称，应用仍然是模拟 Demo）。仓库变量 `TENNIS_DEPLOY_ENABLED` 初始保持未设置或 `false`。关闭时 Release 可以验证并上传 COS，但不进入 deploy job；rollback 和 retention（包括定时任务）也不会连接服务器。此开关是**仓库变量**，不能只设置在 Environment，因为 job 的 if 在读取 Environment 前求值。
 
-管理员在另行确认的窗口配置：
+首次接管所需配置（已配置，后续按实际变更维护）：
 
-- 仓库/Environment 变量：`COS_BUCKET=greenpms-release-1305166808`、`COS_REGION=ap-shanghai`、`DEPLOY_HOST=122.51.77.220`、`DEPLOY_USER=tennis-green-pms-deploy`；可选 `COS_ENDPOINT`。
+- 仓库/Environment 变量：`COS_BUCKET=tennis-pms-release-1305166808`、`COS_REGION=ap-shanghai`、`DEPLOY_HOST=122.51.77.220`、`DEPLOY_USER=tennis-green-pms-deploy`；本环境已设置 `COS_ENDPOINT=cos.accelerate.myqcloud.com`，全球加速费用按实际用量计费。
 - Secrets：独立 `UPLOAD_COS_SECRET_ID/KEY`、`RETENTION_COS_SECRET_ID/KEY`（临时凭据另带 TOKEN）、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`。服务器只保存独立 reader 凭据，不能保存 upload/retention 身份。Release Please 继续使用现有 `RELEASE_PLEASE_TOKEN`。
 - 核验桶从未开启 versioning，CAM 的 list 条件和对象权限只覆盖 Tennis 前缀，现有住房策略不变。SSH host key 由管理员从可信渠道核对，不能用未经核验的 ssh-keyscan 替代信任。
 - 首次只发布已合并 main 的正式 tag，保持部署关闭；Release workflow 运行测试、网球 PG18 集成（原业务 CI 保留 PG16，覆盖两个主版本）、构建并上传四个不可变文件。部分 COS 包会 fail closed，不覆盖、不临时篡改 tag。
 
-`deploy/install.sh --dry-run --deploy-public-key <公钥文件>` 仅在满足脚本依赖的目标 Linux 环境审查安装计划；正式安装命令仍由管理员窗口执行。安装器不写 app/COS 配置、不启用 recovery timer、不启动容器、不执行 adopt。此文中的服务安装/SQL/容器命令都属于**待执行窗口**，不代表本轮已执行。
+`deploy/install.sh --dry-run --deploy-public-key <公钥文件>` 仅在满足脚本依赖的目标 Linux 环境审查安装计划；正式安装命令仍由管理员窗口执行。安装器不写 app/COS 配置、不启用 recovery timer、不启动容器、不执行 adopt。以下命令是操作方法；实际执行证据以首次接管执行记录为准，不据此重复操作。
 
 ## 冻结版本、备份和预恢复
 
@@ -132,7 +132,7 @@ python3 scripts/release/cos.py upload --directory /restricted/original-runner-bu
 
 当前 `upload_bundle` 先验证本地bundle；`put_immutable` 对已有同checksum对象只读复用，仅补缺失对象并回读验证，内容不同即拒绝，禁止覆盖。不要为此重新构建一个“看起来同版本”的包；新的createdAt/镜像字节不能替代原包。正常runner清理可能已删除原始文件，没有可信原包时此路径不可用。
 
-若原包不存在，管理员只能在审查确认这是**从未部署且无成功 `deployed.json` 的残缺候选**后恢复：核对当前/previous/rollbackFrom、所有服务器状态与容器引用、活动工作流及COS对象清单；保存清单/残存manifest和checksum证据，逐一删除这个精确 `tennis-green-pms/releases/<version>/<revision>/` 下经审核的残缺对象，再从可信tag重建。出现成功marker、部署引用、未知对象或身份矛盾立即停止并调查；不能扩大到版本父目录、住房前缀或覆写已部署包。删除只用独立管理员受限权限，并在完整窗口中阻止竞争。**本轮仅提供恢复方案，没有执行任何云端补传或删除。**
+若原包不存在，管理员只能在审查确认这是**从未部署且无成功 `deployed.json` 的残缺候选**后恢复：核对当前/previous/rollbackFrom、所有服务器状态与容器引用、活动工作流及COS对象清单；保存清单/残存manifest和checksum证据，逐一删除这个精确 `tennis-green-pms/releases/<version>/<revision>/` 下经审核的残缺对象，再从可信tag重建。出现成功marker、部署引用、未知对象或身份矛盾立即停止并调查；不能扩大到版本父目录、住房前缀或覆写已部署包。删除只用独立管理员受限权限，并在完整窗口中阻止竞争。首次上传普通链路超时后取消任务，确认前缀无完整对象，再启用已授权全球加速重跑；没有删除已部署发布包。
 
 ## 失败和恢复边界
 
@@ -147,4 +147,4 @@ python3 scripts/release/cos.py upload --directory /restricted/original-runner-bu
 
 本轮本地合成PG16.15→PG18.6的逻辑转移、028→030和重复迁移通过：68张旧业务表行数及迁移checksum一致，原合成AI密钥解密通过，低权限tennis_demo在DBA预建NOLOGIN reader角色后恢复可信扩展并迁移成功，028恢复副本通过，合成住房哨兵不变。日志 `.local-workspace/release-transfer-rehearsal.log`。这不是线上PG16.14→18.4兼容性或生产验收的替代。
 
-工作流、release harness、构建/runtime及本地Docker验证见实施状态。尚待真实执行：凭据与CAM落地、外部独立库创建/权限、最终备份与迁移、HTTPS/AI/业务人工验收、adopt、开启部署与首次重放、真实COS/SSH及清理。线上资源和数据本轮没有更改。
+工作流、release harness、构建/runtime及本地Docker验证见实施状态。真实执行结果及尚未覆盖的人工业务验收见 [首次接管执行记录](tennis-adoption-2026-09-23.md)。合成演练与线上验证分开记录。
