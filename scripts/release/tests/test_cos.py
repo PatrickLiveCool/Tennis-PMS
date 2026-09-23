@@ -299,6 +299,22 @@ class CosStoreTests(unittest.TestCase):
 
 
 class RetentionTests(unittest.TestCase):
+    def test_shared_bucket_never_touches_housing_prefix(self):
+        client = FakeCos()
+        prefix, _, _ = add_release(client, "v1.0.0", "a" * 40, "2026-08-01T00:00:00Z")
+        housing = {key.replace(ROOT, "greenpms/releases/", 1): value
+                   for key, value in list(client.objects.items())}
+        client.objects.update(housing)
+        before = dict(client.objects)
+        store = complete_store(client)
+        now = __import__("datetime").datetime.fromisoformat("2026-09-20T00:00:00+00:00")
+        retention_plan(store, keep=0, dry_run=True, now=now)
+        self.assertEqual(client.objects, before)
+        result = retention_plan(store, keep=0, now=now)
+        self.assertIn(prefix, result["deleted"])
+        self.assertEqual(client.objects, housing)
+        self.assertTrue(all(key.startswith(ROOT) for key in client.delete_calls))
+
     def test_five_keeps_all_and_six_deletes_oldest_safe(self):
         client = FakeCos()
         store = complete_store(client)

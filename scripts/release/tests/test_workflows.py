@@ -69,15 +69,24 @@ class WorkflowContractTests(unittest.TestCase):
         cls.release_please = read(".github/workflows/release-please.yml")
         cls.release_please_config = json.loads(read(".release-please-config.json"))
         cls.release_please_manifest = json.loads(read(".release-please-manifest.json"))
-        cls.release = ""
-        cls.retention = ""
-        cls.rollback = ""
+        cls.release = read(".github/workflows/release.yml")
+        cls.retention = read(".github/workflows/retention.yml")
+        cls.rollback = read(".github/workflows/rollback.yml")
         cls.workflows = cls.ci + cls.release + cls.retention + cls.rollback
 
-    def test_production_workflows_remain_disabled_until_target_environment_is_ready(self) -> None:
-        for name in ("release.yml", "retention.yml", "rollback.yml"):
-            self.assertFalse((ROOT / ".github/workflows" / name).exists())
-            self.assertTrue((ROOT / ".github/upstream-workflows" / (name + ".disabled")).is_file())
+    def test_server_mutations_require_explicit_deployment_enablement(self) -> None:
+        deploy = self.release.split("  deploy:", 1)[1]
+        for workflow in (deploy, self.rollback, self.retention):
+            self.assertIn("vars.TENNIS_DEPLOY_ENABLED == 'true'", workflow)
+        self.assertIn("github.repository == 'PatrickLiveCool/Tennis-PMS'", self.release)
+        validation = self.release.split("  package-upload:", 1)[0]
+        for fragment in ("POSTGRES_DB: tennis_test", "POSTGRES_USER: tennis_dev", "run: npm run test:integration"):
+            self.assertIn(fragment, validation)
+        self.assertIn("image: postgres:18", validation)
+        self.assertIn("image: postgres:16-alpine", self.ci)
+        for workflow in (self.release, self.retention, self.rollback):
+            for action in re.findall(r"uses: (.+)", workflow):
+                self.assertRegex(action, r"@[0-9a-f]{40}(?: |$)")
 
     def test_release_please_prepares_version_pr_and_tag(self) -> None:
         for fragment in (
@@ -185,7 +194,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("COS_", self.ci)
         self.assertNotIn("DEPLOY_", self.ci)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_is_tagged_immutable_and_main_reachable(self) -> None:
         for fragment in (
             "release:\n    types: [published]",
@@ -237,7 +245,7 @@ class WorkflowContractTests(unittest.TestCase):
         deploy = self.release.split("  deploy:", 1)[1]
         self.assertIn("environment: production", package_upload)
         self.assertIn("UPLOAD_COS_SECRET_ID", package_upload)
-        self.assertIn("DEPLOY_SSH_KEY", package_upload)
+        self.assertNotIn("DEPLOY_SSH_KEY", package_upload)
         self.assertNotIn("MARKER_COS_SECRET_ID", package_upload)
         self.assertIn("environment: production", deploy)
         for fragment in ("DEPLOY_SSH_KEY", "MARKER_COS_SECRET_ID", "RETENTION_COS_SECRET_ID"):
@@ -259,7 +267,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("working-directory: harness", harness_test)
         self.assertIn("run: python3 -m unittest discover -s scripts/release/tests -v", harness_test)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_checks_all_external_configuration_before_packaging(self) -> None:
         package_upload = self.release.split("  package-upload:", 1)[1].split("  deploy:", 1)[0]
         preflight = package_upload.split("      - name: Verify release infrastructure configuration", 1)[1].split(
@@ -267,14 +274,23 @@ class WorkflowContractTests(unittest.TestCase):
         )[0]
         for name in (
             "COS_BUCKET", "COS_REGION", "UPLOAD_COS_SECRET_ID", "UPLOAD_COS_SECRET_KEY",
-            "RETENTION_COS_SECRET_ID", "RETENTION_COS_SECRET_KEY", "DEPLOY_HOST",
-            "DEPLOY_USER", "DEPLOY_SSH_KEY", "DEPLOY_KNOWN_HOSTS",
         ):
             self.assertIn(name, preflight)
         self.assertIn("Missing Tennis-Green-PMS release configuration", preflight)
         self.assertNotIn("set -x", preflight)
+        self.assertNotIn("DEPLOY_SSH_KEY", preflight)
+        script = preflight.split("        run: |\n", 1)[1]
+        script = "\n".join(line.removeprefix("          ") for line in script.splitlines())
+        environment = {**os.environ, "COS_BUCKET": "synthetic-12345", "COS_REGION": "ap-shanghai",
+                       "UPLOAD_COS_SECRET_ID": "synthetic", "UPLOAD_COS_SECRET_KEY": "synthetic-secret"}
+        result = subprocess.run(["bash", "-eu", "-c", script], env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        environment["UPLOAD_COS_SECRET_KEY"] = ""
+        result = subprocess.run(["bash", "-eu", "-c", script], env=environment, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("UPLOAD_COS_SECRET_KEY", result.stderr)
+        self.assertNotIn("synthetic-secret", result.stdout + result.stderr)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_package_key_command_preserves_v_prefix(self) -> None:
         package_step = self.release.split("      - name: Upload immutable release and verify stored bytes", 1)[1]
         package_step = package_step.split("      - name: Write release summary", 1)[0]
@@ -300,7 +316,6 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), f"v1.2.3|tennis-green-pms/releases/v1.2.3/{'a' * 40}/")
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_runner_temp_is_step_scoped(self) -> None:
         for workflow in (self.release, self.retention, self.rollback):
             jobs = re.split(r"(?m)^  [a-z][a-z-]*:\n", workflow.split("jobs:\n", 1)[1])
@@ -308,7 +323,6 @@ class WorkflowContractTests(unittest.TestCase):
                 job_env = job.split("    steps:", 1)[0]
                 self.assertNotIn("runner.temp", job_env)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_keeps_v_in_package_identity_and_cos_key(self) -> None:
         self.assertIn('version="$RELEASE_VERSION"', self.release)
         self.assertNotIn('version="${RELEASE_VERSION#v}"', self.release)
@@ -333,7 +347,6 @@ class WorkflowContractTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_ancestry_command_accepts_tag_before_later_main_commit(self) -> None:
         command = next(line.strip() for line in self.release.splitlines() if line.strip().startswith("git merge-base --is-ancestor"))
         with tempfile.TemporaryDirectory() as temporary:
@@ -363,7 +376,6 @@ class WorkflowContractTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_retention_shares_lock_and_has_dry_run(self) -> None:
         for fragment in (
             "schedule:",
@@ -383,7 +395,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("secrets.DEPLOY_SSH_KEY", self.retention)
         self.assertNotIn("MAINTENANCE_SSH_KEY", self.workflows)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_rollback_runs_trusted_main_tools_with_shared_environment_and_lock(self) -> None:
         for fragment in ("workflow_dispatch:", "if: github.ref == 'refs/heads/main'",
                          "environment: production", "group: tennis-green-pms-production",
@@ -394,7 +405,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("ref: ${{ inputs.", self.rollback)
         self.assertNotIn("--manifest-sha", self.rollback)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_secrets_are_not_inherited_by_setup_or_build_steps(self) -> None:
         for workflow in (self.release, self.retention, self.rollback):
             jobs = re.split(r"(?m)^  [a-z][a-z-]*:\n", workflow.split("jobs:\n", 1)[1])
@@ -405,7 +415,6 @@ class WorkflowContractTests(unittest.TestCase):
                 if name.startswith(("Set up", "Install", "Check out", "Build and package")):
                     self.assertNotIn("secrets.", step)
 
-    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_workflows_do_not_publish_github_or_registry_binaries(self) -> None:
         forbidden = (
             "actions/upload-artifact",

@@ -36,10 +36,10 @@ gh pr list --repo PatrickLiveCool/Tennis-PMS --state open
 | CI | 已在远端运行；本次追加版本工作流契约检查 |
 | 自动版本 PR、标签与 Draft Release | 本次补齐代码；需要合入、配置专用 Secret，并取得真实运行证据 |
 | Docker、Tennis 运行入口、备份恢复、发布工具 | 已适配并有本地验证，见迁移记录 |
-| COS 自动打包上传与服务器发布 | `release.yml.disabled` 仍为参考；目标环境、独立凭据和端到端发布未完成 |
+| COS 自动打包上传与服务器发布 | Tennis 专用 release/rollback/retention 已实现；部署开关默认关闭。真实凭据与首次接管、端到端发布尚待执行 |
 | 云端版本回退与保留清理 | `rollback.yml.disabled`、`retention.yml.disabled` 仍为参考；未做目标环境演练 |
 
-因此，“基础设施完整迁移”仍未完成。自动版本 PR 可以独立接通，不依赖真实支付、COS 或服务器上线；云端 Demo 的独立部署方式见 [云端 Demo](../tennis/cloud-demo.md)。生产接入另见 [发布快速开始](production-release-quickstart.md)，其草案不能当作已生效配置。
+代码准备已补齐，真实接管尚未完成，见 [首次接管方案](tennis-release-onboarding.md)。自动版本 PR 可以独立接通，不依赖真实支付、COS 或服务器上线；云端 Demo 的独立部署方式见 [云端 Demo](../tennis/cloud-demo.md)。生产接入另见 [发布快速开始](production-release-quickstart.md)，其草案不能当作已生效配置。
 
 ## 故障与回退
 

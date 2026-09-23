@@ -1,6 +1,7 @@
 ARG NODE_IMAGE=node:22-bookworm-slim
 
-FROM ${NODE_IMAGE} AS build
+# Vite/esbuild emit portable JavaScript; compile natively, install runtime deps for the target.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS build
 WORKDIR /app
 
 COPY package.json package-lock.json tsconfig.json CHANGELOG.md ./
@@ -32,6 +33,8 @@ LABEL org.opencontainers.image.version="${OCI_VERSION}" \
 
 COPY --from=build /app/runtime/ ./
 RUN npm ci --omit=dev --ignore-scripts
+
+USER node
 
 EXPOSE 4200
 CMD ["node", "scripts/tennis/server-entry.mjs"]

@@ -1,6 +1,6 @@
 # Server deployment only. Use a prebuilt immutable image and an externally
 # managed PostgreSQL database; this file never builds or migrates production data.
-# Template only: the current business payment adapter rejects production startup.
+# Explicit HTTPS simulation Demo. The image itself still rejects production simulation.
 name: tennis-green-pms
 
 services:
@@ -9,17 +9,35 @@ services:
     pull_policy: never
     container_name: ${TENNIS_GREEN_PMS_CONTAINER_NAME:-tennis-green-pms-app}
     restart: unless-stopped
+    user: node
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 96
+    mem_limit: 384m
+    memswap_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
     environment:
+      NODE_ENV: development
+      NODE_OPTIONS: --max-old-space-size=256
+      TENNIS_DEMO_MODE: "true"
       TENNIS_DATABASE_URL: ${TENNIS_DATABASE_URL:?TENNIS_DATABASE_URL is required}
       TENNIS_ALLOW_NONLOCAL_DATABASE: "true"
-      TENNIS_ALLOW_SIMULATION: ${TENNIS_ALLOW_SIMULATION:-false}
+      TENNIS_ALLOW_SIMULATION: "true"
+      TENNIS_TRUSTED_PROXY: ${TENNIS_TRUSTED_PROXY:?Set the exact reverse proxy peer IP}
+      TENNIS_DATABASE_POOL_MAX: 4
       TENNIS_HTTP_HOST: 0.0.0.0
       TENNIS_HTTP_PORT: 4200
       TENNIS_WEB_ORIGINS: ${TENNIS_WEB_ORIGINS:?TENNIS_WEB_ORIGINS is required}
-      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:-}
+      TENNIS_AI_ENCRYPTION_KEY: ${TENNIS_AI_ENCRYPTION_KEY:?Preserve the existing AI encryption key}
       TENNIS_PAYMENT_SIGNING_KEY: ${TENNIS_PAYMENT_SIGNING_KEY:?TENNIS_PAYMENT_SIGNING_KEY is required}
     ports:
-      - "${TENNIS_APP_BIND:-127.0.0.1}:${TENNIS_APP_HOST_PORT:-4200}:4200"
+      - "127.0.0.1:${TENNIS_APP_HOST_PORT:-4200}:4200"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 5s
