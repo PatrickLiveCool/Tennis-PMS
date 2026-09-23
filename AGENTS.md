@@ -32,6 +32,6 @@
 
 - 网球仅用独立 Compose、数据库和迁移；不得将住房 `.env`、数据、支付凭据复制到本项目。
 - 历史 `packages/db/src/migrations`、`tests/helpers`、E2E、备份/清理/发布脚本仍含住房默认地址。不要直接运行；根 npm 相应入口已停用或重定向。新网球代码位于 `packages/db/src/tennis`。
-- `.github/upstream-workflows` 与 `docs/upstream` 仍是停用参考，不能直接启用。Tennis 专用 release/rollback/retention 已在 `.github/workflows` 实现；只有仓库变量 `TENNIS_DEPLOY_ENABLED=true` 才连接服务器。真实首次接管尚待执行，按 `docs/operations/tennis-release-onboarding.md` 操作，不改住房环境。
+- `.github/upstream-workflows` 与 `docs/upstream` 仍是停用参考，不能直接启用。Tennis 专用 release/rollback/retention 已在 `.github/workflows` 实现；只有仓库变量 `TENNIS_DEPLOY_ENABLED=true` 才连接服务器。真实首次接管记录见 `docs/operations/tennis-adoption-2026-09-23.md`；后续按 `docs/operations/tennis-release-onboarding.md` 操作，不改住房环境。
 - 不运行会重置住房数据库的集成/E2E。网球测试只连接 tennis_test，不 DROP 库或清空 schema，仅清理本次合成记录。
 - 不把构建成功、提交成功、占用基础测试通过标成完整 MVP 或人工验收通过。
