@@ -25,7 +25,7 @@ from common import (ARCHIVE, FILES, HEX, ReleaseError, image_tag, json_bytes,
                     validate_bundle, validate_identity, validate_migrations)
 
 ROOT_CONFIG = Path("/etc/tennis-green-pms/deploy.json")
-MANAGED_REPOSITORIES = {"tennis-green-pms", "tennis-green-pms-app"}
+MANAGED_REPOSITORIES = {"tennis-green-pms", "tennis-green-pms-app", "tennis-demo"}
 
 
 def atomic_json(path, value):
@@ -154,21 +154,12 @@ def runtime_image_id(release):
 
 def compatible(source, target, *, rollback):
     a, b = source["manifest"], target["manifest"]
+    require(a["requiredMigrations"] == b["requiredMigrations"],
+            "migration baseline changed: direct image switch refused; use a separate migration or database recovery window")
     if rollback:
-        require(a["requiredMigrations"] == b["requiredMigrations"],
-                "migration baseline changed: direct image switch refused; use an approved forward fix or database recovery plan")
         require(a["rollbackCompatibility"]["mode"] == "same-migrations-only"
                 and b["rollbackCompatibility"]["mode"] == "same-migrations-only",
                 "forward-only release: direct rollback refused; forward fix or database recovery required")
-        return
-
-    source_migrations = a["requiredMigrations"]
-    target_migrations = b["requiredMigrations"]
-    if source_migrations != target_migrations:
-        require(b["rollbackCompatibility"]["mode"] == "forward-only"
-                and len(target_migrations) > len(source_migrations)
-                and target_migrations[:len(source_migrations)] == source_migrations,
-                "migration baseline changed: direct image switch refused; use an approved forward fix or database recovery plan")
 
 
 def cleanup_images(docker, state, dry_run=False):
@@ -282,6 +273,7 @@ class Deployer:
         require(old["configurationSha256"] == self.config_hash(), "recovery configuration changed; administrator intervention required")
         # If state commit completed, restore that committed current instead of undoing success.
         target = json.loads(self.state_file.read_bytes())
+        compatible(transaction["target"], target["current"], rollback=False)
         self.docker.switch(target["current"])
         self.health(target["current"])
         self.journal.unlink()
@@ -338,7 +330,28 @@ class Deployer:
             m = validate_bundle(path, manifest_sha, version, revision)
             target = {"prefix": key, "manifestSha256": manifest_sha, "manifest": m}
             compatible(before["current"], target, rollback=rollback)
-            if before["current"]["manifest"]["imageId"] == m["imageId"]:
+            current = before["current"]
+            if current.get("legacy") and (current["manifest"]["imageId"] == m["imageId"] or
+                                          (current["manifest"]["version"] == version and current["manifest"]["gitRevision"] == revision)):
+                # Initial adoption records the daemon's image ID, which can differ
+                # from the archive config ID. Match the immutable tag to that daemon
+                # ID, then verify the archive and every release identity field.
+                image = self.docker.inspect_image(m["imageTag"])
+                if image["Id"] == runtime_image_id(current):
+                    require(all(current["manifest"][field] == m[field]
+                                for field in ("version", "gitRevision", "requiredMigrations")),
+                            "adopted image has conflicting release identity")
+                    self.decompress(path / ARCHIVE, path / "image.tar")
+                    details = self.scanner(path / "image.tar", m)
+                    verify_loaded_image(image, m, details)
+                    target["runtimeImageId"] = image["Id"]
+                    self.health(target)
+                    self.observe(before)
+                    after = {**before, "current": target, "deployedAt": utcnow()}
+                    atomic_json(self.state_file, after)
+                    self.audit("adoption-finalized", version=version, imageId=image["Id"])
+                    return self.receipt(after)
+            if current["manifest"]["imageId"] == m["imageId"]:
                 require(before["current"].get("manifestSha256") == manifest_sha, "same image has conflicting release identity")
                 image = self.docker.inspect_image(m["imageTag"])
                 verify_image(image, m)
@@ -355,6 +368,7 @@ class Deployer:
             return self.promote(before, target, rollback=rollback)
 
     def promote(self, before, target, *, rollback=False):
+        compatible(before["current"], target, rollback=rollback)
         self.observe(before)
         atomic_json(self.journal, {"before": before, "target": target, "startedAt": utcnow()})
         try:

@@ -64,10 +64,12 @@ function runtimePackageJson(packageJson, relativePath) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function rewriteRuntimeJsonImports(source, packageVersion) {
+function rewriteRuntimeJsonImports(source, packageVersion, sourcePath, root) {
   return source.replace(
-    /^\s*import\s*\{\s*version\s+as\s+applicationVersion\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/package\.json["'];?\s*$/mu,
-    `const applicationVersion = ${JSON.stringify(packageVersion)};`
+    /^\s*import\s*\{\s*version(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*\}\s*from\s*(["'])([^"']+\/package\.json)\2;?\s*$/gmu,
+    (match, alias, _quote, packagePath) => resolve(dirname(sourcePath), packagePath) === resolve(root, "package.json")
+      ? `const ${alias ?? "version"} = ${JSON.stringify(packageVersion)};`
+      : match
   );
 }
 
@@ -93,14 +95,14 @@ async function transformTree(root, output, sourceRelative, outputRelative, packa
       }
       if (!entry.isFile() || !sourceFilePattern.test(entry.name) || testFilePattern.test(entry.name)) continue;
       if (sourceRelative === "scripts/tennis" && !new Set([
-        "server-entry.mts", "runtime-config.mts",
+        "server-entry.mts", "runtime-config.mts", "release-migrate.mts",
         ...(demoTools ? ["database.mts", "cloud-demo-init.mts", "cloud-demo-data.ts"] : [])
       ]).has(entry.name)) continue;
       if (sourceRelative === "packages/db/src" && excludedRuntimeFiles.has(entry.name)
-        && !(demoTools && relative(sourceDirectory, sourcePath) === "tennis/migrate.ts")) continue;
+        && relative(sourceDirectory, sourcePath) !== "tennis/migrate.ts") continue;
 
       const extension = extname(entry.name);
-      const source = rewriteRuntimeJsonImports(await readFile(sourcePath, "utf8"), packageVersion);
+      const source = rewriteRuntimeJsonImports(await readFile(sourcePath, "utf8"), packageVersion, sourcePath, root);
       const transformed = await transform(source, {
         format: "esm",
         loader: extension === ".tsx" ? "tsx" : "ts",

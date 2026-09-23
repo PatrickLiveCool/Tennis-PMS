@@ -76,3 +76,9 @@ Compose 默认复用官方 PostgreSQL 16 的 DaoCloud 镜像；可通过 TENNIS_
 本地备份目录不属于测试源码，Vitest 已显式排除 `.local-workspace` 和 `.worktrees`，避免扫描旧依赖/恢复副本。正式仓库最终检查已通过，见实施状态与日志。
 
 2026-09-19 F7：iCloud 再次将正式目录源码变成 dataless 占位。本轮使用已有 `/private/tmp/tennis-pms-goal-build` 验证副本完成修改和测试，按 F7 文件清单同步正式目录并核对 SHA256，未整库覆盖。Web/API 暂从该已核对副本运行，以保持本地演示可用；不修改系统云盘设置，也不把文件读取等待当成执行审批。当前会话为 Full Access / approval never，普通开发、验证与本地服务动作不重复申请权限。
+
+## 标准发布镜像与首次接管
+
+Tennis 专用 release/rollback/retention 已实现；仓库变量 `TENNIS_DEPLOY_ENABLED` 默认关闭。标准 `Dockerfile` 仍默认 production 拒绝模拟支付，受控 `compose.server.yaml` 明确覆盖为 HTTPS 模拟 Demo（development），以 node 用户连接外部独立 tennis_demo 库。应用启动只验证迁移checksum，不自动迁移。
+
+管理员迁移使用镜像内 `node scripts/tennis/release-migrate.mjs --apply` 和独立受限 `TENNIS_MIGRATION_DATABASE_URL` 文件；镜像不包含 seed，普通SSH发布身份不能调用迁移。首次001–028→目标manifest、数据转移和失败恢复见 [接管方案](../operations/tennis-release-onboarding.md)。本轮没有线上切换。

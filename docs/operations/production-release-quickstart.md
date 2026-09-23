@@ -1,22 +1,22 @@
 # Tennis-Green-PMS 生产发布快速开始
 
-> 当前状态：目标为 `PatrickLiveCool/Tennis-PMS`。Tennis CI 已启用；本次补齐独立的 Release Please 工作流，合入并配置专用 Secret 后可生成版本 PR 和 Draft Release，详见 [首次启用](release-please.md)。生产 release、retention、rollback 仍为 `.github/upstream-workflows/*.disabled`，发布 GitHub Release 不会自动部署。下文生产发布与权限约定是待接入草案，不能按源项目约定直接套用。当前可执行验证见 [迁移记录](tennis-green-pms-infrastructure.md)。运行环境需要 Node 22、Python 3.10+、Docker Compose v2。
+> 当前状态：Tennis 专用 release、retention、rollback 已在 `.github/workflows` 实现，旧 upstream 文件仍停用。部署与清理只有仓库变量 `TENNIS_DEPLOY_ENABLED=true` 才执行；关闭时 Publish 仅验证/准备 COS 包。真实凭据、外部网球库和首次切换尚待执行，现行首次操作以 [Demo 接管方案](tennis-release-onboarding.md) 为准。应用明确运行模拟 Demo，不能把发布 Environment 名称 production 当成真实支付环境。工具链 Node22、Python3.12、Docker Compose v2。
 
 这套流程已经写入仓库，但当前文档不代表真实 COS 或生产已经配置完成。首次接入尚未执行，本文也没有生产发布或生产验收记录。下文命令是待执行指南；不在终端、日志或归档中输出凭据。
 
 ## 日常发布
 
-完成全部生产接入后，预期日常流程如下；当前仅前 1–3 步的版本管理代码已接入，仍须按首次启用指南配置并验证：
+完成首次接管并显式打开部署开关后，日常流程如下：
 
 1. 合并业务 PR 到 `main`。`Tennis PMS Release Please` 会自动创建或更新版本 PR；它自动更新 `package.json`、`package-lock.json`、`CHANGELOG.md`、`.release-please-manifest.json`、`deploy/release-policy.json` 的版本字段。无需本地执行版本命令或 Git tag 命令。
-2. 检查自动版本 PR 的版本和 `CHANGELOG.md`。本次若有数据库迁移或回退不兼容变化，在这个 PR 中修改 `deploy/release-policy.json` 的 `rollbackCompatibility`；没有迁移时保持 `same-migrations-only`。合并版本 PR。
+2. 检查自动版本 PR 的版本和 `CHANGELOG.md`。核对 `deploy/release-policy.json` 的回退限制；当前实际policy为 `forward-only`，不能假定普通版本已允许回退。改变policy不会执行SQL：跨SQL基线一律拒绝普通deploy，须按 [管理员重新接管](tennis-release-onboarding.md#后续跨-sql-基线的管理员重新接管) 完成独立窗口，再重放目标版本。合并版本 PR。
 3. Release Please 自动创建不可变的 `vX.Y.Z` tag 和 Draft GitHub Release。确认说明和上线时机后，打开 GitHub Releases，点击 **Publish release**。
 4. `release.published` 自动启动 **Tennis-Green-PMS Release**。它会验证 tag 指向 `main` 历史中的提交，运行测试和构建，生成 linux/amd64 镜像、archive、checksum、SBOM，上传并回读 COS，然后通过受限 SSH 自动更新服务器上的 Tennis app。
 5. 不需要再点击 Environment 审批。GitHub Release 的 **Publish release**（`release.published`）就是本次生产发布的唯一批准点；只使用一个 `production` Environment，且不设置 reviewer 或 wait timer。
 
 成功条件是 Release workflow 绿色、`/health` 通过，COS 版本目录出现 `deployed.json`。下载/校验、Compose 启动或健康检查失败时，服务器不写成功标记，启动或健康失败会尽力恢复部署前容器，也不执行成功版本 retention；如果健康检查已经通过而 marker、retention 或本地清理失败，新版本保持运行，marker 可能已经创建，workflow 报错后可重试，不自动回退。
 
-同一 Release 重放时，Actions 从受保护的 `main` 解析并固定一个发布 harness commit，再把目标 tag checkout 到独立目录。应用源码和版本身份始终来自不可变 tag；所有 job 的打包、COS 和 SSH 工具来自同一个 harness commit，所以修复发布工具后可以重放旧 tag。Actions 随后查找该版本的完整且已校验 bundle，并复用不可变产物，不重新构建。若 COS 前缀只有部分文件或内容校验失败，流程会拒绝重建和覆盖；等待候选按 7 天策略清理，或使用新的版本/tag。
+同一 Release 重放时，Actions 从受保护的 `main` 解析并固定一个发布 harness commit，再把目标 tag checkout 到独立目录。应用源码和版本身份始终来自不可变 tag；所有 job 的打包、COS 和 SSH 工具来自同一个 harness commit，所以修复发布工具后可以重放旧 tag。Actions 随后查找该版本的完整且已校验 bundle，并复用不可变产物，不重新构建。若 COS 前缀只有部分文件或内容校验失败，流程会拒绝重建和覆盖；未知对象或损坏候选可能被清理跳过，不能假定7天后自动修复。按 [部分COS上传恢复](tennis-release-onboarding.md#部分-cos-上传失败的恢复) 审查可信原包补齐或限定残缺前缀恢复，不覆盖成功包。
 
 基础设施修复合并后，在 Actions 页面使用 **Run workflow** 新建一次 `workflow_dispatch` 并填写已发布 tag。不要点击旧失败 run 的 **Re-run jobs**：GitHub 会沿用旧 run 固定的 workflow 内容，无法验证刚合并的修复。
 
@@ -36,7 +36,7 @@
 
 ### 1. 创建 COS 桶
 
-创建私有桶，记录完整桶名和地域代码。建议使用独立桶，并满足：
+本次共用 `greenpms-release-1305166808` / `ap-shanghai`，隔离 `tennis-green-pms/releases/` 前缀及CAM身份，不新建或修改住房发布前缀。桶须满足：
 
 - 从未启用 COS 版本控制；`Enabled` 或 `Suspended` 都不能使用。
 - 开启服务端加密，禁止公开访问。

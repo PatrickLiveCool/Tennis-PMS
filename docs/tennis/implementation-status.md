@@ -459,3 +459,16 @@ typecheck、69 文件/1,284 项单元、Web build 通过，网页资产 tennis-P
 最终类型检查、89 文件/1,506 项单测、构建、PR 格式 8 项及 diff --check 通过。完整 PostgreSQL 回归 30 文件/375 项：373 项通过，付款组一项超过 15 秒超时并触发清理失败，造成该组另一项清理失败；单独重跑付款组 21/21 全通过（全组 13.84 秒）。新管理集成 10/10、原 Gateway 28 项及其余全量测试通过。仅清理本次失败残留的两个合成测试租户，证据留在忽略目录。独立后端静态审阅未留下待修复问题。
 
 本地开发库已迁移、API 已重新加载，预览已更新为 tennis-BbFgjf1r.js。开发者浏览器核对系统管理三个栏目、接入表单默认 90 天、接口空列表、帮助说明及账号绑定入口；实际 400 CSS 像素宽度无页面横溢，临时视口已恢复，未见浏览器 error/warn。未通过浏览器签发真实 Key、绑定员工或操作资金；签发、轮换和异常恢复由合成自动测试验证。用户人工验收、外部工作人员 Runtime/真实企微联调仍待完成，未部署生产。
+
+## 发布基础设施与 Demo 接管准备（2026-09-23）
+
+- 已实现 Tennis 专用 release/rollback/retention：固定 actions、main harness 与 tag 源码分离、发布验证包含独立 tennis_test PostgreSQL；仓库 `TENNIS_DEPLOY_ENABLED=true` 才允许服务器部署/回退/清理。关闭时仍可准备不可变 COS 包，未改现有 CI 或 GreenPMS。
+- 标准镜像使用 node 用户，受控 Compose 明确 HTTPS 模拟 Demo、外部 tennis_demo、精确 proxy 与日志/资源限制；镜像默认 production 禁模拟仍保留。单独管理员迁移工具仅允许 tennis_demo 库和 owner 角色，不含 seed，应用启动不自动迁移。
+- 普通切换与回退拒绝不同 SQL 名单或checksum；恢复拒绝未提交跨基线事务。同镜像目标 adopt 可在校验 bundle/标签/版本/基线/rootfs与健康后转为正式 manifest。清理限定 Tennis 与历史 tennis-demo 标签，保护所有运行/停止容器引用，不删卷。
+- 已验证：Node22 typecheck；单测98文件1647项；build；Python3.12 release harness123项（含恢复的工作流测试，无skip）；PR格式测试；actionlint；git diff --check。首次release重跑暴露重负载下旧signal测试200ms竞态，已改为等待子进程PID证据再发信号，最终123项通过。
+- 本地合成数据库转移由主会话完成：PG16.15→18.6，028→030、重复迁移、原密钥解密、68张旧业务表与checksum、旧028恢复副本及住房哨兵通过，不代表线上PG16.14→18.4验收。证据见 `.local-workspace/release-transfer-rehearsal.log`。
+- Docker linux/amd64镜像构建、独立低权限owner迁移及重复执行、无seed、默认production拒绝模拟、`/health`与`/version`均通过。实际启动发现并修复AI问题记录模块的JSON版本导入问题，新增产物动态导入回归测试。Apple Silicon本地原生builder编译JS，最终runtime保持amd64；模拟运行在384MB限额下未通过健康检查，本地演练单独覆盖为1GB/2CPU/15秒探针后通过，服务器模板仍为384MB/1CPU/3秒，线上容量未验收。证据 `/tmp/tennis-release-runtime-rehearsal-final.log`；本轮合成容器/网络/数据库已清理，不影响既有环境。
+- 审阅修复后，新增迁移诊断及runtime测试2文件7项、workflow及signal测试20项、最终typecheck/actionlint通过；PG18全量业务集成35文件409项通过。三层审阅问题已修复；强制TLS/CA接入是否需要仍待实际实例策略确认，未声称完成TLS验收。
+- 本轮未创建真实凭据、写远端配置、安装线上服务、迁移或删除线上数据、触发部署。接管窗口、恢复路径及非秘密配置命令见 [首次接管方案](../operations/tennis-release-onboarding.md)；仍需真实COS/SSH、外部DB权限和HTTPS/AI/业务人工验收。
+
+- 接续定点修复：Release集成服务改为PG18，原CI保留PG16；主会话已完成PG18全量integration，35文件409项通过（`/tmp/tennis-release-pg18-integration.log`）。标准runtime修复根package.json版本导入重写；迁移CLI加入锁/SQL超时和脱敏SQLSTATE分类。Docker最终验证仍由主会话补录。

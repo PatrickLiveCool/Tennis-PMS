@@ -1,0 +1,102 @@
+name: Tennis-Green-PMS Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Previously deployed version, e.g. v1.2.4
+        required: true
+        type: string
+      revision:
+        description: Full Git revision (only needed if the version is ambiguous)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tennis-green-pms-production
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main' && github.repository == 'PatrickLiveCool/Tennis-PMS' && vars.TENNIS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      COS_BUCKET: ${{ vars.COS_BUCKET }}
+      COS_REGION: ${{ vars.COS_REGION }}
+      COS_ENDPOINT: ${{ vars.COS_ENDPOINT }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install COS client dependencies
+        run: python3 -m pip install --disable-pip-version-check --no-input -r scripts/release/requirements.txt
+      - name: Verify deployment configuration
+        env:
+          UPLOAD_COS_SECRET_ID: ${{ secrets.UPLOAD_COS_SECRET_ID }}
+          UPLOAD_COS_SECRET_KEY: ${{ secrets.UPLOAD_COS_SECRET_KEY }}
+          RETENTION_COS_SECRET_ID: ${{ secrets.RETENTION_COS_SECRET_ID }}
+          RETENTION_COS_SECRET_KEY: ${{ secrets.RETENTION_COS_SECRET_KEY }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          missing=""
+          for name in COS_BUCKET COS_REGION DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS RETENTION_COS_SECRET_ID RETENTION_COS_SECRET_KEY UPLOAD_COS_SECRET_ID UPLOAD_COS_SECRET_KEY; do
+            if [ -z "${!name:-}" ]; then missing="${missing}${missing:+, }${name}"; fi
+          done
+          if [ -n "$missing" ]; then
+            printf 'Missing Tennis-Green-PMS deployment configuration: %s\n' "$missing" >&2
+            exit 1
+          fi
+
+      - name: Materialize restricted SSH files
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY_FILE: ${{ runner.temp }}/tennis-green-pms-rollback-key
+          DEPLOY_KNOWN_HOSTS_FILE: ${{ runner.temp }}/tennis-green-pms-rollback-known-hosts
+        run: |
+          set -eu
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$DEPLOY_SSH_KEY_FILE"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$DEPLOY_KNOWN_HOSTS_FILE"
+      - name: Roll back to a verified successful release
+        env:
+          MARKER_COS_SECRET_ID: ${{ secrets.UPLOAD_COS_SECRET_ID }}
+          MARKER_COS_SECRET_KEY: ${{ secrets.UPLOAD_COS_SECRET_KEY }}
+          MARKER_COS_TOKEN: ${{ secrets.UPLOAD_COS_TOKEN }}
+          RETENTION_COS_SECRET_ID: ${{ secrets.RETENTION_COS_SECRET_ID }}
+          RETENTION_COS_SECRET_KEY: ${{ secrets.RETENTION_COS_SECRET_KEY }}
+          RETENTION_COS_TOKEN: ${{ secrets.RETENTION_COS_TOKEN }}
+          DEPLOY_SSH_KEY_FILE: ${{ runner.temp }}/tennis-green-pms-rollback-key
+          DEPLOY_KNOWN_HOSTS_FILE: ${{ runner.temp }}/tennis-green-pms-rollback-known-hosts
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_REVISION: ${{ inputs.revision }}
+        run: |
+          set -eu
+          args=(rollback-release --version "$RELEASE_VERSION")
+          if [ -n "$RELEASE_REVISION" ]; then
+            args+=(--revision "$RELEASE_REVISION")
+          fi
+          python3 scripts/release/orchestrate.py "${args[@]}"
+          # Markdown backticks are literal.
+          # shellcheck disable=SC2016
+          printf 'Tennis-Green-PMS rollback to `%s` passed identity, migration compatibility and health checks.\n' \
+            "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary SSH files
+        if: always()
+        env:
+          DEPLOY_SSH_KEY_FILE: ${{ runner.temp }}/tennis-green-pms-rollback-key
+          DEPLOY_KNOWN_HOSTS_FILE: ${{ runner.temp }}/tennis-green-pms-rollback-known-hosts
+        run: rm -f -- "$DEPLOY_SSH_KEY_FILE" "$DEPLOY_KNOWN_HOSTS_FILE"

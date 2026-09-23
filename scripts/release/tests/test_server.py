@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -598,7 +599,7 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(fixture.docker.switches, [])
             self.assertEqual(fixture.store.markers, {})
 
-    def test_forward_migration_extension_allows_switch(self) -> None:
+    def test_forward_migration_extension_refuses_switch(self) -> None:
         with DeployerFixture() as fixture:
             current_migrations = list(fixture.old_manifest["requiredMigrations"])
             target_migrations = current_migrations + [migration("061_room_catalog_management.sql")]
@@ -608,10 +609,12 @@ class DeploymentTests(unittest.TestCase):
             )
             manifest_sha = digest(fixture.store.objects[key + "manifest.json"])
 
-            result = fixture.deployer.deploy(fixture.new_version, fixture.new_revision, key, manifest_sha)
-
-            self.assertEqual(result["status"], "healthy")
-            self.assertEqual(fixture.docker.current_image_id, fixture.new_image_id)
+            before = fixture.deployer.state_file.read_bytes()
+            with self.assertRaisesRegex(ReleaseError, "migration baseline changed"):
+                fixture.deployer.deploy(fixture.new_version, fixture.new_revision, key, manifest_sha)
+            self.assertEqual(fixture.deployer.state_file.read_bytes(), before)
+            self.assertEqual(fixture.docker.switches, [])
+            self.assertEqual(fixture.docker.load_calls, [])
 
     def test_forward_only_release_allows_forward_switch_but_refuses_rollback(self) -> None:
         with DeployerFixture() as fixture:
@@ -682,6 +685,75 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(fixture.store.markers, {})
             self.assertEqual(fixture.temp_downloads(), [])
 
+    def test_adopted_target_registers_verified_bundle_without_switch(self) -> None:
+        for runtime_differs in (False, True):
+            with self.subTest(runtime_differs=runtime_differs), DeployerFixture() as fixture:
+                fixture.deployer.state_file.unlink()
+                fixture.deployer.adopt(fixture.old_version, fixture.old_revision, fixture.old_image_id, [migration()])
+                archive_id = fixture.new_image_id if runtime_differs else fixture.old_image_id
+                manifest, objects = make_manifest(fixture.old_version, fixture.old_revision, archive_id)
+                key = release_key(fixture.old_version, fixture.old_revision)
+                fixture.store.add_bundle(key, objects)
+                result = fixture.deployer.deploy(fixture.old_version, fixture.old_revision, key, digest(objects["manifest.json"]))
+                self.assertEqual(result["status"], "healthy")
+                current = fixture.deployer.state()["current"]
+                self.assertFalse(current.get("legacy", False))
+                self.assertEqual(current["manifestSha256"], digest(objects["manifest.json"]))
+                self.assertEqual(current["runtimeImageId"], fixture.old_image_id)
+                self.assertEqual(fixture.docker.switches, [])
+                self.assertEqual(fixture.docker.load_calls, [])
+                self.assertEqual(len(fixture.decompress_calls), 1)
+                self.assertEqual(fixture.temp_downloads(), [])
+                # Formal registration is safely replayable.
+                fixture.deployer.deploy(fixture.old_version, fixture.old_revision, key, digest(objects["manifest.json"]))
+
+    def test_adoption_registration_failure_preserves_legacy_state(self) -> None:
+        for failure in ("archive", "health", "labels"):
+            with self.subTest(failure=failure), DeployerFixture() as fixture:
+                fixture.deployer.state_file.unlink()
+                fixture.deployer.adopt(fixture.old_version, fixture.old_revision, fixture.old_image_id, [migration()])
+                manifest, objects = make_manifest(fixture.old_version, fixture.old_revision, fixture.old_image_id)
+                key = release_key(fixture.old_version, fixture.old_revision)
+                fixture.store.add_bundle(key, objects)
+                if failure == "archive":
+                    fixture.deployer.scanner = Mock(side_effect=ReleaseError("archive rejected"))
+                elif failure == "health":
+                    fixture.health.failures.add(fixture.old_image_id)
+                else:
+                    fixture.docker.image_records[fixture.old_image_id]["Labels"]["org.opencontainers.image.source"] = "https://example.invalid/other"
+                before = fixture.deployer.state_file.read_bytes()
+                with self.assertRaises(ReleaseError):
+                    fixture.deployer.deploy(fixture.old_version, fixture.old_revision, key, digest(objects["manifest.json"]))
+                self.assertEqual(fixture.deployer.state_file.read_bytes(), before)
+                self.assertEqual(fixture.docker.switches, [])
+                self.assertEqual(fixture.temp_downloads(), [])
+
+    def test_adopted_same_image_rejects_conflicting_version(self) -> None:
+        with DeployerFixture() as fixture:
+            fixture.deployer.state_file.unlink()
+            fixture.deployer.adopt(fixture.old_version, fixture.old_revision, fixture.old_image_id, [migration()])
+            manifest, objects = make_manifest(fixture.new_version, fixture.new_revision, fixture.old_image_id)
+            key = release_key(fixture.new_version, fixture.new_revision)
+            fixture.store.add_bundle(key, objects)
+            fixture.docker.add_image(fixture.old_image_id, [manifest["imageTag"]],
+                                     version=fixture.new_version, revision=fixture.new_revision)
+            before = fixture.deployer.state_file.read_bytes()
+            with self.assertRaisesRegex(ReleaseError, "conflicting release identity"):
+                fixture.deployer.deploy(fixture.new_version, fixture.new_revision, key, digest(objects["manifest.json"]))
+            self.assertEqual(fixture.deployer.state_file.read_bytes(), before)
+            self.assertEqual(fixture.docker.switches, [])
+
+    def test_checksum_change_refuses_both_deploy_and_rollback(self) -> None:
+        for rollback in (False, True):
+            with DeployerFixture() as fixture:
+                _, key = fixture.add_new_release(migrations=[{**migration(), "sha256": "c" * 64}])
+                before = fixture.deployer.state_file.read_bytes()
+                with self.assertRaisesRegex(ReleaseError, "migration baseline changed"):
+                    fixture.deployer.deploy(fixture.new_version, fixture.new_revision, key,
+                                             digest(fixture.store.objects[key + "manifest.json"]), rollback=rollback)
+                self.assertEqual(fixture.deployer.state_file.read_bytes(), before)
+                self.assertEqual(fixture.docker.switches, [])
+
     def test_rollback_reuses_matching_previous_image_without_cos_download(self) -> None:
         with DeployerFixture() as fixture:
             target_manifest, key = fixture.add_new_release()
@@ -719,7 +791,7 @@ class DeploymentTests(unittest.TestCase):
             fixture.docker.current_image_id = fixture.new_image_id
             server.atomic_json(  # type: ignore[union-attr]
                 fixture.deployer.journal,
-                {"before": state, "target": {"manifest": {"imageId": fixture.new_image_id}}, "startedAt": "2026-09-09T00:00:00Z"},
+                {"before": state, "target": {"manifest": {**fixture.old_manifest, "imageId": fixture.new_image_id}}, "startedAt": "2026-09-09T00:00:00Z"},
             )
 
             fixture.deployer.recover()
@@ -727,6 +799,22 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(fixture.docker.current_image_id, fixture.old_image_id)
             self.assertFalse(fixture.deployer.journal.exists())
             self.assertEqual(fixture.docker.switches, [fixture.old_image_id])
+
+    def test_recovery_refuses_uncommitted_cross_baseline_transaction(self) -> None:
+        with DeployerFixture() as fixture:
+            before = fixture.deployer.state()
+            target_manifest, _ = fixture.add_new_release(migrations=[migration(), migration("002_new.sql")])
+            server.atomic_json(fixture.deployer.journal, {"before": before, "target": {"manifest": target_manifest}})
+            with self.assertRaisesRegex(ReleaseError, "migration baseline changed"):
+                fixture.deployer.recover()
+            self.assertTrue(fixture.deployer.journal.exists())
+            self.assertEqual(fixture.docker.switches, [])
+            # A committed target is recovered in place, never by reverting its SQL.
+            after = {**before, "current": {"manifest": target_manifest}}
+            server.atomic_json(fixture.deployer.state_file, after)
+            fixture.deployer.recover()
+            self.assertEqual(fixture.docker.switches, [fixture.new_image_id])
+            self.assertFalse(fixture.deployer.journal.exists())
 
     def test_flock_allows_only_one_process(self) -> None:
         if "fork" not in multiprocessing.get_all_start_methods():
@@ -763,7 +851,20 @@ class DeploymentTests(unittest.TestCase):
             def interrupt(_signum: int, _frame: object) -> None:
                 raise Interrupted
 
-            timer = threading.Timer(0.2, lambda: os.kill(os.getpid(), signal.SIGTERM))
+            def interrupt_after_child_started() -> None:
+                # Heavy image builds can delay process startup beyond 200ms.
+                # Signal only after the child has written its PID evidence.
+                for _ in range(500):
+                    try:
+                        child_pid = probe.read_text(encoding="ascii").strip()
+                    except FileNotFoundError:
+                        child_pid = ""
+                    if child_pid.isdigit():
+                        os.kill(os.getpid(), signal.SIGTERM)
+                        return
+                    time.sleep(0.01)
+
+            timer = threading.Timer(0, interrupt_after_child_started)
             try:
                 signal.signal(signal.SIGTERM, interrupt)
                 child_code = (
@@ -900,6 +1001,21 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(decisions[0]["action"], "delete")
         self.assertEqual(self.docker.remove_calls, [managed_tag])
         self.assertEqual(self.docker.inspect_image(other_tag)["RepoTags"], [other_tag])
+
+    def test_old_demo_tags_protect_stopped_container_and_housing_tags(self) -> None:
+        referenced = "sha256:" + "7" * 64
+        unreferenced = "sha256:" + "8" * 64
+        self.docker.add_image(referenced, ["tennis-demo:c80696a"])
+        self.docker.add_image(unreferenced, ["tennis-demo:old", "greenpms:shared"])
+        self.docker.extra_containers.append({"imageId": referenced, "name": "/tennis-demo-app-1", "running": False})
+        volumes = list(self.docker.volumes)
+        server.cleanup_images(self.docker, self.state(), dry_run=True)
+        self.assertEqual(self.docker.remove_calls, [])
+        server.cleanup_images(self.docker, self.state())
+        self.assertEqual(self.docker.remove_calls, ["tennis-demo:old"])
+        self.assertEqual(self.docker.inspect_image("greenpms:shared")["RepoTags"], ["greenpms:shared"])
+        self.assertIn("tennis-demo:c80696a", self.docker.tag_to_id)
+        self.assertEqual(self.docker.volumes, volumes)
 
     def test_repeated_cleanup_is_idempotent(self) -> None:
         old_id = "sha256:" + "7" * 64

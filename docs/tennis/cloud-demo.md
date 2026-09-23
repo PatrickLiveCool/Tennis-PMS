@@ -4,6 +4,8 @@
 
 真实商户支付和微信渠道尚未接入，`NODE_ENV=production` 继续拒绝模拟支付启动。本地 `tennis:demo` 保留两个租户以验证隔离；云端初始化使用独立入口，不复制本地数据库或公开固定密码。
 
+> 本文记录旧 `tennis-demo` 首次初始化流程。已有云端数据接管到标准发布镜像时，必须改用 [首次接管方案](../operations/tennis-release-onboarding.md)，不重跑下文 seed，不删除旧容器/卷或轮换原 AI 密钥。
+
 ## 配置与部署
 
 使用 `Dockerfile.demo` 构建固定提交的 `linux/amd64` 镜像，在本机完成构建再上传。`compose.demo.yaml` 不在服务器安装依赖或构建镜像。应用使用 384 MiB、数据库 256 MiB 内存上限，分别最多使用 512 MiB、384 MiB（包含 swap）；这些上限适用于少量演示，不是并发容量承诺。
