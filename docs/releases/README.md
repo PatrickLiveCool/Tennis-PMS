@@ -2,6 +2,8 @@
 
 根 `package.json` 的 `version` 是 Tennis-Green-PMS 应用版本唯一来源，根锁文件必须同步。历史 Green PMS 版本只用于说明 fork 基线，不代表 Tennis 版本已经发布。
 
+自动版本 PR 使用独立的 `Tennis PMS Release Please` 工作流。合入 `main` 并配置 `RELEASE_PLEASE_TOKEN` 后，业务 PR 合并会创建或更新版本 PR；版本 PR 合并会创建标签和 Draft Release。首次启用、验证和缺口见 [自动版本 PR](../operations/release-please.md)。这不代表生产发布、回退或清理已接通。
+
 每个发布版本使用不可复用的 `vX.Y.Z` 标签和 GitHub Release。发布校验由 `npm run release:check` 执行，校验包版本、锁文件、CHANGELOG 和 `deploy/release-policy.json`。生产发布前还必须完成目标仓库的镜像仓库、数据库、域名、密钥和权限配置；本仓库不会在开发验证中执行生产发布、数据库迁移或云端权限变更。
 
 当前可验证的本地链路是：

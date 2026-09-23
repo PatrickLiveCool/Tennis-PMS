@@ -1,14 +1,14 @@
 # Tennis-Green-PMS 生产发布快速开始
 
-> 当前状态：目标为 `PatrickLiveCool/Tennis-PMS`。只有 Tennis CI 已启用，release-please、release、retention、rollback 均保持 `.github/upstream-workflows/*.disabled`；下文自动发布步骤是接入草案，现在合并或发布 GitHub Release 不会启动这些流程。CI 差异和当前可执行验证见 [迁移记录](tennis-green-pms-infrastructure.md)。Environment 审批、分支保护、云端权限须另行确认，不能按源项目约定直接套用。运行环境需要 Node 22、Python 3.10+、Docker Compose v2。
+> 当前状态：目标为 `PatrickLiveCool/Tennis-PMS`。Tennis CI 已启用；本次补齐独立的 Release Please 工作流，合入并配置专用 Secret 后可生成版本 PR 和 Draft Release，详见 [首次启用](release-please.md)。生产 release、retention、rollback 仍为 `.github/upstream-workflows/*.disabled`，发布 GitHub Release 不会自动部署。下文生产发布与权限约定是待接入草案，不能按源项目约定直接套用。当前可执行验证见 [迁移记录](tennis-green-pms-infrastructure.md)。运行环境需要 Node 22、Python 3.10+、Docker Compose v2。
 
 这套流程已经写入仓库，但当前文档不代表真实 COS 或生产已经配置完成。首次接入尚未执行，本文也没有生产发布或生产验收记录。下文命令是待执行指南；不在终端、日志或归档中输出凭据。
 
 ## 日常发布
 
-日常发布不需要登录服务器，也不需要手工上传镜像：
+完成全部生产接入后，预期日常流程如下；当前仅前 1–3 步的版本管理代码已接入，仍须按首次启用指南配置并验证：
 
-1. 合并业务 PR 到 `main`。`Tennis-Green-PMS Release Please` 会自动创建或更新版本 PR；它自动更新 `package.json`、`package-lock.json`、`CHANGELOG.md`、`deploy/release-policy.json` 的版本字段。无需本地执行版本命令或 Git tag 命令。
+1. 合并业务 PR 到 `main`。`Tennis PMS Release Please` 会自动创建或更新版本 PR；它自动更新 `package.json`、`package-lock.json`、`CHANGELOG.md`、`.release-please-manifest.json`、`deploy/release-policy.json` 的版本字段。无需本地执行版本命令或 Git tag 命令。
 2. 检查自动版本 PR 的版本和 `CHANGELOG.md`。本次若有数据库迁移或回退不兼容变化，在这个 PR 中修改 `deploy/release-policy.json` 的 `rollbackCompatibility`；没有迁移时保持 `same-migrations-only`。合并版本 PR。
 3. Release Please 自动创建不可变的 `vX.Y.Z` tag 和 Draft GitHub Release。确认说明和上线时机后，打开 GitHub Releases，点击 **Publish release**。
 4. `release.published` 自动启动 **Tennis-Green-PMS Release**。它会验证 tag 指向 `main` 历史中的提交，运行测试和构建，生成 linux/amd64 镜像、archive、checksum、SBOM，上传并回读 COS，然后通过受限 SSH 自动更新服务器上的 Tennis app。

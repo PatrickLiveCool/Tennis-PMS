@@ -24,4 +24,4 @@ npm test
 npm run build
 ```
 
-发布工具的本地 fake harness 使用 Python 3.10+：`npm run test:release`。它不访问生产 COS 或 SSH。真实 Docker 验证见 [迁移记录](operations/tennis-green-pms-infrastructure.md)。源发布 workflow 保持停用，合并或发布 GitHub Release 不等于已上线。
+发布工具的本地 fake harness 使用 Python 3.10+：`npm run test:release`。它不访问生产 COS 或 SSH。CI 额外执行其中的版本工作流契约检查；真实 Docker 验证见 [迁移记录](operations/tennis-green-pms-infrastructure.md)。独立 [Release Please](operations/release-please.md) 需合入并配置专用 Secret 才能创建版本 PR。生产发布、回退和清理 workflow 仍停用，合并或发布 GitHub Release 不等于已上线。

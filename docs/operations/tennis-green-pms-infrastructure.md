@@ -1,5 +1,7 @@
 # Tennis-Green-PMS 基础设施迁移记录
 
+> 2026-09-23 接续：本文保留首次迁移时的暂停决定和验证记录。本次新增 Tennis 专用 Release Please 工作流及 CI 契约检查，接入步骤和当前缺口见 [自动版本 PR](release-please.md)。代码合入与专用 Secret 配置后仍需核对实际运行；生产发布、回退及清理尚未接通，不能将本文视为完整基础设施已交付。
+
 源仓库：本机 Green PMS，核对提交 `9b9c6eed97f18f535b295a2910c47b8ab5412af9`。目标：`git@github.com:PatrickLiveCool/Tennis-PMS.git`，本机 `Tennis PMS`。用户后续指定此原始 GitHub 仓库作为目标，原 `qintopia-agent-studio/Tennis-Green-PMS` 地址未使用。
 
 迁移分支：`codex/green-pms-infrastructure-migration`，开始时 HEAD 为 `c06d4a4`。目标已继承 Green PMS v1.4.3 基础设施，但住房发布 workflow 和危险数据库入口此前已停用；本次以已有文件逐项合并适配，不复制业务源码、业务数据库或源项目环境文件。
