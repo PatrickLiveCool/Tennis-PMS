@@ -255,7 +255,6 @@ function Workspace({
           <div className="sidebar-brand-identity">
             <div className="sidebar-brand sidebar-brand-identity">
               <strong className="brand-word sidebar-brand-full">Tennis</strong>
-              <span className="sidebar-brand-product">运营工作台</span>
               <strong className="sidebar-brand-compact">T</strong>
             </div>
             <a
