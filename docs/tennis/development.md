@@ -60,7 +60,7 @@ Compose 默认复用官方 PostgreSQL 16 的 DaoCloud 镜像；可通过 TENNIS_
 - `node --test scripts/check-pr-tests.mjs`：继承的 PR 格式验证。
 - `npm run dev/start` 现在启动独立网球 API/Web；`db:reset/test:e2e/test:contract` 等住房入口仍停用。`npm run db:migrate` 已指向网球迁移。
 
-旧生产 Compose 位于 `docs/upstream/compose.server.yaml.disabled`；发布、回滚和清理工作流位于 `.github/upstream-workflows/*.disabled`，GitHub 不执行这些归档文件。原部署工具与 Dockerfile 仍为住房参考，不能用于网球生产。网球生产部署尚未配置；本地改动需通过 PR 合入 main 后才影响远端工作流。
+旧住房生产 Compose 位于 `docs/upstream/compose.server.yaml.disabled`。当前 Dockerfile、Tennis 运行入口、备份恢复与发布工具已完成网球适配和本地验证，见 [迁移记录](../operations/tennis-green-pms-infrastructure.md)；网球生产部署尚未接通，release、rollback 和 retention 工作流仍在 `.github/upstream-workflows/*.disabled`。新增的独立 Release Please 工作流须合入 `main` 并配置专用 Secret 后才生效，见 [自动版本 PR](../operations/release-please.md)。
 
 ## 后续切片
 

@@ -66,20 +66,18 @@ class WorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.ci = read(".github/workflows/ci.yml")
-        cls.release_please = ""
-        cls.release_please_config = {}
-        cls.release_please_manifest = {}
+        cls.release_please = read(".github/workflows/release-please.yml")
+        cls.release_please_config = json.loads(read(".release-please-config.json"))
+        cls.release_please_manifest = json.loads(read(".release-please-manifest.json"))
         cls.release = ""
         cls.retention = ""
         cls.rollback = ""
         cls.workflows = cls.ci + cls.release + cls.retention + cls.rollback
 
-    def test_release_workflows_remain_disabled_until_target_ci_conflict_is_resolved(self) -> None:
-        for name in ("release-please.yml", "release.yml", "retention.yml", "rollback.yml"):
+    def test_production_workflows_remain_disabled_until_target_environment_is_ready(self) -> None:
+        for name in ("release.yml", "retention.yml", "rollback.yml"):
             self.assertFalse((ROOT / ".github/workflows" / name).exists())
             self.assertTrue((ROOT / ".github/upstream-workflows" / (name + ".disabled")).is_file())
-
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
 
     def test_release_please_prepares_version_pr_and_tag(self) -> None:
         for fragment in (
@@ -94,6 +92,12 @@ class WorkflowContractTests(unittest.TestCase):
         ):
             self.assertIn(fragment, self.release_please)
         self.assertNotIn("environment: production", self.release_please)
+        self.assertNotIn("pull_request:", self.release_please)
+        self.assertIn("github.repository == 'PatrickLiveCool/Tennis-PMS' && github.ref == 'refs/heads/main'", self.release_please)
+        self.assertIn("target-branch: main", self.release_please)
+        self.assertNotIn("github.token", self.release_please)
+        self.assertNotIn("GITHUB_TOKEN", self.release_please)
+        self.assertEqual(self.release_please_config["bootstrap-sha"], "47eb658a20aee5fc469a6ecbb17444999385da6a")
         package = self.release_please_config["packages"]["."]
         self.assertEqual(package["release-type"], "node")
         self.assertTrue(package["include-v-in-tag"])
@@ -112,6 +116,52 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("actions/upload-artifact", self.release_please)
         self.assertNotIn("docker push", self.release_please)
 
+    def test_missing_release_credential_fails_clearly_without_echoing_present_secret(self) -> None:
+        preflight = self.release_please.split("      - name: Check dedicated release credential\n", 1)[1]
+        script = preflight.split("        run: |\n", 1)[1].split("      - name:", 1)[0]
+        script = "\n".join(line.removeprefix("          ") for line in script.splitlines())
+        for token, expected in (("", 1), ("synthetic-private-release-token", 0)):
+            environment = os.environ.copy()
+            environment["RELEASE_PLEASE_TOKEN"] = token
+            result = subprocess.run(["bash", "-euo", "pipefail", "-c", script], env=environment,
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, expected, result.stderr)
+            if token:
+                self.assertEqual(result.stdout + result.stderr, "")
+            else:
+                self.assertIn("Missing repository secret RELEASE_PLEASE_TOKEN", result.stdout)
+
+    def test_next_version_pr_is_compatible_with_existing_ci_and_release_policy(self) -> None:
+        package = self.release_please_config["packages"]["."]
+        next_version = f"{APP_VERSION.split('.')[0]}.{int(APP_VERSION.split('.')[1]) + 1}.0"
+        pull_request = {
+            "title": package["pull-request-title-pattern"].replace("${version}", next_version),
+            "body": package["pull-request-header"] + f"\n\n## [{next_version}](https://example.invalid/release)\n\n### Features\n\n* Tennis changes\n",
+            "head": {"ref": "release-please--branches--main"},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            event_path = directory / "event.json"
+            event_path.write_text(json.dumps({"pull_request": pull_request}), encoding="utf-8")
+            environment = os.environ.copy()
+            environment["GITHUB_EVENT_PATH"] = str(event_path)
+            result = subprocess.run(["node", str(ROOT / "scripts/check-pr.mjs")], cwd=ROOT,
+                                    env=environment, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for filename in ("package.json", "package-lock.json", "deploy/release-policy.json"):
+                data = json.loads(read(filename))
+                data["version"] = next_version
+                if filename == "package-lock.json":
+                    data["packages"][""]["version"] = next_version
+                target = directory / filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(data), encoding="utf-8")
+            (directory / "CHANGELOG.md").write_text(f"## [{next_version}](https://example.invalid/release)\n\n### Features\n\n* Tennis changes\n", encoding="utf-8")
+            environment.pop("GITHUB_REF", None)
+            result = subprocess.run(["node", str(ROOT / "scripts/check-release.mjs"), "--root", str(directory)],
+                                    cwd=ROOT, env=environment, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_ci_runs_required_checks_without_production_inputs(self) -> None:
         for fragment in (
             "pull_request:",
@@ -128,13 +178,14 @@ class WorkflowContractTests(unittest.TestCase):
             "run: npm test",
             "run: npm run build",
             "run: npm run test:integration",
+            "python3 -m unittest discover -s scripts/release/tests -p test_workflows.py -v",
         ):
             self.assertIn(fragment, self.ci)
         self.assertNotIn("environment: production", self.ci)
         self.assertNotIn("COS_", self.ci)
         self.assertNotIn("DEPLOY_", self.ci)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_is_tagged_immutable_and_main_reachable(self) -> None:
         for fragment in (
             "release:\n    types: [published]",
@@ -208,7 +259,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("working-directory: harness", harness_test)
         self.assertIn("run: python3 -m unittest discover -s scripts/release/tests -v", harness_test)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_checks_all_external_configuration_before_packaging(self) -> None:
         package_upload = self.release.split("  package-upload:", 1)[1].split("  deploy:", 1)[0]
         preflight = package_upload.split("      - name: Verify release infrastructure configuration", 1)[1].split(
@@ -223,7 +274,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Missing Tennis-Green-PMS release configuration", preflight)
         self.assertNotIn("set -x", preflight)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_package_key_command_preserves_v_prefix(self) -> None:
         package_step = self.release.split("      - name: Upload immutable release and verify stored bytes", 1)[1]
         package_step = package_step.split("      - name: Write release summary", 1)[0]
@@ -249,7 +300,7 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), f"v1.2.3|tennis-green-pms/releases/v1.2.3/{'a' * 40}/")
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_runner_temp_is_step_scoped(self) -> None:
         for workflow in (self.release, self.retention, self.rollback):
             jobs = re.split(r"(?m)^  [a-z][a-z-]*:\n", workflow.split("jobs:\n", 1)[1])
@@ -257,7 +308,7 @@ class WorkflowContractTests(unittest.TestCase):
                 job_env = job.split("    steps:", 1)[0]
                 self.assertNotIn("runner.temp", job_env)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_keeps_v_in_package_identity_and_cos_key(self) -> None:
         self.assertIn('version="$RELEASE_VERSION"', self.release)
         self.assertNotIn('version="${RELEASE_VERSION#v}"', self.release)
@@ -282,7 +333,7 @@ class WorkflowContractTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_release_ancestry_command_accepts_tag_before_later_main_commit(self) -> None:
         command = next(line.strip() for line in self.release.splitlines() if line.strip().startswith("git merge-base --is-ancestor"))
         with tempfile.TemporaryDirectory() as temporary:
@@ -312,7 +363,7 @@ class WorkflowContractTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_retention_shares_lock_and_has_dry_run(self) -> None:
         for fragment in (
             "schedule:",
@@ -332,7 +383,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("secrets.DEPLOY_SSH_KEY", self.retention)
         self.assertNotIn("MAINTENANCE_SSH_KEY", self.workflows)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_rollback_runs_trusted_main_tools_with_shared_environment_and_lock(self) -> None:
         for fragment in ("workflow_dispatch:", "if: github.ref == 'refs/heads/main'",
                          "environment: production", "group: tennis-green-pms-production",
@@ -343,7 +394,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("ref: ${{ inputs.", self.rollback)
         self.assertNotIn("--manifest-sha", self.rollback)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_secrets_are_not_inherited_by_setup_or_build_steps(self) -> None:
         for workflow in (self.release, self.retention, self.rollback):
             jobs = re.split(r"(?m)^  [a-z][a-z-]*:\n", workflow.split("jobs:\n", 1)[1])
@@ -354,7 +405,7 @@ class WorkflowContractTests(unittest.TestCase):
                 if name.startswith(("Set up", "Install", "Check out", "Build and package")):
                     self.assertNotIn("secrets.", step)
 
-    @unittest.skip("the source release workflows are intentionally kept disabled pending CI conflict review")
+    @unittest.skip("production workflows remain disabled pending Tennis target environment integration")
     def test_workflows_do_not_publish_github_or_registry_binaries(self) -> None:
         forbidden = (
             "actions/upload-artifact",
