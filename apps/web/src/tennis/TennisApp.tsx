@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
+import { version as applicationVersion } from "../../../../package.json";
 import { createApi, TennisApiError, type TennisApi } from "./api";
 import type { Session, VenueRecord } from "./types";
 import { permits } from "./types";
@@ -251,12 +252,21 @@ function Workspace({
       </a>
       <aside className="sidebar">
         <div className="sidebar-brand-row">
-          <div className="sidebar-brand">
-            <div className="sidebar-brand-identity">
+          <div className="sidebar-brand-identity">
+            <div className="sidebar-brand sidebar-brand-identity">
               <strong className="brand-word sidebar-brand-full">Tennis</strong>
-              <span className="sidebar-brand-product">运营工作台</span>
               <strong className="sidebar-brand-compact">T</strong>
             </div>
+            <a
+              className="application-version"
+              href={`https://github.com/PatrickLiveCool/Tennis-PMS/releases/tag/v${applicationVersion}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Tennis PMS v${applicationVersion} · 更新说明`}
+              aria-label={`版本 v${applicationVersion}，查看更新说明`}
+            >
+              v{applicationVersion}
+            </a>
           </div>
           <button
             className="icon-button sidebar-toggle"
