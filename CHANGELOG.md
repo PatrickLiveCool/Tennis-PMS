@@ -2,6 +2,13 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.6.1](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.6.0...v1.6.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **release:** include agent docs in Docker context ([#17](https://github.com/PatrickLiveCool/Tennis-PMS/issues/17)) ([40e1d66](https://github.com/PatrickLiveCool/Tennis-PMS/commit/40e1d66250d948cd1b7223b5b53698135c63f145))
+
 ## [1.6.0](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.5.0...v1.6.0) (2026-09-30)
 
 
