@@ -117,6 +117,7 @@
 }
 .tennis-panel > .panel-heading {
   margin-bottom: 18px;
+  flex-wrap: wrap;
 }
 .tennis-panel > .panel-heading h2 {
   font-size: 16px;
@@ -467,6 +468,9 @@
 .tennis-note.is-warning {
   background: var(--warning-soft);
   color: var(--warning);
+}
+.tennis-integration-url {
+  overflow-wrap: anywhere;
 }
 .tennis-success {
   background: var(--success-soft);

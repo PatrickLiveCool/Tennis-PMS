@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Plus } from "lucide-react";
+import { Copy, ExternalLink, Plus } from "lucide-react";
 import { InfoHint } from "./InfoHint";
 import { TennisApiError, type TennisApi } from "./api";
 import type { TenantRecord } from "./types";
@@ -465,12 +465,17 @@ function TenantAgentAccess({ api, scope }: { api: TennisApi; scope: string }) {
     }
     return Boolean(result);
   }
-  return <Panel title="智能体接入" action={<InfoHint label="智能体接入说明">
-    创建本商家的 API Key，复制到外部工作人员智能体或企业微信 Gateway 服务端的 PMS 连接配置。
-    然后在「渠道账号绑定」中，将核验过的外部员工账号编号绑定到真实员工。
-    智能体按该员工的实际权限办理业务，接入 Key 本身不授予管理员权限。
-    此 Key 用于连接 PMS；调用模型的 API Key 在外部智能体服务端配置，PMS 内置 AI 助手由平台统一配置。
-  </InfoHint>}>
+  return <Panel title="智能体接入" action={<div className="tennis-actions">
+    <a className="button button-secondary button-small" href="/api/tennis/integration-docs/agent-handoff.md" target="_blank" rel="noreferrer">
+      <ExternalLink size={15} aria-hidden="true" />接口文档
+    </a>
+    <InfoHint label="智能体接入说明">
+      创建本商家的 API Key，复制到外部工作人员智能体或企业微信 Gateway 服务端的 PMS 连接配置。
+      然后在「渠道账号绑定」中，将核验过的外部员工账号编号绑定到真实员工。
+      智能体按该员工的实际权限办理业务，接入 Key 本身不授予管理员权限。
+      此 Key 用于连接 PMS；调用模型的 API Key 在外部智能体服务端配置，PMS 内置 AI 助手由平台统一配置。
+    </InfoHint>
+  </div>}>
     <ErrorNotice error={list.error ?? mutation.error} retry={() => void list.refresh()} />
     <PendingGateway mutation={mutation} refresh={list.refresh}
       recoveryDetail="请核对接入状态，并在接入详情中查看版本和最近更换时间。若创建或更换已完成但没有拿到 API Key，结束核对后可再次更换 Key；旧 Key 会失效。" />
@@ -478,6 +483,7 @@ function TenantAgentAccess({ api, scope }: { api: TennisApi; scope: string }) {
     {secret && <div className="tennis-note">
       <h3>保存「{secret.name}」的 API Key</h3>
       <p>API Key 只显示一次，请复制到智能体服务端的 PMS 连接配置。离开此栏目后无法再次查看。</p>
+      <p>API 地址：<code className="tennis-integration-url">{window.location.origin}/api/tennis</code></p>
       <label className="tennis-form">API Key
         <input aria-label="一次性 API Key" readOnly value={secret.token} autoComplete="off" spellCheck={false} />
       </label>

@@ -18,6 +18,7 @@ describe("standard release runtime", () => {
       }
       const migrations = "packages/db/src/tennis/migrations";
       cpSync(resolve(migrations), join(source, migrations), { recursive: true });
+      cpSync(resolve("docs/tennis"), join(source, "docs/tennis"), { recursive: true });
       for (const file of ["scripts/tennis/cloud-demo-init.mts", "scripts/tennis/cloud-demo-data.ts", "packages/db/src/seed.ts", "packages/db/src/migrate.ts"])
         writeFileSync(join(source, file), 'throw new Error("seed or housing migration must not ship");');
       execFileSync(process.execPath, [resolve("scripts/build-runtime.mjs"), "--source-root", source, "--output", output]);
@@ -26,6 +27,8 @@ describe("standard release runtime", () => {
       expect(readdirSync(join(output, migrations)).sort()).toEqual(sqlFiles);
       for (const file of sqlFiles)
         expect(readFileSync(join(output, migrations, file))).toEqual(readFileSync(resolve(migrations, file)));
+      expect(readFileSync(join(output, "docs/tennis/agent-handoff.md"), "utf8"))
+        .toEqual(readFileSync(resolve("docs/tennis/agent-handoff.md"), "utf8"));
       for (const file of ["scripts/tennis/cloud-demo-init.mjs", "scripts/tennis/cloud-demo-data.js", "packages/db/src/seed.js", "packages/db/src/migrate.js"])
         expect(existsSync(join(output, file))).toBe(false);
       symlinkSync(resolve("node_modules"), join(output, "node_modules"), "dir");

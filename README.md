@@ -11,6 +11,7 @@
 - [体验延续清单](docs/tennis/experience-continuity.md)
 - [决策与验收清单](docs/tennis/decisions-and-acceptance.md)
 - [外部智能体接口](docs/tennis/external-agent.md)
+- [外部智能体交接入口](docs/tennis/agent-handoff.md)
 
 ```bash
 npm ci
