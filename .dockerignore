@@ -14,6 +14,19 @@ diagrams
 docs/**
 !docs/releases
 !docs/releases/**
+# Keep in sync with the public integration docs copied by scripts/build-runtime.mjs.
+!docs/tennis
+!docs/tennis/agent-handoff.md
+!docs/tennis/gateway.md
+!docs/tennis/external-agent.md
+!docs/tennis/gateway-admin.md
+!docs/tennis/agent-access-management.md
+!docs/tennis/business-events.md
+!docs/tennis/agent-discovery.md
+!docs/tennis/staff-agent-reconciliation.md
+!docs/tennis/operator-completion.md
+!docs/tennis/backoffice-assistant.md
+!docs/tennis/ai-native-pms.md
 待开发项
 **/*.test.ts
 **/*.test.tsx
