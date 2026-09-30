@@ -132,6 +132,16 @@ async function main() {
   await cp(resolve(root, "packages/db/catalog"), resolve(output, "packages/db/catalog"), { recursive: true });
   await cp(resolve(root, "apps/web/dist-tennis"), resolve(output, "apps/web/dist-tennis"), { recursive: true });
   await cp(resolve(root, "package-lock.json"), resolve(output, "package-lock.json"));
+  for (const name of [
+    "agent-handoff.md", "gateway.md", "external-agent.md", "gateway-admin.md",
+    "agent-access-management.md", "business-events.md", "agent-discovery.md",
+    "staff-agent-reconciliation.md", "operator-completion.md", "backoffice-assistant.md", "ai-native-pms.md"
+  ]) {
+    const source = resolve(root, "docs/tennis", name);
+    const target = resolve(output, "docs/tennis", name);
+    await mkdir(dirname(target), { recursive: true });
+    await cp(source, target);
+  }
 
   for (const relativePath of [
     "package.json",

@@ -5,6 +5,8 @@ import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-dir
 import { getMemberProfile, listMemberDirectory } from "../../../../packages/db/src/tennis/member-directory.ts";
 import { correctCustomerContact } from "../../../../packages/db/src/tennis/customer-contact-correction.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
@@ -158,6 +160,19 @@ const reason = Type.String({ minLength: 1, maxLength: 2000 });
 const commandKey = Type.String({ minLength: 8, maxLength: 128 });
 const obj = <T extends Record<string, TSchema>>(properties: T) =>
   Type.Object(properties, { additionalProperties: false });
+const integrationDocs = new Set([
+  "agent-handoff.md",
+  "gateway.md",
+  "external-agent.md",
+  "gateway-admin.md",
+  "agent-access-management.md",
+  "business-events.md",
+  "agent-discovery.md",
+  "staff-agent-reconciliation.md",
+  "operator-completion.md",
+  "backoffice-assistant.md",
+  "ai-native-pms.md",
+]);
 const params = (request: FastifyRequest) => request.params as Record<string, string>;
 const query = (request: FastifyRequest) => request.query as Record<string, string | undefined>;
 const messages: Record<string, string> = {
@@ -336,6 +351,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
     if (
       pathname === "/health" ||
       pathname === "/api/tennis/auth/login" ||
+      ((request.method === "GET" || request.method === "HEAD") && pathname?.startsWith("/api/tennis/integration-docs/")) ||
       pathname?.startsWith("/api/tennis/agent/") ||
       pathname?.startsWith("/api/tennis/gateway/") ||
       (request.method === "POST" && /^\/api\/tennis\/payment-notifications\/[a-zA-Z0-9-]+$/.test(pathname ?? ""))
@@ -362,6 +378,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
     }
   });
   const base = "/api/tennis";
+  app.get<{ Params: { name: string } }>(`${base}/integration-docs/:name`, async (request, reply) => {
+    const { name } = request.params;
+    if (!integrationDocs.has(name)) return reply.code(404).send({ error: { code: "RESOURCE_NOT_FOUND" } });
+    const document = await readFile(resolve("docs/tennis", name), "utf8");
+    return reply.type("text/markdown; charset=utf-8").send(document);
+  });
   function get(path: string, work: (request: FastifyRequest) => Promise<unknown> | unknown) {
     app.get(`${base}${path}`, async (request) => work(request));
   }
