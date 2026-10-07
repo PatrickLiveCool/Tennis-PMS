@@ -392,6 +392,7 @@ export function ScheduleGrid({
                       }}
                       disabled={!o.orderId}
                       onClick={() => o.orderId && openOrder(o.orderId)}
+                      aria-label={[court.name, primary, primary !== status ? status : "", time].filter(Boolean).join(" · ")}
                       title={[primary, primary !== status ? status : "", time].filter(Boolean).join(" · ")}
                     >
                       <strong>{primary}</strong>
@@ -501,8 +502,11 @@ export function ScheduleGrid({
         {courts.map((court, row) => (
           <details key={court.id} open={row === 0}>
             <summary>
-              {court.name} · {courtDescription(court)}
-              {court.hourlyPriceCents !== null && <> · {money(court.hourlyPriceCents)}/时</>}
+              <strong className="tennis-mobile-court-name">{court.name}</strong>
+              <span className="tennis-mobile-court-details">
+                <span>{courtDescription(court)}</span>
+                {court.hourlyPriceCents !== null && <span className="tennis-mobile-court-price">{money(court.hourlyPriceCents)} / 时</span>}
+              </span>
             </summary>
             <div className="tennis-mobile-times">
               {ticks
@@ -559,7 +563,7 @@ export function ScheduleGrid({
                         : occupancy
                           ? [occupancy.primary, occupancy.primary !== occupancy.status ? occupancy.status : ""].filter(Boolean).join(" · ")
                           : open
-                            ? "选场"
+                            ? "空闲"
                             : "不可售"}</span>
                     </button>
                   );

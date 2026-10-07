@@ -71,7 +71,7 @@ export function OrdersPage({
     status: filters.status === "ALL" ? undefined : filters.status,
   });
   return (
-    <>
+    <div className="tennis-orders-page">
       <PageHeading title="预订订单">
         <RefreshButton onClick={() => void orders.refresh()} busy={orders.busy} />
       </PageHeading>
@@ -107,43 +107,43 @@ export function OrdersPage({
           <EmptyState title="暂无符合条件的订单" detail="可调整筛选条件，或去排期新建预订。" />
         ) : (
           <div className="tennis-table-scroll">
-            <table className="tennis-table">
-              <thead>
-                <tr>
-                  <th>订单 / 客户</th>
-                  <th>预订时段</th>
-                  <th>明细</th>
-                  <th>应付</th>
-                  <th>订单状态</th>
-                  <th>付款</th>
-                  <th />
+            <table className="tennis-table tennis-orders-table" role="table" aria-label="预订订单">
+              <thead role="rowgroup">
+                <tr role="row">
+                  <th scope="col">订单 / 客户</th>
+                  <th scope="col">预订时段</th>
+                  <th scope="col">明细</th>
+                  <th scope="col" className="tennis-order-amount">应付</th>
+                  <th scope="col">订单状态</th>
+                  <th scope="col">付款</th>
+                  <th scope="col"><span className="sr-only">操作</span></th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
                 {orders.data.orders.map((order) => (
-                  <tr key={order.id}>
-                    <td>
+                  <tr key={order.id} role="row">
+                    <td className="tennis-order-customer" role="cell">
                       <strong>{order.customerName ?? "客户预订"}</strong>
-                      <small>{order.id.slice(0, 8)}</small>
+                      <small title={order.id}>{order.id.slice(0, 8)}</small>
                     </td>
-                    <td>
-                      {order.matchingLines.length
+                    <td className="tennis-order-time" data-label="预订时段" role="cell">
+                      <span>{order.matchingLines.length
                         ? dateTime(order.matchingLines[0]?.startAt, venue.timezone)
                         : "无有效时段"}
-                      {order.matchingLines.length > 1 && <small>含其他 {order.matchingLines.length - 1} 条时段</small>}
+                      {order.matchingLines.length > 1 && <small>含其他 {order.matchingLines.length - 1} 条时段</small>}</span>
                     </td>
-                    <td>{order.matchingLines.length} 条</td>
-                    <td className="tennis-numeric">{money(order.totalCents)}</td>
-                    <td>
+                    <td data-label="明细" role="cell">{order.matchingLines.length} 条</td>
+                    <td className="tennis-numeric tennis-order-amount" data-label="应付" role="cell">{money(order.totalCents)}</td>
+                    <td data-label="订单状态" role="cell">
                       <Badge value={order.status} />
                     </td>
-                    <td>
+                    <td data-label="付款" role="cell">
                       <Badge value={order.paymentStatus} />
                     </td>
-                    <td>
-                      <button className="button button-secondary button-small" onClick={() => openOrder(order.id)}>
+                    <td className="tennis-order-open" role="cell">
+                      <button className="button button-secondary button-small" aria-label={`查看${order.customerName ?? "客户"}的订单 ${order.id.slice(0, 8)}`} onClick={() => openOrder(order.id)}>
                         查看
-                        <ArrowUpRight size={14} />
+                        <ArrowUpRight size={14} aria-hidden="true" />
                       </button>
                     </td>
                   </tr>
@@ -154,7 +154,7 @@ export function OrdersPage({
         )}
         {!searching && <OrderPagination directory={orders} />}
       </Panel>
-    </>
+    </div>
   );
 }
 export function OrderDialog({
@@ -227,7 +227,7 @@ export function OrderDialog({
       if (prep.reason) setReason(prep.reason);
       setAction(prep.kind);
     }
-    setNotice("助手已填好，尚未提交。请核对后确认。");
+    setNotice("助手已填好，尚未提��。请核对后确认。");
   }, [pendingPreparation, detail.data, detail.busy, detail.error, command.busy]);
   async function changed() {
     setAction(null);
