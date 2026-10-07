@@ -2,6 +2,13 @@
 
 每个部署版本使用独立 Git 标签和 GitHub Release，优化说明与升级说明随代码保存。版本规则及发布步骤见 [发布约定](docs/releases/README.md)。
 
+## [1.7.0](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.6.1...v1.7.0) (2026-10-07)
+
+
+### Features
+
+* **web:** 优化网球工作台视觉与响应式布局 ([#19](https://github.com/PatrickLiveCool/Tennis-PMS/issues/19)) ([04f3e80](https://github.com/PatrickLiveCool/Tennis-PMS/commit/04f3e8001fb0af1aa2f91f796babd72852b06b24))
+
 ## [1.6.1](https://github.com/PatrickLiveCool/Tennis-PMS/compare/v1.6.0...v1.6.1) (2026-09-30)
 
 
