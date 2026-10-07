@@ -4,13 +4,16 @@
 .tennis-overview-tabs { display: flex; align-items: stretch; gap: 6px; padding: 0 0 0 2px; border-bottom: 1px solid var(--border); margin-bottom: 18px; overflow-x: auto; }
 .tennis-overview-tabs > button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 10px 17px; border: 0; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0; background: transparent; color: var(--muted); font-size: 14px; white-space: nowrap; transition: background 150ms, color 150ms; }
 .tennis-overview-tabs > button:hover { background: var(--surface-muted); color: var(--text); }
-.tennis-overview-tabs > button[aria-selected="true"] { border-bottom-color: var(--brand); background: var(--brand-soft); color: var(--brand-hover); font-weight: 650; }
+.tennis-overview-tabs > button[aria-selected="true"] { border-bottom-color: var(--brand); background: transparent; color: var(--brand-hover); font-weight: 650; }
 .tennis-overview-count { padding: 1px 5px; font-size: 11px; line-height: 18px; border-radius: 4px; background: var(--warning-soft); color: var(--warning); font-variant-numeric: tabular-nums; }
 .tennis-overview button:focus-visible, .tennis-overview [role="tabpanel"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tennis-overview-simulation { margin: 0 0 14px; color: var(--warning); font-size: 12px; }
 .tennis-overview-pending { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.tennis-overview-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 6px; background: var(--surface); margin-bottom: 20px; }
-.tennis-overview-metrics > div { min-width: 0; padding: 20px 22px; }
+.tennis-overview-metrics { display: grid; grid-template-columns: minmax(0, 1.35fr) repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); margin-bottom: 24px; overflow: hidden; }
+.tennis-overview-metrics > div { min-width: 0; padding: 24px 20px; }
+.tennis-overview-metrics > div:first-child { background: var(--brand-soft); }
+.tennis-overview-metrics > div:first-child > span { color: var(--brand-hover); }
+.tennis-overview-metrics > div > span > svg { display: none; }
 .tennis-overview-metrics > div + div { border-left: 1px solid var(--border); }
 .tennis-overview-metrics > div > span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
 .tennis-overview-metrics > div > span > svg { flex-shrink: 0; }
@@ -20,10 +23,15 @@
 .tennis-overview-workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 320px); align-items: start; gap: 20px; }
 .tennis-overview-workbench.is-single { grid-template-columns: minmax(0, 1fr); }
 .tennis-overview-workbench > *, .tennis-overview-side, .tennis-overview-attention > * { min-width: 0; }
-.tennis-overview-side { display: grid; gap: 18px; }
+.tennis-overview-side { display: grid; gap: 24px; }
+.tennis-overview-side > .tennis-panel { background: transparent; border: 0; border-top: 2px solid var(--border); border-radius: 0; padding: 18px 4px 0; }
+.tennis-overview-task { color: var(--text); }
+.tennis-overview-shortcut { color: var(--text); }
+.tennis-overview-appointments .tennis-overview-appointment:hover { background: #f8faf7; }
+.tennis-overview-appointment-action > .button { border-color: var(--border); color: var(--brand); }
 .tennis-overview-side > .tennis-panel, .tennis-overview-workbench > .tennis-panel, .tennis-overview-attention > .tennis-panel { margin: 0; }
 .tennis-overview-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.tennis-overview-filters > button { padding: 7px 12px; min-height: 40px; font-size: 13px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--muted); }
+.tennis-overview-filters > button { padding: 7px 12px; min-height: 40px; font-size: 13px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); }
 .tennis-overview-filters > button:hover { border-color: var(--border-strong); color: var(--text); }
 .tennis-overview-filters > button[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand-hover); border-color: var(--brand); font-weight: 600; }
 .tennis-overview-appointments { display: grid; }
@@ -75,7 +83,10 @@
 @media (max-width: 1100px) {
   .tennis-overview-workbench { grid-template-columns: minmax(0, 1fr); }
   .tennis-overview-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tennis-overview-metrics > div { padding: 18px 15px; }
+  .tennis-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tennis-overview-metrics > div { padding: 20px 18px; }
+  .tennis-overview-metrics > div:nth-child(3) { border-left: 0; }
+  .tennis-overview-metrics > div:nth-child(n + 3) { border-top: 1px solid var(--border); }
 }
 @media (max-width: 720px) {
   .tennis-overview-tabs { gap: 2px; }

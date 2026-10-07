@@ -12,8 +12,8 @@
 .assistant-trigger-compact { width: auto; margin-left: auto; flex-shrink: 0; padding: 7px 10px; }
 .assistant-portal { display: contents; }
 .assistant-panel[hidden] { display: none; }
-.assistant-panel { position: fixed; z-index: 80; inset: 0 0 0 auto; width: min(400px, 100vw); display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 30px rgba(23,32,27,.14); }
-.assistant-header { flex-shrink: 0; padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.assistant-panel { position: fixed; z-index: 80; inset: 0 0 0 auto; width: min(400px, 100vw); display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 32px rgb(32 55 44 / 8%); }
+.assistant-header { flex-shrink: 0; padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface-muted); }
 .assistant-header > div { display: flex; gap: 8px; align-items: center; }
 .assistant-header > div:first-child { color: var(--brand); }
 .assistant-messages { overflow-y: auto; overscroll-behavior: contain; flex: 1; min-height: 0; padding: 24px 18px; }
@@ -21,8 +21,8 @@
 .assistant-welcome > svg { color: var(--brand); margin-bottom: 16px; }
 .assistant-welcome h2 { margin-bottom: 10px; }
 .assistant-welcome p { color: var(--muted); line-height: 1.7; }
-.assistant-suggestions { display: grid; gap: 8px; margin-top: 20px; }
-.assistant-suggestions button { display: grid; grid-template-columns: minmax(0, 1fr) 16px; align-items: center; gap: 12px; padding: 12px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; color: var(--text); transition: background-color 160ms ease, border-color 160ms ease; }
+.assistant-suggestions { display: grid; gap: 0; margin-top: 24px; border-top: 1px solid var(--border); }
+.assistant-suggestions button { display: grid; grid-template-columns: minmax(0, 1fr) 16px; align-items: center; gap: 12px; padding: 15px 8px; min-height: 56px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; color: var(--text); transition: background-color 160ms ease, color 160ms ease; }
 .assistant-suggestions button > span { display: grid; gap: 4px; }
 .assistant-suggestions strong { font-size: 13px; font-weight: 600; }
 .assistant-suggestions small { font-size: 12px; line-height: 1.65; color: var(--muted); text-wrap: pretty; }
@@ -53,7 +53,11 @@
 .assistant-markdown table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
 .assistant-markdown :is(th, td) { min-width: 80px; padding: 8px 10px; border: 1px solid var(--border); text-align: left; white-space: normal; }
 .assistant-markdown th { background: var(--surface-muted); font-weight: 650; }
-.assistant-message-user .assistant-message-text { background: var(--brand-soft); border-radius: 7px; padding: 10px 12px; }
+.assistant-message-user { margin-left: 24px; }
+.assistant-message-user .assistant-message-text { background: var(--brand-soft); border-radius: 8px 8px 2px 8px; padding: 12px 14px; }
+.assistant-message:not(.assistant-message-user) .assistant-message-text { padding-left: 12px; border-left: 2px solid var(--border); }
+.assistant-panel .assistant-composer textarea { border-color: var(--border-strong); border-radius: 8px; background: var(--canvas); line-height: 1.65; }
+.assistant-panel .assistant-entry { border-left: 3px solid var(--brand); background: #f8faf7; }
 .assistant-feedback { margin-top: 14px; font-size: 12px; color: var(--muted); }
 .assistant-feedback > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .assistant-feedback button { border: 1px solid var(--border); border-radius: 5px; background: transparent; padding: 6px 9px; color: var(--muted); font-size: 12px; }
