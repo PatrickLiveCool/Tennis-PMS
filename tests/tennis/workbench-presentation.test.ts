@@ -48,10 +48,12 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-async function renderSchedule(lines: SelectionLine[] = [], occupancies = [occupied], issues: string[] = []) {
+async function renderSchedule(lines: SelectionLine[] = [], occupancies = [occupied], issues: string[] = [],
+  options: { venue?: VenueRecord; date?: string } = {}) {
   const callbacks = { onAdd: vi.fn(), onRemove: vi.fn(), onResize: vi.fn(), openOrder: vi.fn() };
+  const scheduleVenue = options.venue ?? venue;
   await act(async () => root.render(createElement(ScheduleGrid, {
-    schedule: { venue, courts: [court], occupancies }, venue, date: "2026-09-21",
+    schedule: { venue: scheduleVenue, courts: [court], occupancies }, venue: scheduleVenue, date: options.date ?? "2026-09-21",
     ticks: Array.from({ length: 20 }, (_, i) => 480 + i * 15), lines, disabled: false,
     scrollRef: { current: container }, issues, ...callbacks,
   })));
@@ -65,7 +67,7 @@ describe("tennis workbench presentation", () => {
     expect(ticket.getAttribute("aria-label")).toBe("中央球场 · 合成球友 · 已预订 · 09:00–10:00");
     expect(ticket.querySelector("strong")?.textContent).toBe("合成球友");
     expect(ticket.querySelector(".tennis-occupancy-status")?.textContent).toBe("已预订");
-    const mobile = container.querySelector<HTMLButtonElement>('.tennis-mobile-times button[aria-label="中央球场 09:00 查看占用"]')!;
+    const mobile = container.querySelector<HTMLButtonElement>('.tennis-mobile-times button[aria-label="中央球场 · 合成球友 · 已预订 · 09:00–10:00"]')!;
     await act(async () => { ticket.click(); mobile.click(); });
     expect(callbacks.openOrder.mock.calls).toEqual([["synthetic-order"], ["synthetic-order"]]);
     expect(container.querySelector(".tennis-mobile-court-name")?.textContent).toBe("中央球场");
@@ -87,6 +89,87 @@ describe("tennis workbench presentation", () => {
     expect(selected.textContent).toContain("已选");
     await act(async () => selected.click());
     expect(cancel.onRemove).toHaveBeenCalledWith(0);
+  });
+
+  it("shows a course and the following booking within the same hour with their actual times", async () => {
+    const course = { ...occupied, id: "course", kind: "COURSE", orderId: null,
+      endAt: "2026-09-21T01:30:00.000Z" };
+    const booking = { ...occupied, startAt: course.endAt };
+    const callbacks = await renderSchedule([], [course, booking]);
+    const mobile = container.querySelector(".tennis-mobile-times")!;
+    const courseButton = [...mobile.querySelectorAll("button")].find((button) => button.textContent?.includes("课程"))!;
+    const bookingButton = [...mobile.querySelectorAll("button")].find((button) => button.textContent?.includes("合成球友"));
+    expect(courseButton.textContent).toContain("09:00–09:30");
+    expect(courseButton.disabled).toBe(true);
+    expect(bookingButton?.textContent).toContain("09:30–10:00");
+    await act(async () => bookingButton!.click());
+    expect(callbacks.openOrder).toHaveBeenCalledWith("synthetic-order");
+  });
+
+  it("opens each adjacent booking within one hour independently", async () => {
+    const first = { ...occupied, endAt: "2026-09-21T01:30:00.000Z" };
+    const second = { ...occupied, id: "second-occupancy", orderId: "second-order", customerName: "另一位球友",
+      startAt: first.endAt };
+    const callbacks = await renderSchedule([], [second, first]);
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".tennis-mobile-times button")]
+      .filter((button) => button.textContent?.includes("球友"));
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      expect.stringContaining("09:00–09:30"), expect.stringContaining("09:30–10:00"),
+    ]);
+    await act(async () => buttons.forEach((button) => button.click()));
+    expect(callbacks.openOrder.mock.calls).toEqual([["synthetic-order"], ["second-order"]]);
+  });
+
+  it("shows a booking spanning several hours only once on the phone", async () => {
+    await renderSchedule([], [{ ...occupied, startAt: "2026-09-21T00:30:00.000Z", endAt: "2026-09-21T03:30:00.000Z" }]);
+    const tickets = [...container.querySelectorAll(".tennis-mobile-times button")]
+      .filter((button) => button.textContent?.includes("合成球友"));
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0]?.textContent).toContain("08:30–11:30");
+  });
+
+  it("keeps the real order accessible alongside a conflicting draft cancellation", async () => {
+    const draft = { courtId: court.id, startAt: occupied.startAt, endAt: occupied.endAt };
+    const callbacks = await renderSchedule([draft], [occupied], ["该时段已被占用"]);
+    const cancel = container.querySelector<HTMLButtonElement>(".tennis-mobile-times .has-conflict")!;
+    const ticket = [...container.querySelectorAll<HTMLButtonElement>(".tennis-mobile-times button")]
+      .find((button) => button.textContent?.includes("合成球友"));
+    expect(ticket).toBeDefined();
+    expect(cancel.getAttribute("aria-label")).toBe("中央球场 · 冲突 · 取消已选 · 09:00–10:00");
+    await act(async () => ticket!.click());
+    expect(callbacks.openOrder).toHaveBeenCalledWith("synthetic-order");
+    expect(callbacks.onRemove).not.toHaveBeenCalled();
+    await act(async () => cancel.click());
+    expect(callbacks.onRemove).toHaveBeenCalledWith(0);
+    expect(callbacks.openOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a valid daytime schedule when DST skips the local midnight", async () => {
+    vi.setSystemTime(new Date("2026-09-05T00:00:00Z"));
+    const santiago = { ...venue, timezone: "America/Santiago",
+      openingHours: [{ weekday: 0, startMinute: 480, endMinute: 720 }] };
+    const booking = { ...occupied, startAt: "2026-09-06T12:00:00.000Z", endAt: "2026-09-06T13:00:00.000Z" };
+    const callbacks = await renderSchedule([], [booking], [], { venue: santiago, date: "2026-09-06" });
+    const ticket = container.querySelector<HTMLButtonElement>('.tennis-mobile-times button[aria-label="中央球场 · 合成球友 · 已预订 · 09:00–10:00"]')!;
+    expect(ticket).not.toBeNull();
+    await act(async () => ticket.click());
+    expect(callbacks.openOrder).toHaveBeenCalledWith("synthetic-order");
+  });
+
+  it.each(["COURSE", "MAINTENANCE"])("shows dates on both remote endpoints of a multi-day %s occupancy", async (kind) => {
+    await renderSchedule([], [{ ...occupied, kind, orderId: null,
+      startAt: "2026-09-20T14:00:00.000Z", endAt: "2026-09-22T02:00:00.000Z" }]);
+    const ticket = container.querySelector<HTMLButtonElement>(`.tennis-mobile-times .is-${kind === "COURSE" ? "course" : "maintenance"}`)!;
+    const interval = "2026-09-20 22:00–2026-09-22 10:00";
+    expect(ticket.textContent).toContain(interval);
+    expect(ticket.getAttribute("aria-label")).toContain(interval);
+    expect(ticket.title).toContain(interval);
+    expect(ticket.disabled).toBe(true);
+  });
+
+  it("excludes an occupancy ending exactly at the start of this local date", async () => {
+    await renderSchedule([], [{ ...occupied, startAt: "2026-09-20T14:00:00.000Z", endAt: "2026-09-20T16:00:00.000Z" }]);
+    expect(container.querySelector(".tennis-mobile-times")?.textContent).not.toContain("合成球友");
   });
 
   it("keeps payment, maintenance and conflict states visible without relying on color", async () => {

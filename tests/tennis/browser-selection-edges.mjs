@@ -117,7 +117,7 @@ try {
   await expect(m.locator(".tennis-selection")).toContainText("该时段已被占用");
   await m.getByRole("button", { name: "收起", exact: true }).tap();
   await m.screenshot({ path: `${out}/mobile-conflict-before-cancel.png`, fullPage: true });
-  await m.getByRole("button", { name: "1 号场 10:00 取消已选", exact: true }).tap();
+  await m.locator(".tennis-mobile-times").getByRole("button", { name: /^1 号场 · 冲突 · 取消已选 · 10:00–/ }).tap();
   await check("Mobile conflict cancellation removes the draft and preserves the established order", async () => {
     await expect(m.getByRole("dialog")).toHaveCount(0);
     await expect(m.getByRole("button", { name: "继续预订 · 1 条时段", exact: true })).toHaveCount(0);
@@ -129,7 +129,7 @@ try {
     await expect(m.getByLabel("姓名", { exact: true })).toHaveValue("手机冲突草稿保留");
     await expect(m.locator(".tennis-selection")).toHaveCount(0);
     await m.getByRole("button", { name: "收起", exact: true }).tap();
-    await m.getByRole("button", { name: "1 号场 10:00 查看占用", exact: true }).tap();
+    await m.locator(".tennis-mobile-times").getByRole("button", { name: /^1 号场 · 手机竞争占用合成客 · 待付款 · 10:00–/ }).tap();
     await expect(m.getByRole("dialog")).toContainText("手机竞争占用合成客");
     await m.screenshot({ path: `${out}/mobile-existing-order.png`, fullPage: true });
   });

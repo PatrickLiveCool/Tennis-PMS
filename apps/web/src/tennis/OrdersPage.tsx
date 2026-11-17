@@ -227,7 +227,7 @@ export function OrderDialog({
       if (prep.reason) setReason(prep.reason);
       setAction(prep.kind);
     }
-    setNotice("助手已填好，尚未提��。请核对后确认。");
+    setNotice("助手已填好，尚未提交。请核对后确认。");
   }, [pendingPreparation, detail.data, detail.busy, detail.error, command.busy]);
   async function changed() {
     setAction(null);

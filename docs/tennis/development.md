@@ -42,7 +42,7 @@ node --version
 | PostgreSQL | 127.0.0.1:55439 |
 | 开发库 | tennis_dev |
 | 测试库 | tennis_test |
-| Compose 项目 / 卷 | tennis-pms-local / tennis-pms-local_tennis-data |
+| Compose 项目 / 卷 | tennis-green-pms-local / tennis-green-pms-local_tennis-green-pms-data |
 | API / Web 端口 | 4200 / 4273，仅本机监听 |
 | 网球迁移 | packages/db/src/tennis/migrations/ |
 | 运行状态 | `docker compose ps` |
@@ -60,11 +60,11 @@ Compose 默认复用官方 PostgreSQL 16 的 DaoCloud 镜像；可通过 TENNIS_
 - `node --test scripts/check-pr-tests.mjs`：继承的 PR 格式验证。
 - `npm run dev/start` 现在启动独立网球 API/Web；`db:reset/test:e2e/test:contract` 等住房入口仍停用。`npm run db:migrate` 已指向网球迁移。
 
-旧住房生产 Compose 位于 `docs/upstream/compose.server.yaml.disabled`。当前 Dockerfile、Tennis 运行入口、备份恢复与发布工具已完成网球适配和本地验证，见 [迁移记录](../operations/tennis-green-pms-infrastructure.md)；网球生产部署尚未接通，release、rollback 和 retention 工作流仍在 `.github/upstream-workflows/*.disabled`。新增的独立 Release Please 工作流须合入 `main` 并配置专用 Secret 后才生效，见 [自动版本 PR](../operations/release-please.md)。
+旧住房生产 Compose 位于 `docs/upstream/compose.server.yaml.disabled`，上游停用工作流保留在 `.github/upstream-workflows/`。Tennis 专用发布、回退、保留清理和 Release Please 已在 `.github/workflows/` 实现；2026-09-23 已记录独立模拟支付 Demo 的首次接管，见[执行记录](../operations/tennis-adoption-2026-09-23.md)。当前部署仍须按[发布接入约定](../operations/tennis-release-onboarding.md)核对目标环境与门禁，不能将历史接管或本地构建视作本次已部署。最新源码基线与证据边界见[实施状态](implementation-status.md)。
 
 ## 后续切片
 
-集中答复已在 [开发决策清单](decisions-and-acceptance.md) 固化。智能体和 Runtime 位于 PMS 外部，接口见 [外部助手契约](external-agent.md)。F8 补充 [Gateway 接入](gateway.md)、[事件轮询](business-events.md) 和 [替代场馆](agent-discovery.md)；网球迁移现为001–022。本地 API 每 15 秒处理预约/改期占位到期；课程和维护占场仅员工可办。商户号、微信具体入口、外部 Runtime 与部署条件未具备，真实接入和人工验收仍须分别完成。
+集中答复已在 [开发决策清单](decisions-and-acceptance.md) 固化。智能体和 Runtime 位于 PMS 外部，接口见 [外部助手契约](external-agent.md)、[Gateway 接入](gateway.md)、[事件轮询](business-events.md) 和 [替代场馆](agent-discovery.md)。迁移以 `packages/db/src/tennis/migrations/` 中的实际文件为准。本地 API 每 15 秒处理预约/改期占位到期；课程和维护占场仅员工可办。真实商户、微信渠道和外部 Runtime 的接入与人工验收仍须分别完成；已有 Demo 部署不代替这些验收。
 
 ## 本机云盘读取限制
 
