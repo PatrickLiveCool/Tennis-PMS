@@ -277,6 +277,7 @@ export function OrderDialog({
     }
   }
   const order = detail.data;
+  const remainingLineStatus = order?.status === "EXPIRED" ? "已释放" : "有效";
   const canBook = session.kind === "customer" || permits(session, "book");
   return (
     <>
@@ -338,7 +339,7 @@ export function OrderDialog({
                         </details>
                       </td>
                       <td className="tennis-numeric">{money(line.amountCents)}</td>
-                      <td>{line.cancelledAt ? "已取消" : "有效"}</td>
+                      <td>{line.cancelledAt ? "已取消" : remainingLineStatus}</td>
                     </tr>
                   ))}
                 </tbody>

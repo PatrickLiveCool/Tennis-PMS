@@ -5,10 +5,11 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as uiBasic from "../../apps/web/src/uiBasic";
 import { ScheduleGrid } from "../../apps/web/src/tennis/ScheduleGrid";
-import { OrdersPage } from "../../apps/web/src/tennis/OrdersPage";
+import { OrderDialog, OrdersPage } from "../../apps/web/src/tennis/OrdersPage";
 import { emptyCourtProfile } from "../../packages/domain/src/tennis-court-profile";
-import type { CourtRecord, Schedule, SelectionLine, VenueRecord } from "../../apps/web/src/tennis/types";
+import type { CourtRecord, Schedule, SelectionLine, Session, VenueRecord } from "../../apps/web/src/tennis/types";
 
 const { directory } = vi.hoisted(() => ({ directory: vi.fn() }));
 vi.mock("../../apps/web/src/tennis/OrderDirectory", () => ({
@@ -45,6 +46,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -198,6 +200,36 @@ describe("tennis workbench presentation", () => {
     await act(async () => container.querySelector<HTMLButtonElement>(".tennis-order-open button")!.click());
     expect(openOrder).toHaveBeenCalledWith("synthetic-order");
   });
+
+  it.each([["HELD", "有效"], ["EXPIRED", "已释放"]])(
+    "shows the remaining slot of a %s order separately from its previously cancelled slot",
+    async (status, remainingStatus) => {
+      vi.spyOn(uiBasic, "Modal").mockImplementation(({ children }) => createElement("dialog", { open: true }, children));
+      const session: Session = {
+        subjectId: "player", displayName: "合成球友", csrfToken: "synthetic", tenantId: venue.tenantId,
+        kind: "customer", platformOperator: false, contextVersion: 1, permissions: [], allVenues: false,
+        venueIds: [venue.id], customerId: "player", expiresAt: "2099-01-01T00:00:00Z", tenants: [],
+      };
+      const line = { courtId: court.id, startAt: occupied.startAt, endAt: occupied.endAt, amountCents: 12000, price: { segments: [] } };
+      const api = vi.fn().mockImplementation(async (path: string) => {
+        if (path === "/orders/booking") return {
+          id: "booking", customerId: "player", status, revision: 2, paymentStatus: "UNPAID",
+          totalCents: 12000, createdAt: "2026-09-19T08:00:00Z", lines: [
+            { ...line, id: "remaining", cancelledAt: null },
+            { ...line, id: "cancelled", startAt: occupied.endAt, endAt: "2026-09-21T03:00:00Z", cancelledAt: "2026-09-19T08:02:00Z" },
+          ],
+        };
+        if (path === `/venues/${venue.id}/courts`) return [court];
+        if (path === "/orders/booking/amendments") return [];
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      await act(async () => root.render(createElement(OrderDialog, {
+        api, session, venue, scope: "order-detail", orderId: "booking", onClose: vi.fn(), onChanged: vi.fn(),
+      })));
+      const states = [...container.querySelectorAll("dialog .tennis-table tbody tr")].map(row => row.lastElementChild?.textContent);
+      expect(states).toEqual([remainingStatus, "已取消"]);
+    },
+  );
 
   it("retains explicit error and empty-state messages", async () => {
     directory.mockReturnValue({ data: { orders: [], nextCursor: null }, busy: false,
