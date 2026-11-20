@@ -1,6 +1,7 @@
 import { maintainAssistantQuestions } from "../../../../packages/db/src/tennis/assistant-question-records.ts";
 import { courtAssetProperties, courtPriceSchema } from "./court-schema.ts";
 import { getBookingPolicy, saveBookingPolicy } from "../../../../packages/db/src/tennis/booking-policy.ts";
+import { playerOrder, playerOrders, previewPlayerOption } from "../../../../packages/db/src/tennis/player-checkout.ts";
 import { listCustomerTopups } from "../../../../packages/db/src/tennis/topup-directory.ts";
 import { getMemberProfile, listMemberDirectory } from "../../../../packages/db/src/tennis/member-directory.ts";
 import { correctCustomerContact } from "../../../../packages/db/src/tennis/customer-contact-correction.ts";
@@ -303,6 +304,11 @@ export async function buildTennisServer(options: TennisServerOptions) {
   const staff = (request: FastifyRequest) => {
     const value = actor(request);
     if (isCustomerActor(value)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
+    return value;
+  };
+  const player = (request: FastifyRequest) => {
+    const value = actor(request);
+    if (!isCustomerActor(value)) throw new TenantAccessError("TENANT_ACCESS_DENIED");
     return value;
   };
   const view = (input: SessionView | AuthContext) => {
@@ -611,6 +617,23 @@ export async function buildTennisServer(options: TennisServerOptions) {
     }),
   );
   const line = obj({ courtId: id, startAt: timestamp, endAt: timestamp });
+  const playerOption = obj({ venueId: id, lines: Type.Array(line, { minItems: 1, maxItems: 100 }) });
+  write("POST", "/player/preview", playerOption, (request, input) => previewPlayerOption(db, player(request), input));
+  write("POST", "/player/quotes", playerOption, async (request, input) => {
+    const principal = player(request);
+    const quote = await createQuote(db, principal, { ...input, customerId: principal.customerId });
+    return { id: quote.id, totalCents: quote.price.totalCents, lineCents: quote.price.lines.map(l => l.totalCents) };
+  });
+  write("POST", "/player/quotes/:id/confirm", obj({ commandKey }), async (request, input) => {
+    const order = await confirmQuote(db, player(request), { quoteId: params(request).id!, commandKey: input.commandKey });
+    return { id: order.id, status: order.status, paymentStatus: order.paymentStatus };
+  });
+  get("/player/orders", request => playerOrders(db, player(request), query(request).cursor));
+  get("/player/orders/:id", request => playerOrder(db, player(request), params(request).id!));
+  write("POST", "/player/orders/:id/payments", obj({ walletCents: cents, commandKey }), async (request, input) => {
+    const payment = await beginOrderPayment(db, player(request), gateway, { ...input, orderId: params(request).id! });
+    return { id: payment.id, status: payment.status };
+  });
   write(
     "POST",
     "/quotes",
@@ -647,7 +670,7 @@ export async function buildTennisServer(options: TennisServerOptions) {
   );
   get("/payments/:id", (request) => getOrderPayment(db, actor(request), params(request).id!));
   const simulateBody = obj({ status: Type.Union([Type.Literal("SUCCEEDED"), Type.Literal("FAILED")]) });
-  write("POST", "/payments/:id/simulate", simulateBody, async (request, input) => {
+  async function simulateOrderPayment(request: FastifyRequest, input: Static<typeof simulateBody>) {
     simulation();
     const principal = actor(request);
     const payment = await getOrderPayment(db, principal, params(request).id!);
@@ -663,6 +686,12 @@ export async function buildTennisServer(options: TennisServerOptions) {
     if (!(gateway instanceof LocalMockPaymentGateway)) throw new HttpError("SIMULATION_DISABLED", 403);
     await simulatePaymentChannel(db, principal, "ORDER", payment.id, gateway, input.status);
     return getOrderPayment(db, principal, payment.id);
+  }
+  write("POST", "/payments/:id/simulate", simulateBody, simulateOrderPayment);
+  write("POST", "/player/payments/:id/simulate", simulateBody, async (request, input) => {
+    player(request);
+    const { id, status } = await simulateOrderPayment(request, input);
+    return { id, status };
   });
   write(
     "POST",

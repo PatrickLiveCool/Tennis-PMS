@@ -153,7 +153,7 @@ export async function locateOrder(tx: pg.PoolClient, actor: BookingActor, id: st
   ownCustomer(actor, row.customer_id);
   return row.venue_id;
 }
-async function available(
+export async function assertBookingAvailability(
   tx: pg.PoolClient,
   actor: BookingActor,
   lines: readonly (CourtInterval & { courtId: string })[],
@@ -245,7 +245,7 @@ export async function createQuote(
     await expireVenueHolds(tx, actor.tenantId, input.venueId);
     const policy = await bookingPolicyInTransaction(tx, actor.tenantId);
     const price = await priceSelectionInTransaction(tx, actor, input.venueId, input.lines);
-    await available(tx, actor, price.lines);
+    await assertBookingAvailability(tx, actor, price.lines);
     const id = randomUUID();
     const row = (
       await tx.query<QuoteRow>(
@@ -308,7 +308,7 @@ export async function confirmQuote(
           if (quote.expiresAt.getTime() <= (await databaseTime(tx))) throw new TennisBookingError("QUOTE_EXPIRED");
           // Current opening/asset rules must still permit sale. Keep the saved quote's prices.
           await priceSelectionInTransaction(tx, actor, quote.venueId, quote.price.lines, { existingQuote: true });
-          await available(tx, actor, quote.price.lines);
+          await assertBookingAvailability(tx, actor, quote.price.lines);
           const now = await databaseTime(tx);
           if (quote.expiresAt.getTime() <= now) throw new TennisBookingError("QUOTE_EXPIRED");
           const until = request.staffHold ? Date.parse(request.staffHold.until) : now + quote.paymentHoldMinutes * 60_000;

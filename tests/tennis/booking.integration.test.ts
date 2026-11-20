@@ -13,6 +13,8 @@ import {
   type CourtRecord,
 } from "../../packages/db/src/tennis/catalog.ts";
 import { createCustomer, searchCustomers, type CustomerActor } from "../../packages/db/src/tennis/customers.ts";
+import { playerOrder, playerOrders, previewPlayerOption } from "../../packages/db/src/tennis/player-checkout.ts";
+import { recordOfflineTopup } from "../../packages/db/src/tennis/wallet.ts";
 import {
   cancelUnpaidOrder,
   confirmQuote,
@@ -129,6 +131,40 @@ afterAll(async () => {
 });
 
 describe("quotes and atomic multi-line orders", () => {
+  it("previews exact player terms without reserving stock or funds and reopens the original staff hold", async () => {
+    const input = { venueId: first.venueId, lines: lines([0, 1]) };
+    const preview = () => previewPlayerOption(db, customer, input);
+    expect(await preview()).toMatchObject({ state: "available", totalCents: 20000, walletCents: 0 });
+    await recordOfflineTopup(db, first.actor, { venueId: first.venueId, customerId: customer.customerId,
+      principalCents: 6000, giftCents: 500, commandKey: key(), receiptReference: key(), reason: "synthetic checkout" });
+    expect(await preview()).toMatchObject({ state: "available", totalCents: 20000, walletCents: 6500 });
+    expect((await db.query("SELECT id FROM tennis.quotes WHERE tenant_id=$1", [first.actor.tenantId])).rowCount).toBe(0);
+    expect((await playerOrders(db, customer)).orders).toHaveLength(0);
+    const held = await confirm([1, 0]);
+    expect(await preview()).toMatchObject({ state: "booked", orderId: held.id });
+    expect(await previewPlayerOption(db, customer, { ...input, lines: lines([0]) })).toMatchObject({ state: "unavailable" });
+    const personal = await playerOrder(db, customer, held.id);
+    expect(personal).toMatchObject({ id: held.id, status: "HELD", holdUntil: held.holdUntil, walletCents: 6500, payments: [] });
+    expect(personal).not.toHaveProperty("holdReason");
+    expect(personal).not.toHaveProperty("createdBy");
+    await db.query("UPDATE tennis.orders SET hold_until=clock_timestamp()-interval '1 second' WHERE id=$1", [held.id]);
+    expect(await playerOrder(db, customer, held.id)).toMatchObject({ status: "EXPIRED", paymentStatus: "UNPAID", payments: [] });
+    expect(await preview()).toMatchObject({ state: "available", walletCents: 6500 });
+  });
+  it("redacts another player's occupancy and denies their order and cross-tenant bookings", async () => {
+    const other = await createCustomer(db, first.actor, { nickname: "synthetic guest", phone: "13800000129" });
+    const input = { venueId: first.venueId, lines: lines() };
+    const quote = await createQuote(db, first.actor, { ...input, customerId: other.id });
+    const order = await confirmQuote(db, first.actor, { quoteId: quote.id, commandKey: key() });
+    const taken = await previewPlayerOption(db, customer, input);
+    expect(taken.state).toBe("unavailable");
+    expect(Object.keys(taken).sort()).toEqual(["lines", "state", "venue"]);
+    expect(JSON.stringify(taken)).not.toContain(other.id);
+    expect(JSON.stringify(taken)).not.toContain(order.id);
+    expect((await playerOrders(db, customer)).orders).toHaveLength(0);
+    await expect(playerOrder(db, customer, order.id)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
+    await expect(previewPlayerOption(db, customer, { ...input, venueId: second.venueId })).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
+  });
   it("requires a valid mainland contact for new quotes while preserving historical quote confirmation and receipt recovery", async () => {
     const prior = await quote();
     for (const phone of [null, "+12025550123"]) {
