@@ -115,7 +115,7 @@ try {
   const m = phone.page;
   await m.getByLabel("排场日期", { exact: true }).fill(testDate);
   await m.getByLabel("筛选球场", { exact: true }).selectOption("clay");
-  await m.getByRole("button", { name: `${courtName} 10:00 查看占用`, exact: true }).tap();
+  await m.locator(".tennis-mobile-times").getByRole("button", { name: `${courtName} · 红土预订合成客 ·`, exact: false }).tap();
   const mobileOrder = m.getByRole("dialog", { name: /预订详情/ });
   await mobileOrder.getByRole("button", { name: "询问此订单", exact: true }).tap();
   const ma = m.getByRole("complementary", { name: "AI 助手", exact: true });

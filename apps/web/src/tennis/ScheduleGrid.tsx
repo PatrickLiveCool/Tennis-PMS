@@ -162,6 +162,13 @@ export function ScheduleGrid({
     const [h, m] = clock(iso, venue.timezone).split(":").map(Number);
     return h! * 60 + m!;
   }
+  function mobileInterval(item: SelectionLine) {
+    const endpoint = (value: string) => {
+      const localDate = dateValue(new Date(value), venue.timezone);
+      return `${localDate === date ? "" : `${localDate} `}${clock(value, venue.timezone)}`;
+    };
+    return `${endpoint(item.startAt)}–${endpoint(item.endAt)}`;
+  }
   function start(
     event: ReactPointerEvent,
     origin: GridPoint,
@@ -499,37 +506,81 @@ export function ScheduleGrid({
         </div>
       </div>
       <div className="tennis-mobile-schedule">
-        {courts.map((court, row) => (
-          <details key={court.id} open={row === 0}>
-            <summary>
-              <strong className="tennis-mobile-court-name">{court.name}</strong>
-              <span className="tennis-mobile-court-details">
-                <span>{courtDescription(court)}</span>
-                {court.hourlyPriceCents !== null && <span className="tennis-mobile-court-price">{money(court.hourlyPriceCents)} / 时</span>}
-              </span>
-            </summary>
-            <div className="tennis-mobile-times">
-              {ticks
-                .filter((t) => t % 60 === 0)
-                .map((t) => {
-                  const item = line(row, (t - from) / 15, (t - from) / 15 + 4);
-                  const occupied = schedule.occupancies.find(
-                    (o) =>
-                      o.courtId === court.id &&
-                      o.startAt < item.endAt &&
-                      o.endAt > item.startAt,
-                  );
-                  const selected = lines.findIndex(
-                    (l) =>
-                      l.courtId === court.id &&
-                      l.startAt < item.endAt &&
-                      l.endAt > item.startAt,
-                  );
+        {courts.map((court, row) => {
+          const onThisCourtAndDay = (item: SelectionLine) =>
+            item.courtId === court.id &&
+            dateValue(new Date(item.startAt), venue.timezone) <= date &&
+            dateValue(new Date(Date.parse(item.endAt) - 1), venue.timezone) >= date;
+          const occupancies = schedule.occupancies.filter(onThisCourtAndDay);
+          const selections = lines.flatMap((item, index) =>
+            onThisCourtAndDay(item) ? [{ item, index }] : [],
+          );
+          const entries = [
+            ...occupancies.map((occupancy) => ({ kind: "occupancy" as const, startAt: occupancy.startAt, occupancy })),
+            ...selections.map(({ item, index }) => ({ kind: "selection" as const, startAt: item.startAt, item, index })),
+            ...ticks.filter((t) => t % 60 === 0).flatMap((minute) => {
+              const item = line(row, (minute - from) / 15, (minute - from) / 15 + 4);
+              const overlaps = (other: SelectionLine) => other.startAt < item.endAt && other.endAt > item.startAt;
+              // Occupancies and drafts have their own entries; keep the existing
+              // hourly shortcuts only where neither already covers the hour.
+              if (occupancies.some(overlaps) || selections.some(({ item }) => overlaps(item))) return [];
+              return [{ kind: "hour" as const, startAt: item.startAt, minute }];
+            }),
+          ].sort((a, b) => a.startAt.localeCompare(b.startAt));
+          return (
+            <details key={court.id} open={row === 0}>
+              <summary>
+                <strong className="tennis-mobile-court-name">{court.name}</strong>
+                <span className="tennis-mobile-court-details">
+                  <span>{courtDescription(court)}</span>
+                  {court.hourlyPriceCents !== null && <span className="tennis-mobile-court-price">{money(court.hourlyPriceCents)} / 时</span>}
+                </span>
+              </summary>
+              <div className="tennis-mobile-times">
+                {entries.map((entry) => {
+                  if (entry.kind === "occupancy") {
+                    const occupied = entry.occupancy;
+                    const { state, primary, status } = occupancyDetails(occupied);
+                    const time = mobileInterval(occupied);
+                    const summary = [court.name, primary, primary !== status ? status : "", time].filter(Boolean).join(" · ");
+                    return (
+                      <button
+                        key={`occupancy:${occupied.id}`}
+                        className={`button is-${state}`}
+                        aria-label={summary}
+                        title={summary}
+                        disabled={!occupied.orderId}
+                        onClick={() => occupied.orderId && openOrder(occupied.orderId)}
+                      >
+                        <span className="tennis-occupancy-time">{time}</span>
+                        <span className="tennis-occupancy-status">{[primary, primary !== status ? status : ""].filter(Boolean).join(" · ")}</span>
+                      </button>
+                    );
+                  }
+                  if (entry.kind === "selection") {
+                    const conflict = Boolean(blocked(entry.item));
+                    const time = mobileInterval(entry.item);
+                    const summary = [court.name, conflict ? "冲突" : "", "取消已选", time].filter(Boolean).join(" · ");
+                    return (
+                      <button
+                        key={`selection:${entry.index}`}
+                        className={`button is-selected${conflict ? " has-conflict" : ""}`}
+                        aria-label={summary}
+                        title={summary}
+                        disabled={disabled}
+                        onClick={() => onRemove(entry.index)}
+                      >
+                        <span className="tennis-occupancy-time">{time}</span>
+                        <span className="tennis-occupancy-status">{conflict ? "冲突 · 取消 ×" : "已选 ×"}</span>
+                      </button>
+                    );
+                  }
+                  const t = entry.minute;
                   const open =
                     court.active &&
                     venue.active &&
                     isCourtReadyForBooking(court) &&
-                    Date.parse(item.startAt) > Date.now() &&
+                    Date.parse(entry.startAt) > Date.now() &&
                     venue.openingHours.some(
                       (w) =>
                         w.weekday ===
@@ -537,40 +588,23 @@ export function ScheduleGrid({
                         w.startMinute <= t &&
                         w.endMinute > t,
                     );
-                  const occupancy = occupied ? occupancyDetails(occupied) : undefined;
-                  const state = occupancy?.state ?? (open ? "free" : "closed");
-                  const selectedConflict = selected >= 0 && Boolean(blocked(lines[selected]!));
                   return (
                     <button
-                      key={t}
-                      className={`button is-${state}${selected >= 0 ? " is-selected" : ""}${selectedConflict ? " has-conflict" : ""}`}
-                      aria-label={`${court.name} ${minuteLabel(t)} ${selected >= 0 ? "取消已选" : occupied ? "查看占用" : open ? "选场" : "不可售"}`}
-                      disabled={selected >= 0 ? disabled :
-                        !occupied?.orderId &&
-                        (disabled || !open || Boolean(occupied))
-                      }
-                      onClick={() =>
-                        selected >= 0
-                          ? onRemove(selected)
-                          : occupied?.orderId
-                            ? openOrder(occupied.orderId)
-                            : click(row, (t - from) / 15)
-                      }
+                      key={`hour:${t}`}
+                      className={`button is-${open ? "free" : "closed"}`}
+                      aria-label={`${court.name} ${minuteLabel(t)} ${open ? "选场" : "不可售"}`}
+                      disabled={disabled || !open}
+                      onClick={() => click(row, (t - from) / 15)}
                     >
                       <span className="tennis-occupancy-time">{minuteLabel(t)}</span>{" "}
-                      <span className="tennis-occupancy-status">{selected >= 0
-                        ? selectedConflict ? "冲突 · 取消 ×" : "已选 ×"
-                        : occupancy
-                          ? [occupancy.primary, occupancy.primary !== occupancy.status ? occupancy.status : ""].filter(Boolean).join(" · ")
-                          : open
-                            ? "空闲"
-                            : "不可售"}</span>
+                      <span className="tennis-occupancy-status">{open ? "空闲" : "不可售"}</span>
                     </button>
                   );
                 })}
-            </div>
-          </details>
-        ))}
+              </div>
+            </details>
+          );
+        })}
       </div>
       <p className="tennis-drag-status" aria-live="polite">
         {previews.length

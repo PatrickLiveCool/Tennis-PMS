@@ -19,6 +19,7 @@ import { createApi, TennisApiError, type TennisApi } from "./api";
 import type { Session, VenueRecord } from "./types";
 import { permits } from "./types";
 import { BookingPage } from "./BookingPage";
+import { PlayerCheckout } from "./PlayerCheckout";
 import { OrdersPage, OrderDialog } from "./OrdersPage";
 import { OverviewPage } from "./OverviewPage";
 import { PlatformPage } from "./PlatformPage";
@@ -39,7 +40,14 @@ import {
 } from "./components";
 
 export function TennisApp() {
+  const playerLink = new URLSearchParams(window.location.search).has("booking");
   const [session, setSession] = useState<Session | null>();
+  useEffect(() => {
+    const club = session?.tenants.find(t => t.kind === "customer" && t.id === session.tenantId);
+    document.title = playerLink || session?.kind === "customer"
+      ? club ? `球友预订 · ${club.name}` : "球友预订"
+      : "Tennis PMS · 网球运营工作台";
+  }, [playerLink, session]);
   const [error, setError] = useState<unknown>();
   async function restore() {
     setError(undefined);
@@ -60,9 +68,13 @@ export function TennisApp() {
     return (
       <main className="startup-state">
         <ErrorNotice error={error} retry={() => void restore()} />
-        {!error && <LoadingBlock label="正在恢复工作空间" />}
+        {!error && <LoadingBlock label={playerLink ? "正在打开预订" : "正在恢复登录"} />}
       </main>
     );
+  if (session && (session.kind === "customer" || playerLink)) return (
+    <PlayerCheckout key={`${session.subjectId}:${session.kind}:${session.tenantId}:${session.contextVersion}`}
+      session={session} onSession={setSession} onLogout={() => setSession(null)} />
+  );
   return session ? (
     <Workspace
       key={`${session.subjectId}:${session.kind}:${session.tenantId}:${session.contextVersion}`}
@@ -71,10 +83,10 @@ export function TennisApp() {
       onLogout={() => setSession(null)}
     />
   ) : (
-    <Login onLogin={setSession} />
+    <Login onLogin={setSession} playerLink={playerLink} />
   );
 }
-function Login({ onLogin }: { onLogin: (session: Session) => void }) {
+function Login({ onLogin, playerLink }: { onLogin: (session: Session) => void; playerLink: boolean }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<unknown>();
@@ -96,10 +108,10 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
       <section className="login-panel">
         <div className="login-brand">
           <span className="brand-word">Tennis</span>
-          <span>PMS</span>
+          <span>{playerLink ? "预订" : "PMS"}</span>
         </div>
         <div>
-          <p className="eyebrow">网球运营工作台</p>
+          <p className="eyebrow">{playerLink ? "球友预订" : "网球预订与运营"}</p>
           <h1>登录</h1>
         </div>
         <ErrorNotice error={error} />
@@ -123,7 +135,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
             onChange={(e) => setPassword(e.target.value)}
           />
           <button className="button button-primary login-submit" disabled={busy}>
-            {busy ? "正在登录…" : "进入工作台"}
+            {busy ? "正在登录…" : playerLink ? "登录并查看预订" : "进入工作台"}
           </button>
         </form>
       </section>
@@ -218,7 +230,7 @@ function Workspace({
     }
   }
   const entries = navigation
-    .filter((item) => item.id !== "members" || session.kind === "customer" || permits(session, "manage_members"))
+    .filter((item) => item.id !== "members" || permits(session, "manage_members"))
     .filter((item) => item.id !== "settings" || session.kind === "staff")
     .filter((item) => item.id !== "management" || canManageTenant(session));
   const currentPage = entries.some((e) => e.id === page) ? page : "booking";

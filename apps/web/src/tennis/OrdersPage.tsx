@@ -227,7 +227,7 @@ export function OrderDialog({
       if (prep.reason) setReason(prep.reason);
       setAction(prep.kind);
     }
-    setNotice("助手已填好，尚未提��。请核对后确认。");
+    setNotice("助手已填好，尚未提交。请核对后确认。");
   }, [pendingPreparation, detail.data, detail.busy, detail.error, command.busy]);
   async function changed() {
     setAction(null);
@@ -277,6 +277,7 @@ export function OrderDialog({
     }
   }
   const order = detail.data;
+  const remainingLineStatus = order?.status === "EXPIRED" ? "已释放" : "有效";
   const canBook = session.kind === "customer" || permits(session, "book");
   return (
     <>
@@ -338,7 +339,7 @@ export function OrderDialog({
                         </details>
                       </td>
                       <td className="tennis-numeric">{money(line.amountCents)}</td>
-                      <td>{line.cancelledAt ? "已取消" : "有效"}</td>
+                      <td>{line.cancelledAt ? "已取消" : remainingLineStatus}</td>
                     </tr>
                   ))}
                 </tbody>
